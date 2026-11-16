@@ -1,0 +1,959 @@
+{
+  "slug": "algorithmes-ia-generative",
+  "title": "VAE, GAN, diffusion et Flow Matching : les algorithmes de l'IA générative",
+  "subtitle": "Quatre familles de modèles, leurs objectifs d'entraînement et leurs compromis",
+  "level": "Avancé",
+  "tags": [
+    "VAE",
+    "GAN",
+    "Diffusion",
+    "Flow Matching",
+    "Modèles génératifs",
+    "Espace latent"
+  ],
+  "summary": "Quatre familles de modèles génératifs, un même objectif : apprendre une distribution de données. Ce cours compare leurs objectifs d'entraînement, leurs schémas d'échantillonnage et leurs compromis, avec des calculs en NumPy exécutés.",
+  "introduction": "Entre 2013 et 2022, quatre familles d'algorithmes ont structuré la génération d'images et de signaux : les autoencodeurs variationnels, les réseaux antagonistes, les modèles de diffusion et le Flow Matching. Chacune répond à la même question, apprendre une distribution à partir d'exemples, avec un objectif d'entraînement différent et donc des compromis différents entre qualité des échantillons, diversité, contrôle et vitesse de génération. Ce cours décrit ces objectifs et ces compromis, en s'appuyant sur les articles fondateurs cités en fin de page. Il ne demande pas de matériel particulier : les calculs présentés tiennent dans quelques lignes de Python scientifique. À la fin, le lecteur saura expliquer ce qu'optimise chaque famille, pourquoi un GAN peut osciller pendant l'entraînement, pourquoi la diffusion coûte cher à l'échantillonnage et pourquoi le Flow Matching privilégie des chemins conditionnels droits et pourquoi Rectified Flow cherche à redresser les trajectoires marginales. Les choix d'architecture des grands systèmes contemporains, eux, ne sont pas couverts en détail.",
+  "prerequisites": [
+    "Connaître les bases des probabilités (variable aléatoire, espérance, densité)",
+    "Avoir vu un réseau de neurones et sa descente de gradient",
+    "Savoir lire une dérivée simple et une intégrale en dimension un",
+    "Savoir écrire un court script Python scientifique"
+  ],
+  "checkedOn": "2026-10-26",
+  "cover": {
+    "src": "pics/cours/algorithmes-ia-generative.webp",
+    "alt": "Quatre processus abstraits de génération d'images reliés dans un même cadre."
+  },
+  "modules": [
+    {
+      "id": "trilemme",
+      "title": "Introduction et trilemme génératif",
+      "keyTakeaways": [
+        "Un modèle génératif apprend une distribution de probabilité ; estimer une densité et produire de beaux échantillons sont deux usages distincts, et une même famille ne les sert pas toujours avec la même efficacité.",
+        "Les quatre familles du cours diffèrent par leur objectif d'entraînement : borne inférieure de vraisemblance pour le VAE, jeu antagoniste pour le GAN, inversion d'un bruitage pour la diffusion, régression d'un champ de vecteurs pour le Flow Matching.",
+        "Le triangle qualité, diversité, contrôle et vitesse est une grille de lecture, pas un théorème : il aide à situer les familles et à anticiper les compromis d'un projet.",
+        "Chaque famille paie un prix différent : l'écart à la vraie vraisemblance pour le VAE, une instabilité d'optimisation pour le GAN, un échantillonnage itératif pour la diffusion, une erreur d'intégration pour le Flow Matching.",
+        "Les architectures récentes combinent souvent plusieurs familles, par exemple un autoencodeur qui compresse l'image puis une diffusion dans l'espace latent, comme le proposent Rombach et al. (2021)."
+      ],
+      "theory": "### Qu'est-ce qu'un modèle génératif\n\nUn modèle génératif apprend une distribution de probabilité à partir d'exemples. On dispose d'échantillons $x$ tirés d'une distribution inconnue $p_{\\text{données}}$, et l'on cherche un modèle paramétré $p_\\theta$ qui s'en approche. Deux usages en découlent. Le premier est l'estimation de densité : attribuer une probabilité à une donnée, détecter une observation improbable, comparer deux hypothèses. Le second est la génération d'échantillons : tirer une nouvelle donnée $x \\sim p_\\theta$, une image, un texte ou un signal. Ces deux usages ne sont pas équivalents. Une famille de modèles peut estimer correctement une densité sans produire d'échantillons agréables à lire, et inversement.\n\nLes VAE, les GAN, les modèles de diffusion et le Flow Matching appartiennent tous à cette famille. Ce qui les distingue est la façon dont ils représentent la distribution et dont ils s'entraînent. Un VAE introduit des variables latentes et optimise une borne inférieure de la vraisemblance (Kingma et Welling, 2013). Un GAN ne définit aucune densité explicite : il compare des échantillons à l'aide d'un classifieur entraîné en même temps que le générateur (Goodfellow et al., 2014). Un modèle de diffusion apprend à inverser un processus de bruitage en plusieurs étapes (Ho, Jain et Abbeel, 2020). Le Flow Matching apprend un champ de vecteurs dont l'intégration transporte du bruit vers les données (Lipman et al., 2022).\n\n> **Repère.** Tout ce cours parle d'échantillons et de distributions. Le mot « génération » désigne le fait de tirer une donnée nouvelle d'un modèle ajusté, pas le fait de retrouver une donnée mémorisée.\n\nUne conséquence pratique de cette définition mérite d'être posée tout de suite. Un modèle génératif ne stocke pas les exemples d'entraînement pour les restituer tels quels. Il en résume la distribution, avec plus ou moins de fidélité selon sa capacité et le nombre d'exemples disponibles. Quand un modèle restitue presque exactement une image vue à l'entraînement, on parle de mémorisation : c'est un comportement particulier, pas le fonctionnement normal, et il dépend fortement de la taille du jeu de données et de la taille du modèle.\n\n### Trois pressions contradictoires\n\nOn résume souvent les attentes placées dans un générateur par trois pôles. Le premier est la **qualité** des échantillons : une image nette, un signal plausible, un texte cohérent. Le deuxième est la **diversité** ou la couverture : le modèle doit produire des exemples variés, pas toujours le même. Le troisième est le **contrôle et la vitesse** : générer rapidement, et respecter une condition donnée, comme une légende ou une esquisse.\n\nCes trois pôles ne se laissent pas satisfaire ensemble par un seul mécanisme d'entraînement, d'où l'image d'un triangle. Sa valeur est descriptive. Il ne dit pas qu'une famille serait condamnée : les positions se déplacent avec la taille du modèle, la quantité de données et le type de conditionnement. Il aide à anticiper où une approche met ses efforts.\n\nLe VAE se situe du côté de la diversité et d'un entraînement stable. Son objectif est une espérance qui moyenne les erreurs sur tout le lot et sur toute la distribution latente, et le décodeur modélise souvent l'incertitude par une gaussienne. Cette moyenne est ce qui rend l'entraînement régulier. Elle explique aussi qu'un VAE produit parfois des échantillons moins nets qu'un modèle antagoniste sur les mêmes données : la mesure de qualité visuelle n'est pas ce qu'il optimise directement.\n\nLe GAN se situe du côté de la qualité perçue. Son discriminateur compare des échantillons sans jamais écrire de densité, et le générateur apprend à tromper ce juge. L'article de 2014 démontre l'existence d'un optimum théorique, mais il ne donne aucune garantie d'atteindre cet optimum par descente de gradient alternée. En pratique, l'entraînement peut osciller, et le générateur peut se concentrer sur quelques modes de la distribution, phénomène appelé effondrement des modes.\n\nLa diffusion se situe du côté de la qualité. Elle transforme du bruit en donnée par une suite d'étapes de débruitage, ce qui donne au modèle de nombreuses occasions de corriger une erreur locale. En contrepartie, chaque échantillon coûte autant d'appels au réseau qu'il y a d'étapes, souvent plusieurs centaines. Rombach et al. (2021) réduisent ce coût en faisant la diffusion dans l'espace latent d'un autoencodeur plutôt que dans l'espace des pixels : le nombre d'étapes ne change pas, mais chaque étape traite des tenseurs beaucoup plus petits.\n\nLe Flow Matching se distingue surtout par son objectif de régression. Le réseau apprend un champ de vecteurs qui déplace chaque point de bruit vers un point de données le long d'un chemin choisi. Cet objectif s'entraîne généralement de façon plus régulière qu'un jeu antagoniste, mais la vitesse d'échantillonnage dépend du nombre d'étapes d'intégration. Liu, Gong et Liu (2022) défendent l'idée qu'un redressement successif des trajectoires permet de réduire ce nombre d'étapes.\n\n### Ce que le triangle ne dit pas\n\nPremière mise en garde : ces positions sont qualitatives. Elles ne s'appuient sur aucune mesure unique, et donner un chiffre par famille serait trompeur. La qualité perçue dépend du jeu de données et de l'observateur ; la diversité est difficile à mesurer, car un modèle peut couvrir beaucoup de modes tout en ratant systématiquement les zones mal représentées du jeu d'entraînement.\n\nDeuxième mise en garde : le triangle ne remplace pas l'objectif d'entraînement. Dire qu'un GAN privilégie la qualité perçue n'explique pas pourquoi son entraînement oscille ; il faut revenir au jeu minimax du module 3. De même, dire qu'une diffusion coûte cher à l'échantillonnage n'explique pas le compromis entre bruit et signal ; il faut revenir à la chaîne de Markov du module 4.\n\nTroisième mise en garde : les familles se combinent. L'exemple déjà cité de la diffusion latente associe un autoencodeur régularisé, proche d'un VAE dans la variante KL et d'un VQ-GAN dans la variante VQ, à un modèle de diffusion. Rombach et al. entraînent cet autoencodeur avec une combinaison de perte de reconstruction et de perte adversariale, donc avec un discriminateur emprunté aux GAN. Un système réel n'est pas une case du triangle, mais un assemblage dont chaque pièce a été choisie pour une raison.\n\nC'est ce que les quatre modules suivants détaillent, famille par famille, avant une comparaison finale.",
+      "analogy": {
+        "title": "L'atelier de tailleur",
+        "text": "Un atelier de tailleur doit livrer des vêtements bien coupés, dans toutes les tailles du catalogue, et assez vite pour honorer les commandes. Pousser la finition coûte du temps, produire toutes les tailles demande plus de patrons, et accepter toutes les demandes impose des retouches. Un atelier ne peut pas pousser les trois leviers au maximum avec la même équipe.\n\n**Limite de l'analogie :** un atelier connaît la liste des tailles à produire, alors qu'un modèle génératif ne connaît la distribution des données qu'à travers un nombre fini d'exemples. Le triangle décrit une tension, pas un budget mesurable."
+      },
+      "diagram": {
+        "title": "Le triangle des compromis génératifs",
+        "description": "Schéma illustratif : un triangle dont les sommets sont la qualité, la diversité, puis le contrôle et la vitesse, avec une position indicative des quatre familles. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Triangle des compromis génératifs : qualité en haut, diversité à gauche, contrôle et vitesse à droite, avec la position indicative des familles VAE, GAN, diffusion et Flow Matching\">\n  <rect width=\"800\" height=\"440\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Trois pressions, aucune famille ne les satisfait toutes</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, positions indicatives, sans mesure</text>\n\n  <g id=\"triangle-compromis\">\n    <path d=\"M400 108 L180 344 L620 344 Z\" fill=\"none\" stroke=\"#475569\" stroke-width=\"2\"/>\n    <circle cx=\"400\" cy=\"108\" r=\"7\" fill=\"#38bdf8\"/>\n    <circle cx=\"180\" cy=\"344\" r=\"7\" fill=\"#34d399\"/>\n    <circle cx=\"620\" cy=\"344\" r=\"7\" fill=\"#fbbf24\"/>\n    <text x=\"400\" y=\"92\" fill=\"#7dd3fc\" font-size=\"13\" text-anchor=\"middle\">qualité des échantillons</text>\n    <text x=\"180\" y=\"374\" fill=\"#6ee7b7\" font-size=\"13\" text-anchor=\"middle\">diversité</text>\n    <text x=\"620\" y=\"374\" fill=\"#fcd34d\" font-size=\"13\" text-anchor=\"middle\">contrôle et vitesse</text>\n  </g>\n\n  <g id=\"familles-stables\">\n    <circle cx=\"330\" cy=\"272\" r=\"26\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"330\" y=\"277\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">VAE</text>\n    <text x=\"330\" y=\"316\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">entraînement régulier</text>\n    <circle cx=\"446\" cy=\"196\" r=\"26\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"446\" y=\"201\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">GAN</text>\n    <text x=\"446\" y=\"164\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">finesse perçue</text>\n  </g>\n\n  <g id=\"familles-iteratives\">\n    <circle cx=\"516\" cy=\"240\" r=\"26\" fill=\"#0f172a\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"516\" y=\"245\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">diff.</text>\n    <text x=\"592\" y=\"222\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">qualité, plusieurs étapes</text>\n    <circle cx=\"560\" cy=\"306\" r=\"26\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <text x=\"560\" y=\"311\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">FM</text>\n    <text x=\"596\" y=\"330\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">régression, trajectoires</text>\n    <line x1=\"585\" y1=\"272\" x2=\"540\" y2=\"292\" stroke=\"#475569\" stroke-width=\"1.5\" stroke-dasharray=\"4 4\"/>\n  </g>\n\n  <text x=\"400\" y=\"418\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">Les positions bougent avec la taille du modèle, les données et le conditionnement.</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Les trois pressions",
+            "explanation": "Le triangle relie qualité, diversité, puis contrôle et vitesse. Pousser un sommet déplace les efforts ailleurs.",
+            "highlight": [
+              "triangle-compromis"
+            ]
+          },
+          {
+            "title": "2. Le VAE et le GAN",
+            "explanation": "Le VAE optimise une espérance qui moyenne les erreurs, ce qui stabilise l'entraînement. Le GAN vise la finesse perçue sans écrire de densité.",
+            "highlight": [
+              "familles-stables"
+            ]
+          },
+          {
+            "title": "3. Les familles itératives",
+            "explanation": "La diffusion et le Flow Matching construisent l'échantillon par étapes. Leur coût et leur précision dépendent du nombre d'étapes de calcul.",
+            "highlight": [
+              "familles-iteratives"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Pourquoi un VAE produit-il souvent des échantillons moins nets qu'un GAN entraîné sur les mêmes données ?",
+          "options": [
+            "Parce que son objectif moyenne une erreur de reconstruction sous une hypothèse gaussienne, et non une mesure de netteté perçue",
+            "Parce que son décodeur ne contient aucune non-linéarité",
+            "Parce qu'il refuse les échantillons tirés du prior",
+            "Parce que son encodeur supprime une partie des dimensions d'entrée"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le VAE optimise une borne inférieure de vraisemblance. L'espérance sur le lot et le prior gaussien lissent la solution ; la netteté perçue n'est pas dans l'objectif."
+        },
+        {
+          "question": "Qu'est-ce qu'un GAN optimise exactement, si l'on s'en tient à l'article de 2014 ?",
+          "options": [
+            "Une vraisemblance exacte des données",
+            "Un jeu antagoniste entre un générateur et un discriminateur, sans densité explicite pour le générateur",
+            "Une borne inférieure de la vraisemblance, comme le VAE",
+            "Une distance de transport entre deux nuages de points"
+          ],
+          "correctIndex": 1,
+          "explanation": "Goodfellow et al. formalisent un jeu minimax. Le générateur n'a pas de densité évaluable ; il apprend par le signal du discriminateur."
+        },
+        {
+          "question": "Que peut-on conclure du triangle qualité, diversité, contrôle et vitesse ?",
+          "options": [
+            "Qu'il interdit à toute famille de dépasser un seuil mesuré de qualité",
+            "Qu'il démontre mathématiquement l'infériorité des VAE",
+            "Qu'il s'agit d'une grille de lecture qualitative, dont les positions se déplacent avec le modèle, les données et le conditionnement",
+            "Qu'il indique le nombre d'étapes d'échantillonnage de chaque famille"
+          ],
+          "correctIndex": 2,
+          "explanation": "Le triangle décrit une tension entre des attentes, sans mesure unique. Les positions sont indicatives et changent avec le contexte."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Modèle génératif",
+          "definition": "Modèle qui apprend une distribution de probabilité sur des données, pour estimer une densité ou produire de nouveaux échantillons."
+        },
+        {
+          "term": "Vraisemblance",
+          "definition": "Probabilité (ou densité) que le modèle attribue aux données observées, vue comme fonction des paramètres du modèle."
+        },
+        {
+          "term": "Espace latent",
+          "definition": "Espace de représentations de dimension réduite dans lequel un modèle encode les données avant de les reconstruire ou de les générer."
+        },
+        {
+          "term": "Effondrement des modes",
+          "definition": "Comportement d'un générateur qui produit des variantes d'un petit nombre d'échantillons et ignore une partie de la distribution des données."
+        },
+        {
+          "term": "Conditionnement",
+          "definition": "Information supplémentaire (texte, classe, esquisse) fournie au modèle pour orienter la génération vers un échantillon demandé."
+        }
+      ],
+      "example": {
+        "title": "Un choix sous contrainte",
+        "text": "**Scénario illustratif.** Une équipe veut générer des visuels de produit en quelques pas, avec une grande diversité et une fidélité élevée. Un GAN peut produire en un passage, mais son entraînement est instable. Une diffusion donne souvent une bonne qualité, mais coûte plusieurs appels. Un flux entraîné sur des trajectoires droites peut réduire le nombre de pas. Le choix dépend du budget, du temps d'entraînement et de la tolérance aux erreurs. Aucune famille ne maximise les trois objectifs à la fois."
+      },
+      "exercises": [
+        {
+          "title": "Le trilemme",
+          "prompt": "Pourquoi un générateur ne peut-il pas maximiser à la fois la vitesse, la diversité et la fidélité sans compromis ?",
+          "solution": "Les trois objectifs se contraignent : un modèle très rapide peut simplifier les trajectoires, un modèle très fidèle peut se concentrer sur quelques modes, et une diversité élevée peut éloigner les échantillons de la distribution. Le compromis se mesure sur le protocole et le budget."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Kingma et Welling, Auto-Encoding Variational Bayes, 2013.",
+          "href": "https://arxiv.org/abs/1312.6114"
+        },
+        {
+          "label": "Goodfellow et al., Generative Adversarial Nets, 2014.",
+          "href": "https://arxiv.org/abs/1406.2661"
+        }
+      ]
+    },
+    {
+      "id": "vae",
+      "title": "VAE, espace latent et reparamétrisation",
+      "keyTakeaways": [
+        "Un VAE suppose que chaque donnée s'explique par une variable latente z de petite dimension ; la vraisemblance p(x) est une intégrale sur z, intraitable directement.",
+        "L'entraînement maximise une borne inférieure de la vraisemblance, appelée ELBO : elle contient un terme de reconstruction et une divergence KL qui rapproche le postérieur approché du prior.",
+        "La reparamétrisation remplace un tirage z ~ N(mu, sigma^2) par z = mu + sigma * epsilon avec epsilon ~ N(0, I), ce qui rend le gradient calculable.",
+        "La balance entre reconstruction et KL est fragile : une pénalité KL trop forte pousse le décodeur à ignorer z, phénomène appelé effondrement du postérieur.",
+        "Un VAE estime une borne inférieure et non la vraisemblance exacte, mais son encodeur fournit une représentation latente continue qui reste utile à d'autres modèles, comme l'illustre l'autoencodeur de la diffusion latente."
+      ],
+      "theory": "### L'hypothèse latente\n\nUn autoencodeur variationnel repose sur une hypothèse simple : chaque donnée observée $x$ s'explique par une variable latente $z$ de dimension beaucoup plus petite. Un prior $p(z)$, presque toujours une gaussienne centrée réduite, décrit les valeurs plausibles de $z$. Un décodeur paramétré $p_\\theta(x \\mid z)$ décrit les données attendues pour un $z$ donné. La vraisemblance d'une donnée s'obtient alors en intégrant sur toutes les valeurs possibles de $z$ :\n\n$$p_\\theta(x) = \\int p_\\theta(x \\mid z)\\, p(z)\\, \\mathrm{d}z$$\n\nCette intégrale est le premier obstacle du modèle. En dimension un, on pourrait la calculer numériquement. En dimension $10$ ou $100$, et pour chaque donnée, elle devient hors de portée. Le postérieur exact $p_\\theta(z \\mid x)$, qui dirait quelles valeurs de $z$ expliquent une donnée donnée, est tout aussi inaccessible.\n\nKingma et Welling (2013) contournent l'obstacle par une approximation. Ils introduisent un encodeur paramétré $q_\\phi(z \\mid x)$, généralement une gaussienne diagonale, qui joue le rôle d'un postérieur approché. L'encodeur ne calcule pas le vrai postérieur : il propose une distribution plausible, et l'écart entre les deux apparaît explicitement dans la décomposition qui suit.\n\n### La borne inférieure de vraisemblance\n\nPartons de la définition de la divergence de Kullback-Leibler entre le postérieur approché et le postérieur exact :\n\n$$\\mathrm{KL}\\big(q_\\phi(z \\mid x) \\,\\|\\, p_\\theta(z \\mid x)\\big) = \\int q_\\phi(z \\mid x) \\log \\frac{q_\\phi(z \\mid x)}{p_\\theta(z \\mid x)}\\, \\mathrm{d}z$$\n\nEn remplaçant $p_\\theta(z \\mid x)$ par sa définition, $p_\\theta(x \\mid z) p(z) / p_\\theta(x)$, et en sortant $\\log p_\\theta(x)$ de l'intégrale, on obtient une identité utile :\n\n$$\\log p_\\theta(x) = \\mathrm{KL}\\big(q_\\phi(z \\mid x) \\,\\|\\, p_\\theta(z \\mid x)\\big) + \\mathcal{L}(\\theta, \\phi\\, ; x)$$\n\nComme la divergence KL est positive ou nulle, la quantité $\\mathcal{L}$ est une borne inférieure de $\\log p_\\theta(x)$. C'est la **borne inférieure de vraisemblance**, souvent appelée ELBO d'après l'anglais evidence lower bound. Sa forme développée est celle que l'on implémente :\n\n$$\\mathcal{L}(\\theta, \\phi\\, ; x) = \\mathbb{E}_{q_\\phi(z \\mid x)}\\big[\\log p_\\theta(x \\mid z)\\big] - \\mathrm{KL}\\big(q_\\phi(z \\mid x) \\,\\|\\, p(z)\\big)$$\n\nLe premier terme récompense les $z$ qui permettent de reconstruire $x$ : il est grand quand le décodeur retrouve la donnée. Le second pénalise un encodeur qui s'éloignerait du prior. Maximiser $\\mathcal{L}$ revient donc à chercher un compromis entre deux exigences opposées, reconstruire fidèlement et rester proche d'une distribution simple.\n\n> **Repère.** Le VAE ne maximise pas la vraisemblance, il maximise une borne inférieure. La différence entre les deux est précisément la divergence KL entre postérieur approché et postérieur exact, qui reste inconnue.\n\n### La reparamétrisation\n\nIl reste à calculer un gradient à travers une espérance prise sous $q_\\phi$. Tirer un échantillon $z \\sim q_\\phi(z \\mid x)$ semble bloquer la rétropropagation, car un tirage aléatoire n'a pas de dérivée par rapport à $\\phi$. La reparamétrisation résout ce problème pour une gaussienne. On écrit :\n\n$$z = \\mu_\\phi(x) + \\sigma_\\phi(x) \\odot \\varepsilon, \\qquad \\varepsilon \\sim \\mathcal{N}(0, I)$$\n\nLe hasard est concentré dans $\\varepsilon$, qui ne dépend pas des paramètres. $\\mu_\\phi$ et $\\sigma_\\phi$ restent des sorties déterministes du réseau, et le gradient passe par elles. En pratique, on fait produire à l'encodeur la moyenne $\\mu$ et le logarithme de la variance $\\log \\sigma^2$ ; l'écart-type s'obtient par $\\sigma = \\exp(\\tfrac{1}{2} \\log \\sigma^2)$, ce qui évite toute racine carrée d'un nombre négatif.\n\nAvec un prior $\\mathcal{N}(0, I)$ et un postérieur gaussien diagonal, la divergence KL se calcule par une formule fermée. Pour une dimension :\n\n$$\\mathrm{KL}\\big(\\mathcal{N}(\\mu, \\sigma^2) \\,\\|\\, \\mathcal{N}(0, 1)\\big) = \\tfrac{1}{2}\\big(\\mu^2 + \\sigma^2 - \\log \\sigma^2 - 1\\big)$$\n\nLa somme sur les dimensions donne la divergence totale. Cette formule évite tout échantillonnage pour le terme de régularisation, et c'est l'une des raisons de la popularité du modèle : l'objectif s'écrit en quelques lignes.\n\n### Reconstruction contre KL\n\nLe terme de reconstruction et le terme KL ne tirent pas dans le même sens. Réduire seulement la reconstruction conduit l'encodeur à envoyer des points très précis, presque déterministes, et la distribution latente s'éloigne du prior : l'échantillonnage depuis $p(z)$ devient alors incohérent. Réduire seulement le KL écrase le postérieur sur le prior : toutes les données partagent la même loi latente, et le décodeur n'a plus d'information pour distinguer une donnée d'une autre. Dans le cas extrême, le décodeur apprend la meilleure sortie moyenne et ignore $z$ : c'est l'effondrement du postérieur. Ce déséquilibre a été documenté après l'article de 2013, et il explique pourquoi la pondération du terme KL est un réglage sensible.\n\nLa qualité des échantillons souffre de cette moyenne. La perte de reconstruction s'écrit comme une espérance sur la loi latente et sur le lot : une erreur locale peut être compensée par de bonnes reconstructions ailleurs. De plus, le décodeur modélise souvent l'incertitude par une gaussienne, ce qui revient à pénaliser l'écart quadratique moyen et favorise des sorties lisses. Un VAE reste néanmoins apprécié pour deux raisons. Son entraînement est stable, parce qu'il optimise une espérance par descente de gradient et non un jeu antagoniste. Et son encodeur produit une représentation latente continue, utilisable par d'autres modèles. Rombach et al. (2021) s'appuient sur cette idée pour la diffusion latente : un autoencodeur compresse l'image, puis la diffusion travaille dans cet espace réduit plutôt que sur les pixels.",
+      "analogy": {
+        "title": "Le résumé d'un roman",
+        "text": "Résumer un roman force à choisir ce qui compte : deux lecteurs produiront deux résumés différents, tous deux capables d'évoquer l'histoire. Un VAE fait de même avec une image : l'encodeur compresse vers un point flou de l'espace latent, et le décodeur tente de reconstruire à partir de ce résumé.\n\n**Limite de l'analogie :** un résumé de roman s'écrit avec des mots choisis, alors que $z$ est un vecteur de nombres sans interprétation directe. Rien ne garantit que chaque dimension corresponde à un aspect identifiable de l'image."
+      },
+      "example": {
+        "title": "La divergence KL en dimension un",
+        "text": "Pour un postérieur $\\mathcal{N}(0{,}5, 0{,}25)$, on calcule $\\mu^2 = 0{,}25$, $\\sigma^2 = 0{,}25$ et $-\\log \\sigma^2 \\approx 1{,}386$. La divergence vaut donc $\\tfrac{1}{2}(0{,}25 + 0{,}25 + 1{,}386 - 1) \\approx 0{,}443$.\n\n**Ce que cet exemple ne dit pas :** une divergence KL faible ne garantit pas de bonnes reconstructions. Les deux termes de la borne inférieure doivent rester équilibrés pour que l'espace latent soit à la fois informatif et échantillonnable."
+      },
+      "diagram": {
+        "title": "Un VAE : encodeur, latent gaussien et décodeur",
+        "description": "Schéma illustratif : une image entre dans l'encodeur, qui produit une moyenne et un écart-type ; un tirage reparamétré forme z ; le décodeur reconstruit l'image, et une branche mesure l'écart au prior. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 460\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Autoencodeur variationnel : encodeur, paramètres mu et sigma, tirage reparamétré z, décodeur et divergence KL\">\n  <defs>\n    <marker id=\"vae-fleche\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"800\" height=\"460\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Encoder vers une gaussienne, puis échantillonner</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"encodeur-vae\">\n    <rect x=\"60\" y=\"150\" width=\"110\" height=\"90\" rx=\"10\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"115\" y=\"188\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">encodeur</text>\n    <text x=\"115\" y=\"210\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">q(z | x)</text>\n    <line x1=\"170\" y1=\"195\" x2=\"240\" y2=\"195\" stroke=\"#64748b\" stroke-width=\"1.8\" marker-end=\"url(#vae-fleche)\"/>\n    <text x=\"115\" y=\"130\" fill=\"#7dd3fc\" font-size=\"12\" text-anchor=\"middle\">une image x</text>\n  </g>\n\n  <g id=\"parametres-gaussiens\">\n    <rect x=\"250\" y=\"120\" width=\"130\" height=\"150\" rx=\"10\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <text x=\"315\" y=\"150\" fill=\"#fcd34d\" font-size=\"12\" text-anchor=\"middle\">moyenne mu(x)</text>\n    <text x=\"315\" y=\"205\" fill=\"#fcd34d\" font-size=\"12\" text-anchor=\"middle\">log variance</text>\n    <text x=\"315\" y=\"226\" fill=\"#fcd34d\" font-size=\"12\" text-anchor=\"middle\">log sigma carré(x)</text>\n    <text x=\"315\" y=\"252\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">gaussienne diagonale</text>\n  </g>\n\n  <g id=\"latent-vae\">\n    <line x1=\"380\" y1=\"195\" x2=\"440\" y2=\"195\" stroke=\"#64748b\" stroke-width=\"1.8\" marker-end=\"url(#vae-fleche)\"/>\n    <circle cx=\"478\" cy=\"195\" r=\"36\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"2.5\"/>\n    <text x=\"478\" y=\"192\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">z = mu</text>\n    <text x=\"478\" y=\"210\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">+ sigma eps</text>\n    <text x=\"478\" y=\"152\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">tirage reparamétré</text>\n  </g>\n\n  <g id=\"decodeur-vae\">\n    <line x1=\"514\" y1=\"195\" x2=\"575\" y2=\"195\" stroke=\"#64748b\" stroke-width=\"1.8\" marker-end=\"url(#vae-fleche)\"/>\n    <rect x=\"585\" y=\"150\" width=\"130\" height=\"90\" rx=\"10\" fill=\"#0f172a\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"650\" y=\"188\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">décodeur</text>\n    <text x=\"650\" y=\"210\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">p(x | z)</text>\n    <text x=\"650\" y=\"130\" fill=\"#f9a8d4\" font-size=\"12\" text-anchor=\"middle\">image reconstruite</text>\n  </g>\n\n  <g id=\"branche-kl\">\n    <path d=\"M315 270 L315 340 L478 340\" fill=\"none\" stroke=\"#a78bfa\" stroke-width=\"1.8\" stroke-dasharray=\"5 4\"/>\n    <rect x=\"290\" y=\"356\" width=\"260\" height=\"58\" rx=\"10\" fill=\"#0f172a\" stroke=\"#a78bfa\" stroke-width=\"2\"/>\n    <text x=\"420\" y=\"382\" fill=\"#ddd6fe\" font-size=\"12\" text-anchor=\"middle\">divergence KL au prior</text>\n    <text x=\"420\" y=\"402\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">garde le latent échantillonnable</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. L'encodeur",
+            "explanation": "L'encodeur lit une image et produit les paramètres d'une gaussienne : une moyenne et un logarithme de variance par dimension latente.",
+            "highlight": [
+              "encodeur-vae"
+            ]
+          },
+          {
+            "title": "2. Les paramètres gaussiens",
+            "explanation": "La moyenne et le logarithme de variance décrivent le postérieur approché. Le logarithme évite les écarts-types négatifs.",
+            "highlight": [
+              "parametres-gaussiens"
+            ]
+          },
+          {
+            "title": "3. Le tirage reparamétré",
+            "explanation": "z est écrit comme moyenne plus écart-type fois un bruit standard. Le hasard ne dépend plus des paramètres, et le gradient passe par la moyenne et l'écart-type.",
+            "highlight": [
+              "latent-vae"
+            ]
+          },
+          {
+            "title": "4. Le terme de régularisation",
+            "explanation": "La divergence KL mesure l'écart entre le postérieur approché et le prior. Elle empêche l'encodeur de se concentrer sur des points isolés, inutilisables pour l'échantillonnage.",
+            "highlight": [
+              "branche-kl"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Calcul d'une perte VAE sur un petit lot fixe : erreur quadratique moyenne pour la reconstruction, formule fermée pour la divergence KL entre gaussienne diagonale et prior centré réduit. Les valeurs servent à vérifier l'arithmétique, pas à mesurer la qualité d'un modèle.",
+        "code": "import numpy as np\n\nrng = np.random.default_rng(0)\n\n# Un lot de 4 exemples, entrées de dimension 3, espace latent de dimension 2.\nx = rng.normal(size=(4, 3))\nx_reconstruit = x + 0.1 * rng.normal(size=(4, 3))\nmu = 0.2 * rng.normal(size=(4, 2))\nlog_var = np.full((4, 2), -0.5)\n\n# Terme de reconstruction : erreur quadratique moyenne par exemple.\nrec = np.mean((x - x_reconstruit) ** 2, axis=1)\n\n# Terme KL entre N(mu, sigma) et N(0, I) : 0.5 * somme(mu^2 + sigma^2 - log(sigma^2) - 1).\nkl = 0.5 * np.sum(mu ** 2 + np.exp(log_var) - log_var - 1.0, axis=1)\n\nperte = rec + kl\nprint(\"reconstruction :\", np.round(rec, 4))\nprint(\"KL :\", np.round(kl, 4))\nprint(\"perte par exemple :\", np.round(perte, 4))\nprint(\"perte moyenne :\", round(float(perte.mean()), 4))",
+        "output": "reconstruction : [0.0234 0.0031 0.0042 0.0081]\nKL : [0.123  0.1346 0.1117 0.1278]\nperte par exemple : [0.1464 0.1377 0.1159 0.1359]\nperte moyenne : 0.134",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Pourquoi le VAE n'optimise-t-il pas directement la vraisemblance p(x) ?",
+          "options": [
+            "Parce que la vraisemblance ne dépend pas des paramètres du décodeur",
+            "Parce que p(x) est une intégrale sur les variables latentes, sans forme fermée exploitable en grande dimension",
+            "Parce que la vraisemblance est toujours nulle pour une image",
+            "Parce que la descente de gradient interdit les intégrales"
+          ],
+          "correctIndex": 1,
+          "explanation": "La vraisemblance s'écrit comme une intégrale sur z. En dimension élevée, elle n'est pas calculable directement, d'où la borne inférieure."
+        },
+        {
+          "question": "À quoi sert la reparamétrisation z = mu + sigma * epsilon ?",
+          "options": [
+            "À supprimer l'aléa de l'espace latent pour rendre le modèle déterministe",
+            "À rendre le postérieur exact calculable",
+            "À annuler le terme KL de la perte",
+            "À faire passer le gradient à travers le tirage aléatoire, car epsilon ne dépend pas des paramètres"
+          ],
+          "correctIndex": 3,
+          "explanation": "Le hasard est isolé dans epsilon. mu et sigma restent des sorties déterministes du réseau, donc dérivables par rapport aux paramètres."
+        },
+        {
+          "question": "Que se passe-t-il si le terme KL domine trop fortement pendant l'entraînement d'un VAE ?",
+          "options": [
+            "Le décodeur peut apprendre à ignorer z, c'est l'effondrement du postérieur",
+            "L'encodeur produit des points toujours plus éloignés du prior",
+            "Le modèle devient un GAN sans discriminateur",
+            "La vraisemblance devient exacte"
+          ],
+          "correctIndex": 0,
+          "explanation": "Si le KL écrase le postérieur sur le prior, z ne porte plus d'information sur la donnée. Le décodeur se contente alors d'une sortie moyenne."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Variable latente",
+          "definition": "Variable non observée, notée z, supposée expliquer une donnée observée x ; sa dimension est plus petite que celle des données."
+        },
+        {
+          "term": "Borne inférieure de vraisemblance",
+          "definition": "Quantité optimisable, notée ELBO, qui minore la log-vraisemblance ; elle additionne un terme de reconstruction et une divergence KL négative."
+        },
+        {
+          "term": "Reparamétrisation",
+          "definition": "Écriture d'un tirage gaussien z comme moyenne plus écart-type fois un bruit standard, pour rendre le gradient calculable."
+        },
+        {
+          "term": "Effondrement du postérieur",
+          "definition": "Situation où le décodeur ignore la variable latente, parce que le terme KL a écrasé le postérieur approché sur le prior."
+        },
+        {
+          "term": "Prior",
+          "definition": "Distribution supposée des variables latentes avant observation des données, souvent une gaussienne centrée réduite."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Reparamétrisation",
+          "prompt": "Pourquoi la reparamétrisation permet-elle d'entraîner un VAE par rétropropagation ?",
+          "solution": "On écrit $z = \\mu + \\sigma \\odot \\varepsilon$ avec $\\varepsilon$ tiré d’une loi fixe. Le hasard est séparé des paramètres, et le gradient peut passer par $\\mu$ et $\\sigma$."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Kingma et Welling, Auto-Encoding Variational Bayes, 2013.",
+          "href": "https://arxiv.org/abs/1312.6114"
+        }
+      ]
+    },
+    {
+      "id": "gan",
+      "title": "GAN et jeu minimax",
+      "keyTakeaways": [
+        "Un GAN fait s'affronter deux réseaux : un générateur qui transforme un bruit en échantillon, et un discriminateur qui estime si un échantillon vient des données ou du générateur.",
+        "Le jeu minimax de Goodfellow et al. (2014) admet un optimum théorique : pour un générateur fixé, le meilleur discriminateur est p_données / (p_données + p_g), et l'optimum global est atteint quand la distribution générée égale celle des données.",
+        "Ces résultats portent sur la valeur du jeu, pas sur l'algorithme : la descente de gradient alternée ne garantit pas d'atteindre l'équilibre, et rien ne borne l'oscillation des deux réseaux.",
+        "Quand le discriminateur devient trop fort, la perte initiale du générateur sature et fournit un gradient minuscule ; l'article propose de maximiser log D(G(z)) au lieu de minimiser log(1 - D(G(z))).",
+        "L'effondrement des modes, observé en pratique, pousse le générateur à couvrir une partie seulement de la distribution ; il illustre l'écart entre l'optimum du jeu et le comportement réel de l'optimisation."
+      ],
+      "theory": "### Le jeu à deux joueurs\n\nUn réseau antagoniste, ou GAN, fait s'affronter deux réseaux aux rôles opposés. Le **générateur** $G$ prend un bruit $z$ tiré d'une loi simple, souvent $\\mathcal{N}(0, I)$, et le transforme en un échantillon $G(z)$. Le **discriminateur** $D$ prend un échantillon, réel ou généré, et renvoie un nombre entre $0$ et $1$ censé estimer la probabilité que cet échantillon vienne des données. Goodfellow et al. (2014) formalisent l'affrontement par un jeu minimax, c'est-à-dire un objectif que l'un cherche à minimiser et l'autre à maximiser :\n\n$$\\min_G \\max_D V(D, G) = \\mathbb{E}_{x \\sim p_{\\text{données}}}\\big[\\log D(x)\\big] + \\mathbb{E}_{z \\sim p_z}\\big[\\log\\big(1 - D(G(z))\\big)\\big]$$\n\nLe discriminateur veut rendre $V$ grand : il pousse $D(x)$ vers $1$ sur les vraies données et $D(G(z))$ vers $0$ sur les échantillons générés. Le générateur veut rendre $V$ petit : il pousse $D(G(z))$ vers $1$, c'est-à-dire qu'il cherche à faire classer ses échantillons comme réels. Notons que le générateur ne reçoit aucune information directe sur les données : il n'apprend que par le signal du discriminateur.\n\n### Ce que démontre l'article de 2014\n\nDeux résultats structurent l'article fondateur, et il faut les distinguer de l'algorithme qui tente de les atteindre.\n\nLe premier résultat décrit le meilleur discriminateur pour un générateur donné. En annulant la dérivée de $V$ par rapport à $D$, on obtient la fonction optimale :\n\n$$D^*(x) = \\frac{p_{\\text{données}}(x)}{p_{\\text{données}}(x) + p_g(x)}$$\n\noù $p_g$ est la distribution des échantillons du générateur. Si les deux distributions coïncident, $D^*$ vaut $0{,}5$ partout : le discriminateur ne peut pas faire mieux que le hasard.\n\nLe second résultat porte sur l'optimum global. Si l'on remplace $D$ par $D^*$ dans le jeu, la valeur devient égale à $-\\log 4$ plus le double de la divergence de Jensen-Shannon entre $p_{\\text{données}}$ et $p_g$. La divergence est positive et s'annule quand les deux distributions coïncident. L'optimum global du jeu est donc atteint lorsque $p_g = p_{\\text{données}}$, et la valeur vaut alors $-\\log 4 \\approx -1{,}386$. C'est un énoncé d'existence : il décrit un équilibre, pas un chemin pour y arriver.\n\n> **Repère.** Le théorème dit qu'un équilibre existe et vaut $-\\log 4$ au mieux. Il ne dit rien du temps de convergence, ni du risque d'oscillation, ni de la capacité finie des deux réseaux.\n\n### De l'équilibre à l'optimisation\n\nLa descente de gradient alternée remplace la question théorique par une question d'optimisation. On met à jour le discriminateur quelques pas, puis le générateur, et l'on répète. Cette procédure n'offre aucune garantie d'atteindre l'équilibre, pour trois raisons au moins.\n\n1. Le jeu n'est pas convexe par rapport aux paramètres des deux réseaux.\n2. La mise à jour alternée de deux adversaires peut créer une dynamique oscillante, où chaque réseau défait périodiquement les progrès de l'autre.\n3. L'équilibre théorique suppose que l'on peut optimiser $D$ jusqu'à l'optimum avant chaque pas sur $G$, ce qui coûte un entraînement complet à chaque itération.\n\nL'article fondateur identifie en outre une difficulté de gradient. Quand le discriminateur classe presque parfaitement, le terme $\\log(1 - D(G(z)))$ est très proche de zéro et sa dérivée devient minuscule : le générateur n'apprend plus. Les auteurs proposent donc une variante, dite non saturante, qui entraîne le générateur à maximiser $\\log D(G(z))$ au lieu de minimiser $\\log(1 - D(G(z)))$. Cette astuce ne change pas l'équilibre du jeu, mais elle fournit un gradient plus utile quand le discriminateur domine.\n\n### Ce que l'on observe en pratique\n\nLes échecs d'entraînement des GAN sont documentés dans la littérature qui a suivi l'article de 2014. Deux symptômes reviennent souvent.\n\nLe premier est l'instabilité : les pertes des deux réseaux montent et descendent sans stabilisation, et un générateur peut produire de bons échantillons à un moment de l'entraînement puis de moins bons à un autre. Une particularité de ce jeu est qu'aucune des deux pertes ne mesure directement la qualité du générateur : une perte de discriminateur faible peut correspondre à un générateur trop faible ou à un discriminateur trop fort.\n\nLe second est l'effondrement des modes. Le générateur se concentre sur quelques régions de la distribution des données et produit un éventail réduit d'échantillons, souvent très similaires entre eux. L'une des explications avancées est la dynamique du jeu : un générateur qui découvre quelques exemples convaincants peut y rester, car le discriminateur réagit à ces exemples plutôt qu'à l'ensemble de la distribution couverte. Ce comportement n'est pas décrit dans le théorème de 2014 ; il relève du fonctionnement effectif de l'optimisation, et il a motivé de nombreux travaux ultérieurs, dont plusieurs sont hors du périmètre de ce cours.\n\nCette fragilité relative ne condamne pas l'idée adversariale. La comparaison entre deux distributions par un classifieur reste utile, et la perte adverse est réutilisée comme complément dans d'autres familles. Rombach et al. (2021) entraînent ainsi l'autoencodeur de leur diffusion latente avec une perte de reconstruction et une perte adversariale, en plus de la régularisation du latent. On retrouve donc un discriminateur au cœur d'un système qui n'est pas, globalement, un GAN.",
+      "analogy": {
+        "title": "Le faussaire et le détective",
+        "text": "Un faussaire fabrique des copies et un détective tente de les repérer. Chacun s'améliore contre les progrès de l'autre : le faussaire se concentre sur les défauts que le détective sait voir, et le détective sur les techniques que le faussaire utilise. Si le détective devient trop fort, le faussaire n'apprend plus rien de ses retours.\n\n**Limite de l'analogie :** le détective réel connaît la liste des œuvres authentiques et peut la consulter, alors que le discriminateur ne voit que des échantillons. L'analogie décrit la dynamique des deux adversaires, pas la garantie d'un résultat."
+      },
+      "example": {
+        "title": "La valeur du jeu à l'équilibre",
+        "text": "Supposons que le générateur reproduise exactement la distribution des données. Alors $D^*(x) = 0{,}5$ pour tout $x$, et chaque terme du jeu vaut $\\log 0{,}5 \\approx -0{,}693$. La somme vaut donc $2 \\log 0{,}5 = -\\log 4 \\approx -1{,}386$, la valeur annoncée par l'article de 2014.\n\n**Ce que cet exemple ne dit pas :** il ne garantit pas qu'un entraînement réel atteigne cette valeur. Il calcule l'optimum du jeu pour un générateur idéal, pas le résultat d'une descente de gradient alternée."
+      },
+      "diagram": {
+        "title": "La boucle antagoniste et l'effondrement des modes",
+        "description": "Schéma illustratif : le générateur transforme un bruit en échantillon, le discriminateur compare échantillons réels et générés, et les deux se mettent à jour en alternance ; un second panneau montre un générateur concentré sur quelques modes. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 460\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Boucle GAN : générateur, discriminateur, mises à jour alternées et effondrement des modes\">\n  <defs>\n    <marker id=\"gan-fleche\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"800\" height=\"460\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Deux réseaux, un objectif opposé</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"generateur-gan\">\n    <circle cx=\"110\" cy=\"185\" r=\"30\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"110\" y=\"190\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">z</text>\n    <rect x=\"180\" y=\"145\" width=\"120\" height=\"80\" rx=\"10\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"240\" y=\"180\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">générateur G</text>\n    <text x=\"240\" y=\"202\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">G(z)</text>\n    <line x1=\"140\" y1=\"185\" x2=\"172\" y2=\"185\" stroke=\"#64748b\" stroke-width=\"1.8\" marker-end=\"url(#gan-fleche)\"/>\n  </g>\n\n  <g id=\"discriminateur-gan\">\n    <rect x=\"380\" y=\"130\" width=\"150\" height=\"110\" rx=\"10\" fill=\"#0f172a\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"455\" y=\"170\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">discriminateur D</text>\n    <text x=\"455\" y=\"196\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">réel ou généré ?</text>\n    <line x1=\"300\" y1=\"185\" x2=\"372\" y2=\"185\" stroke=\"#64748b\" stroke-width=\"1.8\" marker-end=\"url(#gan-fleche)\"/>\n    <text x=\"336\" y=\"174\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">faux</text>\n    <line x1=\"455\" y1=\"105\" x2=\"455\" y2=\"122\" stroke=\"#64748b\" stroke-width=\"1.8\" marker-end=\"url(#gan-fleche)\"/>\n    <text x=\"455\" y=\"96\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">données réelles</text>\n    <text x=\"600\" y=\"190\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">probabilité</text>\n    <line x1=\"532\" y1=\"185\" x2=\"592\" y2=\"185\" stroke=\"#64748b\" stroke-width=\"1.8\" marker-end=\"url(#gan-fleche)\"/>\n  </g>\n\n  <g id=\"boucle-gan\">\n    <path d=\"M240 240 C240 320 455 330 455 250\" fill=\"none\" stroke=\"#fbbf24\" stroke-width=\"1.8\" stroke-dasharray=\"5 4\" marker-end=\"url(#gan-fleche)\"/>\n    <text x=\"348\" y=\"322\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">gradient remonté vers G</text>\n    <path d=\"M455 250 C455 360 160 350 90 235\" fill=\"none\" stroke=\"#a78bfa\" stroke-width=\"1.8\" stroke-dasharray=\"5 4\" marker-end=\"url(#gan-fleche)\"/>\n    <text x=\"250\" y=\"372\" fill=\"#ddd6fe\" font-size=\"11\" text-anchor=\"middle\">mises à jour alternées des deux réseaux</text>\n  </g>\n\n  <g id=\"mode-collapse\">\n    <line x1=\"60\" y1=\"404\" x2=\"740\" y2=\"404\" stroke=\"#334155\" stroke-width=\"1.5\"/>\n    <text x=\"400\" y=\"434\" fill=\"#f87171\" font-size=\"12\" text-anchor=\"middle\">Effondrement des modes : un générateur peut se concentrer sur quelques régions de la distribution</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Le générateur",
+            "explanation": "Le générateur reçoit un bruit z et produit un échantillon. Il ne voit jamais les données directement.",
+            "highlight": [
+              "generateur-gan"
+            ]
+          },
+          {
+            "title": "2. Le discriminateur",
+            "explanation": "Le discriminateur reçoit soit une vraie donnée, soit un échantillon du générateur, et renvoie une probabilité.",
+            "highlight": [
+              "discriminateur-gan"
+            ]
+          },
+          {
+            "title": "3. La boucle d'apprentissage",
+            "explanation": "Les deux réseaux se mettent à jour en alternance. Le signal du discriminateur remonte vers le générateur, ce qui crée la dynamique antagoniste.",
+            "highlight": [
+              "boucle-gan"
+            ]
+          },
+          {
+            "title": "4. L'effondrement des modes",
+            "explanation": "Un générateur peut ignorer une partie de la distribution et ne produire que quelques variantes. L'équilibre théorique n'empêche pas ce comportement observé.",
+            "highlight": [
+              "mode-collapse"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Pseudo-code du jeu minimax d'après Goodfellow et al. (2014), non exécuté : les fonctions sont notées pour la lecture. Il montre l'alternance des deux mises à jour et la variante non saturante du générateur.",
+        "code": "# Pseudo-code, non exécuté : illustre l'alternance des mises à jour.\nreel = jeu_de_donnees()          # échantillon du jeu d'entraînement\nbruit = tirage_normal(36)        # entrée du générateur\n\nfor etape in range(nb_etapes):\n    # 1. Mettre à jour le discriminateur : maximiser la valeur du jeu.\n    faux = G(bruit)\n    perte_D = -moyenne(log(D(reel)) + log(1 - D(faux)))\n    pas_de_descente_de_gradient(D, perte_D)\n\n    # 2. Mettre à jour le générateur : variante non saturante,\n    #    maximiser log D(G(z)) au lieu de minimiser log(1 - D(G(z))).\n    faux = G(bruit)\n    perte_G = -moyenne(log(D(faux)))\n    pas_de_descente_de_gradient(G, perte_G)\n\n# À aucun moment le générateur n'accède aux données : il ne voit que D(faux)."
+      },
+      "quiz": [
+        {
+          "question": "Quel est le rôle du discriminateur dans le jeu minimax ?",
+          "options": [
+            "Générer des échantillons quand le générateur échoue",
+            "Classer les échantillons comme réels ou générés, en maximisant la valeur du jeu",
+            "Calculer la vraisemblance exacte des données",
+            "Choisir le nombre d'étapes d'entraînement"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le discriminateur est un classifieur. Il cherche à maximiser la valeur du jeu, tandis que le générateur cherche à la minimiser."
+        },
+        {
+          "question": "Que garantit exactement le résultat théorique de Goodfellow et al. (2014) ?",
+          "options": [
+            "Que la descente de gradient alternée converge toujours",
+            "Qu'un GAN entraîné couvre nécessairement tous les modes",
+            "Qu'un optimum global du jeu existe lorsque la distribution générée égale celle des données, sans garantie d'y parvenir par gradient",
+            "Que le discriminateur optimal vaut toujours un"
+          ],
+          "correctIndex": 2,
+          "explanation": "L'article démontre l'existence et la valeur de l'optimum, et décrit le discriminateur optimal pour G fixé. Il ne démontre pas que l'algorithme d'entraînement y converge."
+        },
+        {
+          "question": "Pourquoi une perte de discriminateur très basse n'est-elle pas une bonne nouvelle en soi ?",
+          "options": [
+            "Parce que le discriminateur peut devenir trop fort et fournir au générateur un gradient minuscule, signe d'une dynamique déséquilibrée",
+            "Parce qu'elle signifie que les données réelles ont disparu",
+            "Parce que le générateur cesse alors de produire des échantillons",
+            "Parce qu'elle prouve que l'effondrement des modes est terminé"
+          ],
+          "correctIndex": 0,
+          "explanation": "Quand le discriminateur classe presque parfaitement, le terme initial du générateur sature. C'est le déséquilibre que la variante non saturante cherche à atténuer."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Générateur",
+          "definition": "Réseau qui transforme un bruit en échantillon en cherchant à tromper le discriminateur ; il n'a pas accès aux données d'entraînement."
+        },
+        {
+          "term": "Discriminateur",
+          "definition": "Classifieur qui estime la probabilité qu'un échantillon vienne des données plutôt que du générateur."
+        },
+        {
+          "term": "Divergence de Jensen-Shannon",
+          "definition": "Mesure symétrique de l'écart entre deux distributions, qui apparaît dans la valeur optimale du jeu antagoniste."
+        },
+        {
+          "term": "Variante non saturante",
+          "definition": "Objectif de rechange pour le générateur, qui maximise log D(G(z)) au lieu de minimiser log(1 - D(G(z))), afin d'éviter un gradient trop faible."
+        },
+        {
+          "term": "Équilibre du jeu",
+          "definition": "Point où ni le générateur ni le discriminateur ne peut améliorer sa situation en changeant seul de stratégie ; en pratique, il est difficile à atteindre."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Discriminateur trop fort",
+          "prompt": "Pourquoi un discriminateur qui apprend trop vite peut-il bloquer l’apprentissage du générateur ?",
+          "solution": "Si le discriminateur sépare presque parfaitement le vrai du faux, le gradient transmis au générateur devient faible ou instable. Le générateur n’a plus de signal utile pour progresser. Les recettes de GAN cherchent à équilibrer les deux réseaux."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Goodfellow et al., Generative Adversarial Nets, 2014.",
+          "href": "https://arxiv.org/abs/1406.2661"
+        }
+      ]
+    },
+    {
+      "id": "diffusion",
+      "title": "Diffusion, DDPM, SDE et latent diffusion",
+      "keyTakeaways": [
+        "Un modèle de diffusion définit d'abord un processus de bruitage fixe, une chaîne de Markov qui ajoute progressivement du bruit gaussien à une donnée jusqu'à obtenir un bruit presque pur.",
+        "La forme fermée q(x_t | x_0) permet de calculer un niveau de bruit quelconque sans simuler les étapes intermédiaires, ce qui rend l'entraînement parallélisable.",
+        "Le réseau apprend à prédire le bruit ajouté à chaque étape, et non la donnée directement ; Ho, Jain et Abbeel (2020) partent d'une borne de vraisemblance pondérée, puis en rééquilibrent les termes pour obtenir un objectif quadratique simple.",
+        "L'échantillonnage part d'un bruit et applique le réseau plusieurs centaines de fois : la qualité vient de ce raffinement itératif, et le coût aussi.",
+        "Rombach et al. (2021) déplacent la diffusion dans l'espace latent d'un autoencodeur : le nombre d'étapes ne change pas, mais chaque étape calcule sur des tenseurs beaucoup plus petits."
+      ],
+      "theory": "### Une chaîne de bruitage choisie, pas apprise\n\nUn modèle de diffusion part d'une idée renversée : au lieu d'apprendre à construire une image, on commence par la détruire méthodiquement. Soit une donnée $x_0$. Le processus direct ajoute du bruit en $T$ étapes, avec des variances $\\beta_1, \\dots, \\beta_T$ fixées à l'avance et petites. À chaque étape :\n\n$$q(x_t \\mid x_{t-1}) = \\mathcal{N}\\big(x_t\\, ;\\, \\sqrt{1 - \\beta_t}\\, x_{t-1},\\ \\beta_t I\\big)$$\n\nChaque étape est donc un tirage gaussien centré sur la donnée légèrement réduite, avec une variance $\\beta_t$. La suite $x_0, x_1, \\dots, x_T$ est une chaîne de Markov : la loi de $x_t$ ne dépend que de $x_{t-1}$. Après suffisamment d'étapes, $x_T$ est presque un bruit gaussien standard, et la donnée d'origine n'y est plus discernable.\n\nCe processus n'est pas appris. Les $\\beta_t$ forment un programme de variance choisi par le concepteur, par exemple une progression linéaire de $10^{-4}$ à $0{,}02$ sur mille étapes dans l'article de Ho, Jain et Abbeel (2020). Le choix du programme influence la qualité finale, mais il ne consomme aucun gradient.\n\n### La forme fermée\n\nUne propriété algébrique rend l'entraînement praticable. En posant $\\alpha_t = 1 - \\beta_t$ et $\\bar{\\alpha}_t = \\prod_{s=1}^{t} \\alpha_s$, la composition des bruitages successifs donne une formule directe :\n\n$$q(x_t \\mid x_0) = \\mathcal{N}\\big(x_t\\, ;\\, \\sqrt{\\bar{\\alpha}_t}\\, x_0,\\ (1 - \\bar{\\alpha}_t) I\\big)$$\n\nAutrement dit, on peut tirer directement le niveau de bruit $t$ sans simuler les $t$ étapes précédentes :\n\n$$x_t = \\sqrt{\\bar{\\alpha}_t}\\, x_0 + \\sqrt{1 - \\bar{\\alpha}_t}\\, \\varepsilon, \\qquad \\varepsilon \\sim \\mathcal{N}(0, I)$$\n\nLe coefficient $\\sqrt{\\bar{\\alpha}_t}$ mesure la part de signal conservée, et $\\sqrt{1 - \\bar{\\alpha}_t}$ la part de bruit. Aux premiers pas, le signal domine ; aux derniers, c'est l'inverse. Cette formule est la raison pour laquelle l'entraînement d'une diffusion se parallélise bien : chaque exemple du lot peut recevoir un niveau de bruit $t$ tiré indépendamment, sans dérouler la chaîne.\n\n> **Repère.** Le processus direct est une donnée du problème, pas une partie apprise du modèle. Seul le processus inverse contient des paramètres entraînables.\n\n### Le processus inverse appris\n\nGénérer consiste à parcourir la chaîne à l'envers, en partant d'un bruit $x_T \\sim \\mathcal{N}(0, I)$. Le processus inverse exact $q(x_{t-1} \\mid x_t)$ dépend de la distribution des données et n'est pas accessible. Ho, Jain et Abbeel l'approchent par une gaussienne paramétrée $p_\\theta(x_{t-1} \\mid x_t)$, dont la moyenne est calculée par un réseau. Plutôt que de faire prédire directement la moyenne, l'article propose de faire prédire le bruit $\\varepsilon$ qui a été ajouté, puis de reconstruire la moyenne à partir de cette prédiction.\n\nL'objectif d'entraînement se simplifie alors remarquablement. On tire un exemple $x_0$, un niveau $t$ uniforme et un bruit $\\varepsilon$, on forme $x_t$ par la formule fermée, et l'on minimise :\n\n$$\\mathcal{L}_{\\text{simple}} = \\mathbb{E}_{t, x_0, \\varepsilon}\\Big[\\big\\| \\varepsilon - \\varepsilon_\\theta\\big(\\sqrt{\\bar{\\alpha}_t}\\, x_0 + \\sqrt{1 - \\bar{\\alpha}_t}\\, \\varepsilon,\\ t\\big) \\big\\|^2\\Big]$$\n\nC'est une régression quadratique ordinaire. L'article part d'une borne inférieure de vraisemblance, puis en rééquilibre les termes en abandonnant les pondérations dépendant de $t$ ; l'objectif simplifié qui en résulte n'est plus, au sens strict, cette borne. L'article relie ce calcul au débruitage par score matching ainsi qu'à la dynamique de Langevin. Dans l'implémentation de 2020, le réseau qui prédit le bruit est un U-Net convolutif, et le niveau $t$ lui est communiqué sous forme d'information de position.\n\n### Échantillonner, étape par étape\n\nLa génération répète une opération simple : prédire le bruit présent dans $x_t$, en retirer la part attendue, puis rajouter une petite quantité de bruit aléatoire, sauf à la toute dernière étape. Partir d'un bruit et le débrouiller mille fois de suite donne une image. Chaque étape est un appel au réseau sur un tenseur de la taille de l'image.\n\nDeux conséquences pratiques en découlent. La première est le coût : générer un échantillon demande autant d'applications du réseau qu'il y a d'étapes, alors qu'un générateur antagoniste produit un échantillon en un seul passage. La seconde est la nature approximative du processus : le réseau ne connaît pas la vraie loi inverse, il en donne une estimation à chaque pas. Les erreurs se composent le long de la chaîne, ce qui explique l'attention portée au programme de variance et à la précision d'échantillonnage.\n\nUne reformulation continue de ce mécanisme, en termes d'équations différentielles stochastiques, apparaît dans des travaux postérieurs à l'article de 2020. Elle décrit le bruitage comme une trajectoire continue et l'inversion comme l'intégration d'une équation en temps continu. Cette lecture n'est pas nécessaire pour comprendre DDPM ; elle le devient pour relier diffusion et Flow Matching, ce que fait le module suivant.\n\n### La diffusion latente\n\nRombach et al. (2021) abordent le coût par une autre voie. Leur système comporte deux étages. Un autoencodeur apprend d'abord à comprimer une image en une représentation latente de dimension spatiale réduite, puis à la reconstruire. La diffusion est ensuite entraînée dans cet espace latent, et non sur les pixels.\n\nLe nombre d'étapes reste le même, mais chaque étape traite des tenseurs sensiblement plus petits, ce qui réduit le coût de calcul par étape. L'article conditionne en outre la génération par du texte et des classes, injectés par attention croisée, et par des conditions spatiales comme une esquisse ou un masque, concaténées au latent. La diffusion latente illustre la combinaison des familles annoncée au premier module : un autoencodeur proche des VAE, un processus de diffusion, et une perte adversariale pour entraîner l'autoencodeur.",
+      "analogy": {
+        "title": "La photographie qu'on développe à l'envers",
+        "text": "Imaginez une photographie que l'on recouvrirait progressivement de sable jusqu'à ne plus voir qu'un tas uniforme. Reconstruire l'image consiste à retirer le sable grain par grain, en devinant à chaque passage quelle poussière appartient au paysage et quelle poussière est du bruit. Le réseau apprend exactement ce geste, mais pour des milliers d'étapes et sur des nombres.\n\n**Limite de l'analogie :** le sable retire une information réelle, alors que le bruit gaussien la remplace par des valeurs aléatoires. Un débruitage parfait n'est possible que parce que le processus direct est connu exactement, ce qui n'est pas le cas d'un recouvrement physique."
+      },
+      "example": {
+        "title": "Lire les coefficients de bruitage",
+        "text": "Avec un programme linéaire de $10^{-4}$ à $0{,}02$ sur mille étapes, le script ci-dessous donne $\\sqrt{\\bar{\\alpha}} \\approx 0{,}724$ à l'étape 250 et $\\sqrt{\\bar{\\alpha}} \\approx 0{,}006$ à l'étape 1000. Le signal est donc presque effacé à la fin de la chaîne, et le bruit domine.\n\n**Ce que cet exemple ne dit pas :** ces coefficients dépendent du programme de variance choisi. Ils ne mesurent ni la qualité du modèle ni la qualité des images produites."
+      },
+      "diagram": {
+        "title": "Bruitage avant, débruitage inverse et espace latent",
+        "description": "Schéma illustratif : une chaîne de Markov ajoute du bruit de x0 vers xT, un réseau apprend à inverser chaque étape, et un second panneau compare le calcul sur les pixels et dans un espace latent plus petit. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 470\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Diffusion : chaîne de bruitage avant, processus inverse appris par un réseau, et diffusion latente\">\n  <defs>\n    <marker id=\"diff-fleche\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"800\" height=\"470\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Détruire méthodiquement, puis apprendre à reconstruire</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"chaine-avant\">\n    <rect x=\"70\" y=\"100\" width=\"44\" height=\"44\" rx=\"8\" fill=\"#0ea5e9\" opacity=\"0.85\"/>\n    <text x=\"92\" y=\"164\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">x0</text>\n    <rect x=\"170\" y=\"100\" width=\"44\" height=\"44\" rx=\"8\" fill=\"#0ea5e9\" opacity=\"0.6\"/>\n    <text x=\"192\" y=\"164\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">x1</text>\n    <rect x=\"270\" y=\"100\" width=\"44\" height=\"44\" rx=\"8\" fill=\"#0ea5e9\" opacity=\"0.35\"/>\n    <text x=\"292\" y=\"164\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">x2</text>\n    <rect x=\"370\" y=\"100\" width=\"44\" height=\"44\" rx=\"8\" fill=\"#475569\" opacity=\"0.55\"/>\n    <text x=\"392\" y=\"164\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">...</text>\n    <rect x=\"470\" y=\"100\" width=\"44\" height=\"44\" rx=\"8\" fill=\"#334155\"/>\n    <text x=\"492\" y=\"164\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">xT</text>\n    <line x1=\"114\" y1=\"122\" x2=\"162\" y2=\"122\" stroke=\"#64748b\" stroke-width=\"1.8\" marker-end=\"url(#diff-fleche)\"/>\n    <line x1=\"214\" y1=\"122\" x2=\"262\" y2=\"122\" stroke=\"#64748b\" stroke-width=\"1.8\" marker-end=\"url(#diff-fleche)\"/>\n    <line x1=\"314\" y1=\"122\" x2=\"362\" y2=\"122\" stroke=\"#64748b\" stroke-width=\"1.8\" marker-end=\"url(#diff-fleche)\"/>\n    <line x1=\"414\" y1=\"122\" x2=\"462\" y2=\"122\" stroke=\"#64748b\" stroke-width=\"1.8\" marker-end=\"url(#diff-fleche)\"/>\n    <text x=\"282\" y=\"88\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">ajout de bruit, variances fixées</text>\n  </g>\n\n  <g id=\"reseau-bruit\">\n    <rect x=\"200\" y=\"216\" width=\"400\" height=\"64\" rx=\"10\" fill=\"#0f172a\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"400\" y=\"243\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">réseau qui prédit le bruit ajouté</text>\n    <text x=\"400\" y=\"264\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">epsilon_theta(x_t, t)</text>\n    <line x1=\"492\" y1=\"190\" x2=\"440\" y2=\"214\" stroke=\"#64748b\" stroke-width=\"1.8\" marker-end=\"url(#diff-fleche)\"/>\n  </g>\n\n  <g id=\"chaine-arriere\">\n    <path d=\"M180 292 L620 292\" fill=\"none\" stroke=\"#34d399\" stroke-width=\"2\" marker-end=\"url(#diff-fleche)\"/>\n    <text x=\"400\" y=\"316\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">processus inverse, une étape à la fois, du bruit vers la donnée</text>\n    <circle cx=\"180\" cy=\"292\" r=\"6\" fill=\"#334155\"/>\n    <circle cx=\"620\" cy=\"292\" r=\"6\" fill=\"#34d399\"/>\n  </g>\n\n  <g id=\"latent-vs-pixels\">\n    <rect x=\"70\" y=\"348\" width=\"300\" height=\"86\" rx=\"10\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"220\" y=\"376\" fill=\"#7dd3fc\" font-size=\"12\" text-anchor=\"middle\">diffusion sur les pixels</text>\n    <text x=\"220\" y=\"400\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">tenseurs de la taille de l'image</text>\n    <text x=\"220\" y=\"420\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">autant d'appels réseau que d'étapes</text>\n    <rect x=\"430\" y=\"348\" width=\"300\" height=\"86\" rx=\"10\" fill=\"#0f172a\" stroke=\"#a78bfa\" stroke-width=\"2\"/>\n    <text x=\"580\" y=\"376\" fill=\"#ddd6fe\" font-size=\"12\" text-anchor=\"middle\">diffusion latente</text>\n    <text x=\"580\" y=\"400\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">autoencodeur puis diffusion réduite</text>\n    <text x=\"580\" y=\"420\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">mêmes étapes, tenseurs plus petits</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Le bruitage avant",
+            "explanation": "La chaîne ajoute du bruit gaussien en plusieurs étapes, avec des variances fixées à l'avance. À la fin, la donnée d'origine n'est plus discernable.",
+            "highlight": [
+              "chaine-avant"
+            ]
+          },
+          {
+            "title": "2. Le réseau de débruitage",
+            "explanation": "Le réseau prend un niveau de bruit et l'étape, puis prédit le bruit présent. L'entraînement compare cette prédiction au bruit réellement ajouté.",
+            "highlight": [
+              "reseau-bruit"
+            ]
+          },
+          {
+            "title": "3. Le processus inverse",
+            "explanation": "La génération répète le débruitage du bruit vers la donnée. Chaque étape est un appel au réseau, ce qui explique le coût d'échantillonnage.",
+            "highlight": [
+              "chaine-arriere"
+            ]
+          },
+          {
+            "title": "4. Latent ou pixels",
+            "explanation": "Faire la diffusion dans l'espace latent d'un autoencodeur ne réduit pas le nombre d'étapes, mais réduit la taille des tenseurs traités à chaque étape.",
+            "highlight": [
+              "latent-vs-pixels"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Calcul du bruitage avant par la forme fermée, sans simuler la chaîne. Le script affiche la part de signal conservée et la valeur bruitée de x0 à cinq niveaux de bruit, pour un programme linéaire de 10^-4 à 0,02 sur 1000 étapes.",
+        "code": "import numpy as np\n\nT = 1000\nbetas = np.linspace(1e-4, 0.02, T)\nalphas = 1.0 - betas\nalpha_bar = np.cumprod(alphas)\n\nx0 = np.array([0.5, -1.0])\nrng = np.random.default_rng(1)\n\nfor t in [0, 249, 499, 749, 999]:\n    eps = rng.normal(size=x0.shape)\n    xt = np.sqrt(alpha_bar[t]) * x0 + np.sqrt(1.0 - alpha_bar[t]) * eps\n    print(\n        f\"t = {t:4d}  sqrt(alpha_bar) = {np.sqrt(alpha_bar[t]):.4f}  \"\n        f\"sqrt(1 - alpha_bar) = {np.sqrt(1.0 - alpha_bar[t]):.4f}  \"\n        f\"x_t = [{xt[0]: .4f}, {xt[1]: .4f}]\"\n    )",
+        "output": "t =    0  sqrt(alpha_bar) = 0.9999  sqrt(1 - alpha_bar) = 0.0100  x_t = [ 0.5034, -0.9917]\nt =  249  sqrt(alpha_bar) = 0.7239  sqrt(1 - alpha_bar) = 0.6899  x_t = [ 0.5899, -1.6229]\nt =  499  sqrt(alpha_bar) = 0.2803  sqrt(1 - alpha_bar) = 0.9599  x_t = [ 1.0092,  0.1481]\nt =  749  sqrt(alpha_bar) = 0.0579  sqrt(1 - alpha_bar) = 0.9983  x_t = [-0.5071,  0.5223]\nt =  999  sqrt(alpha_bar) = 0.0064  sqrt(1 - alpha_bar) = 1.0000  x_t = [ 0.3677,  0.2878]",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Pourquoi le processus direct d'un modèle de diffusion n'est-il pas appris ?",
+          "options": [
+            "Parce qu'il ne contient que des multiplications de matrices",
+            "Parce qu'il ne s'exécute qu'à la fin de l'entraînement",
+            "Parce que ses variances sont fixées par le concepteur et qu'il sert uniquement à fabriquer des exemples bruités",
+            "Parce qu'il est remplacé par le discriminateur d'un GAN"
+          ],
+          "correctIndex": 2,
+          "explanation": "Le bruitage avant est un programme de variance choisi à l'avance. Seul le processus inverse, qui prédit le bruit, contient des paramètres entraînés."
+        },
+        {
+          "question": "Que prédit le réseau pendant l'entraînement de DDPM ?",
+          "options": [
+            "Le bruit ajouté à la donnée à l'étape considérée",
+            "La classe de la donnée",
+            "Le nombre d'étapes restantes avant la fin de la chaîne",
+            "La moyenne exacte du processus inverse"
+          ],
+          "correctIndex": 0,
+          "explanation": "Ho, Jain et Abbeel paramètrent le processus inverse par la prédiction du bruit, puis reconstruisent la moyenne à partir de cette prédiction."
+        },
+        {
+          "question": "Quel est l'apport principal de la diffusion latente de Rombach et al. (2021) ?",
+          "options": [
+            "Elle supprime l'échantillonnage itératif et génère en un seul passage",
+            "Elle remplace le programme de variance par un réseau entraîné",
+            "Elle garantit que le processus inverse est exact",
+            "Elle effectue la diffusion dans l'espace d'un autoencodeur, ce qui réduit la taille des tenseurs traités à chaque étape"
+          ],
+          "correctIndex": 3,
+          "explanation": "La diffusion latente conserve la chaîne itérative mais travaille dans un espace comprimé. Le coût par étape diminue, pas le nombre d'étapes."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Processus direct",
+          "definition": "Chaîne de Markov fixe qui ajoute du bruit gaussien à une donnée jusqu'à obtenir un bruit presque pur ; aussi appelée processus de bruitage."
+        },
+        {
+          "term": "Forme fermée",
+          "definition": "Expression q(x_t | x_0) qui donne directement la loi d'un niveau de bruit quelconque, sans simuler les étapes intermédiaires."
+        },
+        {
+          "term": "Prédiction du bruit",
+          "definition": "Paramétrage du processus inverse où le réseau estime le bruit présent dans x_t, au lieu de la donnée ou de la moyenne directement."
+        },
+        {
+          "term": "Diffusion latente",
+          "definition": "Diffusion entraînée dans l'espace latent d'un autoencodeur, pour réduire la taille des tenseurs manipulés à chaque étape."
+        },
+        {
+          "term": "Équation différentielle stochastique",
+          "definition": "Écriture en temps continu d'un processus aléatoire, utilisée dans des reformulations postérieures de la diffusion."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Pas de diffusion",
+          "prompt": "Pourquoi un modèle de diffusion doit-il être appelé plusieurs fois pour produire une image ?",
+          "solution": "Chaque appel estime le bruit ou la vitesse à un niveau donné. La génération part du bruit et retire progressivement le bruit. Moins de pas réduit le coût, mais peut augmenter l’erreur d’intégration."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Ho, Jain et Abbeel, Denoising Diffusion Probabilistic Models, 2020.",
+          "href": "https://arxiv.org/abs/2006.11239"
+        },
+        {
+          "label": "Rombach et al., High-Resolution Image Synthesis with Latent Diffusion Models, 2021.",
+          "href": "https://arxiv.org/abs/2112.10752"
+        }
+      ]
+    },
+    {
+      "id": "flow-matching",
+      "title": "Flow Matching et Rectified Flow",
+      "keyTakeaways": [
+        "Un modèle de Flow Matching apprend un champ de vecteurs dépendant du temps ; intégrer une équation différentielle le long de ce champ transporte une distribution de bruit vers la distribution des données.",
+        "L'objectif d'entraînement est une régression, pas un jeu antagoniste : le réseau apprend la vitesse qui déplace un point le long d'un chemin choisi entre bruit et donnée.",
+        "Lipman et al. (2022) démontrent que l'objectif conditionnel, facile à calculer, a le même gradient que l'objectif marginal, inaccessible : on peut entraîner un flux sans jamais simuler l'équation différentielle.",
+        "L'échantillonnage intègre l'équation par petits pas, par exemple avec la méthode d'Euler : moins de pas signifie une génération plus rapide mais une erreur de discrétisation plus grande.",
+        "Liu, Gong et Liu (2022) proposent de redresser les trajectoires par des passes successives, en réentraînant le champ sur des paires produites par simulation, afin de réduire le nombre de pas nécessaires."
+      ],
+      "theory": "### Un champ de vecteurs au lieu d'un bruitage\n\nLe Flow Matching prend un autre point de départ. On définit une équation différentielle ordinaire dans laquelle la vitesse d'un point $x_t$ dépend du point et de l'instant :\n\n$$\\frac{\\mathrm{d}x_t}{\\mathrm{d}t} = v_\\theta(x_t, t)$$\n\nLe réseau $v_\\theta$ ne produit pas une image : il produit une vitesse, c'est-à-dire un vecteur de même dimension que la donnée. Pour générer un échantillon, on part d'un bruit $x_0 \\sim \\mathcal{N}(0, I)$ et l'on intègre l'équation de $t = 0$ à $t = 1$. Le résultat $x_1$ suit une distribution qui dépend du champ ; l'entraînement cherche à la rendre égale à la distribution des données.\n\nCe type de modèle s'appelle un **flux normalisant continu** (continuous normalizing flow). Sa particularité est d'être déterministe à point de départ fixé : deux exécutions avec le même bruit initial donnent le même échantillon, sans aucun tirage supplémentaire. La transformation est aussi inversible en principe, puisque l'on peut intégrer l'équation à rebours. Le prix de ces propriétés est double : l'évaluation de vraisemblance exige d'estimer la divergence du champ le long de la trajectoire, et l'entraînement par maximum de vraisemblance oblige à simuler l'équation à chaque pas, ce qui est coûteux. Lipman et al. (2022) proposent précisément d'entraîner un tel flux sans simuler.\n\n### Entraîner sans simuler\n\nL'objectif idéal du Flow Matching s'écrit comme une régression du champ appris vers un champ cible $u_t$ qui transporte la distribution de bruit vers celle des données :\n\n$$\\mathcal{L}_{\\text{FM}} = \\mathbb{E}_{t \\sim \\mathcal{U}[0,1]}\\ \\mathbb{E}_{x_t \\sim p_t}\\big[\\, \\| v_\\theta(x_t, t) - u_t(x_t) \\|^2 \\,\\big]$$\n\nLe problème est que ni la distribution intermédiaire $p_t$, ni le champ cible $u_t$ ne sont connus explicitement. On ne sait donc pas calculer cet objectif tel quel.\n\nL'astuce consiste à conditionner sur un point de données. On tire une donnée $x_1$ du jeu d'entraînement, un bruit $x_0 \\sim \\mathcal{N}(0, I)$, et l'on construit un chemin, par exemple le segment droit :\n\n$$x_t = (1 - t)\\, x_0 + t\\, x_1, \\qquad u_t(x_t \\mid x_1) = x_1 - x_0$$\n\nLe long de ce segment, la vitesse est constante et vaut exactement $x_1 - x_0$. L'objectif conditionnel remplace le champ marginal inconnu par ce champ conditionnel, simple à échantillonner :\n\n$$\\mathcal{L}_{\\text{CFM}} = \\mathbb{E}_{t, x_1, x_0}\\big[\\, \\| v_\\theta\\big((1 - t)x_0 + t x_1, t\\big) - (x_1 - x_0) \\|^2 \\,\\big]$$\n\nLipman et al. démontrent que les gradients de cet objectif conditionnel et de l'objectif marginal coïncident. Minimiser le premier revient donc à entraîner le second, sans connaître ni $p_t$ ni $u_t$, et sans jamais intégrer l'équation différentielle pendant l'entraînement. Ce résultat est le cœur de l'article : il transforme un problème de simulation coûteuse en une régression ordinaire.\n\n> **Repère.** L'objectif est une espérance quadratique, comme la perte de prédiction du bruit d'une diffusion. La différence tient à ce que l'on fait prédire : une vitesse le long d'un chemin choisi, plutôt qu'un bruit ajouté par un processus fixé.\n\n### Échantillonner par intégration\n\nUne fois le champ entraîné, la génération revient à résoudre numériquement une équation différentielle ordinaire. La méthode la plus simple est celle d'Euler : on découpe l'intervalle $[0, 1]$ en $N$ pas de taille $h = 1/N$, puis on répète\n\n$$x_{k+1} = x_k + h\\, v_\\theta(x_k, t_k)$$\n\nLa qualité de l'échantillon dépend alors de deux erreurs distinctes. La première est l'approximation du champ, héritée de l'entraînement. La seconde est l'erreur de discrétisation, qui diminue quand le nombre de pas augmente. Un petit nombre de pas rend la génération rapide mais introduit un biais systématique dans la trajectoire. C'est le compromis central de cette famille : contrairement à un générateur antagoniste qui produit un échantillon en un passage, un flux exige une intégration, dont le coût est proportionnel au nombre de pas.\n\nCe cadre éclaire le lien avec la diffusion. Le processus de débruitage déterministe qui sous-tend une diffusion peut se lire comme un flux normalisant, avec un chemin gaussien particulier entre bruit et données. La reformulation déterministe de la diffusion, l'ODE de probabilité, partage avec le Flow Matching l'intégration d'une équation différentielle ordinaire ; l'échantillonnage DDPM standard reste une chaîne stochastique. Les deux familles diffèrent surtout par la façon dont le champ est paramétré et entraîné.\n\n### Rectified Flow\n\nLiu, Gong et Liu (2022) partent de la même interpolation droite entre bruit et donnée, mais étudient une question supplémentaire : que se passe-t-il si l'on redresse les trajectoires ? Leur procédure, appelée **redressement** ou reflow, se déroule en passes. Une première passe entraîne le champ sur des paires indépendantes de bruit et de données. On simule ensuite l'équation pour chaque bruit du jeu, ce qui produit une donnée générée et une paire de départ et d'arrivée qui respecte la trajectoire réellement apprise. Une nouvelle passe entraîne le champ sur ces paires, et l'on recommence.\n\nLes auteurs défendent l'idée que ce redressement rend les trajectoires plus droites, ce qui réduit l'erreur de discrétisation à nombre de pas fixé. Un cas limite illustre leur argument : si le transport appris est déjà exactement droit, une seule étape d'Euler suffit en principe à suivre la trajectoire. Tout l'intérêt de la méthode tient à l'écart entre ce cas limite et le comportement d'un champ entraîné en pratique, où les chemins restent courbes. Le redressement a un coût : chaque passe supplémentaire demande une simulation complète du jeu de bruits. C'est un exemple de compromis supplémentaire entre qualité, vitesse d'échantillonnage et coût d'entraînement.",
+      "analogy": {
+        "title": "Les feuilles dans un courant",
+        "text": "Lâchez des feuilles à l'amont d'une rivière : chacune suit le courant et finit à un endroit précis de l'aval. Le champ de vitesses de l'eau joue le rôle du réseau ; la position initiale de la feuille joue le rôle du bruit, et la berge d'arrivée celle des données. Connaître le courant suffit à prédire où chaque feuille aboutit.\n\n**Limite de l'analogie :** un courant de rivière est un objet physique, mesurable et stationnaire. Le champ appris vit dans un espace de grande dimension, il dépend du temps, et rien ne garantit qu'il soit aussi régulier qu'un courant réel."
+      },
+      "example": {
+        "title": "La vitesse le long d'un chemin droit",
+        "text": "Prenons $x_0 = (0, 0)$ et $x_1 = (2, 1)$. Le chemin vaut $x_t = (2t, t)$, et la vitesse cible $x_1 - x_0 = (2, 1)$ est la même à chaque instant. Au milieu du chemin, pour $t = 0{,}5$, le point est $(1, 0{,}5)$.\n\n**Ce que cet exemple ne dit pas :** un cas jouet à deux dimensions ne dit rien de la difficulté du problème réel. En grande dimension, le champ optimal n'est pas constant le long des trajectoires lorsque plusieurs points de données se croisent."
+      },
+      "diagram": {
+        "title": "Champ de vecteurs, intégration et redressement",
+        "description": "Schéma illustratif : un champ de vecteurs déplace des points du bruit vers les données, la génération intègre ce champ pas à pas, et le redressement redresse les trajectoires apprises. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 460\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Flow Matching : champ de vecteurs, chemins droits, intégration d'Euler et redressement des trajectoires\">\n  <defs>\n    <marker id=\"fm-fleche\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"800\" height=\"460\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Un champ de vitesses transporte le bruit vers les données</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"champ-vecteurs\">\n    <text x=\"200\" y=\"92\" fill=\"#7dd3fc\" font-size=\"12\" text-anchor=\"middle\">champ de vecteurs v(x, t)</text>\n    <g stroke=\"#38bdf8\" stroke-width=\"1.6\">\n      <line x1=\"90\" y1=\"130\" x2=\"130\" y2=\"130\" marker-end=\"url(#fm-fleche)\"/>\n      <line x1=\"180\" y1=\"130\" x2=\"220\" y2=\"130\" marker-end=\"url(#fm-fleche)\"/>\n      <line x1=\"90\" y1=\"180\" x2=\"130\" y2=\"180\" marker-end=\"url(#fm-fleche)\"/>\n      <line x1=\"180\" y1=\"180\" x2=\"220\" y2=\"180\" marker-end=\"url(#fm-fleche)\"/>\n      <line x1=\"90\" y1=\"230\" x2=\"130\" y2=\"230\" marker-end=\"url(#fm-fleche)\"/>\n      <line x1=\"180\" y1=\"230\" x2=\"220\" y2=\"230\" marker-end=\"url(#fm-fleche)\"/>\n    </g>\n    <text x=\"155\" y=\"272\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">vitesse apprise par régression</text>\n  </g>\n\n  <g id=\"chemins-droits\">\n    <circle cx=\"330\" cy=\"140\" r=\"5\" fill=\"#334155\"/>\n    <circle cx=\"450\" cy=\"220\" r=\"6\" fill=\"#34d399\"/>\n    <line x1=\"330\" y1=\"140\" x2=\"450\" y2=\"220\" stroke=\"#34d399\" stroke-width=\"2.2\"/>\n    <circle cx=\"370\" cy=\"230\" r=\"5\" fill=\"#334155\"/>\n    <circle cx=\"490\" cy=\"310\" r=\"6\" fill=\"#34d399\"/>\n    <line x1=\"370\" y1=\"230\" x2=\"490\" y2=\"310\" stroke=\"#34d399\" stroke-width=\"2.2\"/>\n    <text x=\"420\" y=\"120\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">chemin conditionnel droit</text>\n    <text x=\"430\" y=\"342\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">bruit à gauche, donnée à droite</text>\n  </g>\n\n  <g id=\"integration-ode\">\n    <path d=\"M330 140 Q400 150 450 220\" fill=\"none\" stroke=\"#f472b6\" stroke-width=\"2.2\"/>\n    <g fill=\"#f9a8d4\">\n      <circle cx=\"340\" cy=\"143\" r=\"4\"/>\n      <circle cx=\"370\" cy=\"152\" r=\"4\"/>\n      <circle cx=\"402\" cy=\"168\" r=\"4\"/>\n      <circle cx=\"426\" cy=\"192\" r=\"4\"/>\n    </g>\n    <text x=\"398\" y=\"148\" fill=\"#f9a8d4\" font-size=\"11\">pas d'Euler</text>\n  </g>\n\n  <g id=\"reflow\">\n    <rect x=\"80\" y=\"360\" width=\"640\" height=\"76\" rx=\"10\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <text x=\"400\" y=\"388\" fill=\"#fcd34d\" font-size=\"12\" text-anchor=\"middle\">Redressement : simuler, réapparier bruit et donnée, réentraîner le champ</text>\n    <text x=\"400\" y=\"412\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">des trajectoires plus droites réduisent l'erreur d'intégration à nombre de pas fixé</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Le champ de vecteurs",
+            "explanation": "Le réseau produit une vitesse pour chaque position et chaque instant. Intégrer ce champ déplace un point le long d'une trajectoire.",
+            "highlight": [
+              "champ-vecteurs"
+            ]
+          },
+          {
+            "title": "2. Les chemins conditionnels",
+            "explanation": "Pendant l'entraînement, on choisit un chemin simple entre un bruit et une donnée, souvent le segment droit. La vitesse cible le long de ce chemin est connue.",
+            "highlight": [
+              "chemins-droits"
+            ]
+          },
+          {
+            "title": "3. L'intégration",
+            "explanation": "La génération avance par petits pas de la méthode d'Euler. Le nombre de pas fixe le compromis entre vitesse et erreur de discrétisation.",
+            "highlight": [
+              "integration-ode"
+            ]
+          },
+          {
+            "title": "4. Le redressement",
+            "explanation": "Une passe de redressement simule le champ, réapparie chaque bruit avec la donnée obtenue, puis réentraîne. Les trajectoires deviennent plus droites, au prix d'une simulation complète.",
+            "highlight": [
+              "reflow"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Calcul de l'objectif conditionnel du Flow Matching sur un mini-lot : interpolation droite entre bruit et données, vitesse cible, puis perte de deux champs candidats. Les valeurs servent à vérifier l'arithmétique, pas à mesurer un modèle.",
+        "code": "import numpy as np\n\nrng = np.random.default_rng(0)\nn = 4\nx1 = rng.normal(loc=2.0, scale=0.5, size=(n, 2))  # echantillons de donnees\nx0 = rng.normal(size=(n, 2))                       # bruit initial\nt = rng.uniform(0.0, 1.0, size=(n, 1))\nxt = (1.0 - t) * x0 + t * x1\nv_cible = x1 - x0\n\n# Perte pour deux champs candidats : le champ nul et la vitesse moyenne.\nchamp_nul = np.zeros_like(xt)\nchamp_moyen = np.full_like(xt, (x1 - x0).mean())\nprint(\"formes : x_t\", xt.shape, \"v cible\", v_cible.shape)\nprint(\"vitesses cibles :\\n\", np.round(v_cible, 3))\nprint(\"perte du champ nul :\", round(float(np.mean((champ_nul - v_cible) ** 2)), 3))\nprint(\"perte du champ moyen :\", round(float(np.mean((champ_moyen - v_cible) ** 2)), 3))",
+        "output": "formes : x_t (4, 2) v cible (4, 2)\nvitesses cibles :\n [[2.767 3.199]\n [2.943 2.011]\n [4.057 2.4  ]\n [3.898 3.206]]\nperte du champ nul : 9.786\nperte du champ moyen : 0.422",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Que produit le réseau d'un modèle de Flow Matching ?",
+          "options": [
+            "Une vitesse, intégrée ensuite pour déplacer un point du bruit vers les données",
+            "Une probabilité que l'échantillon soit réel",
+            "Le bruit ajouté à une donnée à une étape donnée",
+            "La moyenne et la variance d'une loi latente"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le réseau paramètre un champ de vecteurs v(x, t). La génération résout une équation différentielle ordinaire le long de ce champ."
+        },
+        {
+          "question": "Pourquoi l'objectif marginal du Flow Matching n'est-il pas calculable directement ?",
+          "options": [
+            "Parce qu'il ne dépend pas des paramètres du réseau",
+            "Parce qu'il change à chaque itération de l'optimiseur",
+            "Parce qu'il fait intervenir la distribution intermédiaire p_t et le champ cible, tous deux inconnus explicitement",
+            "Parce qu'il n'est défini que pour une seule dimension"
+          ],
+          "correctIndex": 2,
+          "explanation": "L'objectif marginal dépend de p_t et du champ qui transporte cette distribution. Lipman et al. le remplacent par un objectif conditionnel dont le gradient est identique."
+        },
+        {
+          "question": "Que fait le redressement du Rectified Flow ?",
+          "options": [
+            "Il supprime l'équation différentielle au profit d'un simple bruitage",
+            "Il simule le champ, réapparie chaque bruit avec la donnée obtenue, puis réentraîne le champ sur ces nouvelles paires",
+            "Il remplace le réseau par un discriminateur",
+            "Il garantit un échantillonnage en un pas dans tous les cas"
+          ],
+          "correctIndex": 1,
+          "explanation": "Chaque passe de redressement produit de nouvelles paires issues de la simulation, puis un nouvel entraînement. Les auteurs défendent que les trajectoires deviennent plus droites sans affirmer que le cas limite est toujours atteint."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Champ de vecteurs",
+          "definition": "Fonction qui associe une vitesse à chaque position et à chaque instant ; son intégration définit des trajectoires."
+        },
+        {
+          "term": "Flux normalisant",
+          "definition": "Transformation inversible, définie par une équation différentielle ordinaire, qui transporte une distribution simple vers une distribution complexe."
+        },
+        {
+          "term": "Chemin conditionnel",
+          "definition": "Trajectoire intermédiaire construite entre un bruit et un point de données, par exemple le segment droit x_t = (1 - t) x_0 + t x_1."
+        },
+        {
+          "term": "Intégration d'Euler",
+          "definition": "Méthode numérique qui avance le long d'un champ par pas de taille fixe ; sa précision augmente avec le nombre de pas."
+        },
+        {
+          "term": "Redressement",
+          "definition": "Procédure itérative qui réentraîne un champ de vecteurs sur des paires obtenues par simulation, pour rendre les trajectoires plus proches de segments droits."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Cible de vitesse",
+          "prompt": "Dans un flux conditionnel, que prédit le réseau à partir de l’état, du temps et de la condition ?",
+          "solution": "Il prédit la vitesse qui déplace l’échantillon le long du chemin choisi. La cible dépend du couplage et du temps. Le réseau ne produit pas directement l’image."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Lipman et al., Flow Matching for Generative Modeling, 2022.",
+          "href": "https://arxiv.org/abs/2210.02747"
+        }
+      ]
+    },
+    {
+      "id": "synthese",
+      "title": "Comparaison et avenir multimodal",
+      "keyTakeaways": [
+        "Les quatre familles ne s'opposent pas sur une échelle unique : elles diffèrent par ce qu'elles optimisent, par la disponibilité d'une vraisemblance et par le coût de l'échantillonnage.",
+        "Un VAE fournit toujours une borne inférieure de vraisemblance, un GAN n'en fournit aucune, une diffusion et un Flow Matching permettent en principe d'évaluer une vraisemblance au prix d'une intégration.",
+        "Le choix d'une famille dépend de la contrainte dominante du projet : évaluer une densité, générer en un passage, conditionner une génération ou tenir un budget de calcul.",
+        "Les systèmes réels combinent souvent les familles : la diffusion latente associe un autoencodeur, un processus de diffusion et une perte adversariale.",
+        "Comparer deux modèles sur un chiffre unique est trompeur : les mesures dépendent du jeu de données, de la résolution et du procédé d'échantillonnage."
+      ],
+      "theory": "### Une matrice plutôt qu'un classement\n\nLes cinq modules précédents ont décrit quatre familles avec leurs objectifs propres. Il reste à les comparer sur des critères qui ne dépendent pas d'un classement global. Le tableau suivant résume ce qu'optimise chaque famille et ce qu'elle sait fournir.\n\n| Famille | Objectif d'entraînement | Vraisemblance | Échantillonnage |\n| --- | --- | --- | --- |\n| VAE | borne inférieure (reconstruction et KL) | borne inférieure évaluable | un passage réseau |\n| GAN | jeu antagoniste entre deux réseaux | aucune densité explicite | un passage réseau |\n| Diffusion | régression du bruit ajouté | dérivée d'une borne inférieure | plusieurs centaines d'appels |\n| Flow Matching | régression de la vitesse | possible par intégration, coûteuse | dizaines d'appels selon le pas |\n\nLa colonne de vraisemblance mérite une lecture prudente. Le VAE optimise une borne inférieure de $\\log p(x)$, qui reste évaluable pour une donnée donnée ; cette valeur sert à comparer des modèles ou à détecter une donnée aberrante. Le GAN ne définit aucune densité pour le générateur, donc aucune vraisemblance au sens habituel, ce qui n'empêche ni la génération ni la comparaison par d'autres moyens. La diffusion de Ho, Jain et Abbeel part d'une borne inférieure, puis en rééquilibre les termes sous une forme simplifiée. Le Flow Matching, enfin, permet en principe d'évaluer une vraisemblance exacte par la formule de changement de variables le long de la trajectoire, mais le coût d'estimation de la divergence et de l'intégration rend l'opération peu attrayante en pratique.\n\n> **Repère.** Aucune famille n'est dominante sur tous les critères. La question utile n'est pas « quelle est la meilleure ? », mais « quelle contrainte est prioritaire dans ce projet ? ».\n\n### Choisir selon la contrainte dominante\n\nQuatre contraintes reviennent souvent dans les projets réels.\n\nSi la contrainte est d'obtenir un échantillon en un seul passage réseau, un GAN est le candidat naturel, avec le risque d'instabilité décrit au module 3. Un modèle de flux entraîné sur des trajectoires proches de segments droits réduit le nombre de pas d'intégration, mais ne garantit pas qu'un seul pas suffise. Un VAE produit aussi un échantillon en un passage, avec un profil de qualité différent.\n\nSi la contrainte est la stabilité de l'entraînement, le VAE et le Flow Matching offrent les objectifs les plus réguliers, car ce sont des régressions ou des espérances évaluées par descente de gradient, sans adversaire à équilibrer. La diffusion est également stable à entraîner, mais coûteuse à échantillonner.\n\nSi la contrainte est le conditionnement, c'est-à-dire générer selon une légende, une classe ou une esquisse, les quatre familles savent le faire, par des mécanismes différents. Rombach et al. (2021) montrent un conditionnement par attention croisée dans une diffusion latente, où les informations de condition sont injectées dans le réseau de débruitage.\n\nSi la contrainte est de comparer des probabilités, seule une famille qui évalue une densité ou une borne inférieure convient, ce qui écarte le GAN. Ce critère intervient par exemple en détection d'anomalies.\n\nCes critères ne se combinent pas librement. Réduire le nombre de pas d'une diffusion ou d'un flux augmente l'erreur d'approximation, comme le rappellent les compromis du module 1. La comparaison honnête consiste donc à fixer le budget de calcul et à regarder ce que chaque famille produit sous cette contrainte, plutôt qu'à comparer des configurations inégales.\n\n### Les architectures hybrides\n\nLa diffusion latente de Rombach et al. (2021) est l'exemple le plus clair de combinaison. Un autoencodeur comprime l'image, un modèle de diffusion génère dans l'espace comprimé, et l'autoencodeur est entraîné avec une perte de reconstruction, une régularisation du latent et une perte adversariale. Trois familles cohabitent donc dans un même système : l'autoencodeur emprunte aux VAE, la génération au débruitage, et la finition au jeu antagoniste.\n\nD'autres combinaisons sont documentées dans la littérature du domaine. Un discriminateur peut servir de juge perceptif pour affiner un modèle d'une autre famille. Une composante de flux peut remplacer le processus de diffusion dans une architecture existante, puisque la lecture déterministe de la diffusion passe elle aussi par une intégration. Ces assemblages expliquent pourquoi la comparaison par familles reste une grille de lecture : à l'intérieur d'un système, les frontières sont poreuses.\n\n### Évaluer sans se raconter d'histoires\n\nJuger un modèle génératif est délicat pour une raison simple : il n'existe aucune mesure unique qui résume la qualité, la diversité et l'adéquation à la demande. Les mesures automatiques, souvent des distances entre distributions d'activations d'un réseau pré-entraîné, sont sensibles au réseau choisi, à la résolution et au nombre d'échantillons. Un chiffre obtenu dans un article ne se transpose pas tel quel à un autre jeu de données.\n\nDeux précautions en découlent. La première est de rapporter toute comparaison chiffrée à son protocole complet : jeu d'évaluation, résolution, procédé d'échantillonnage, nombre d'échantillons. La seconde est de compléter les mesures automatiques par une inspection humaine des échantillons, en particulier pour repérer l'effondrement des modes, qu'une moyenne sur des milliers d'images peut masquer. C'est la raison pour laquelle ce cours évite les chiffres non sourcés et préfère les ordres de grandeur et les énoncés qualitatifs.\n\n### Vers le multimodal\n\nLes systèmes contemporains de génération d'images, de vidéo et d'audio s'appuient largement sur la diffusion et le Flow Matching, le plus souvent dans un espace latent, et sont conditionnés par des représentations de texte, d'image ou de son. Ce mouvement prolonge la logique décrite dans ce cours : un encodeur produit une représentation, un modèle génératif la transforme en échantillon, et le conditionnement oriente la transformation vers la demande. Les pages liées en bas de page détaillent l'usage créatif de ces systèmes et la place des modèles génératifs parmi les autres familles d'IA. Comprendre les objectifs d'entraînement et les compromis qu'ils imposent reste la meilleure façon d'interpréter leurs résultats, et de garder un œil critique sur les chiffres avancés.",
+      "example": {
+        "title": "Choisir pour une contrainte fixée",
+        "text": "Scénario fictif : une petite structure veut produire des variantes d'illustration sur du matériel modeste, avec un entraînement qu'elle doit pouvoir relancer seule. La contrainte dominante est la stabilité d'entraînement et un coût d'échantillonnage contenu. Une diffusion est stable à entraîner mais coûteuse à échantillonner ; un GAN échantillonne en un passage mais s'entraîne de façon fragile ; un VAE s'entraîne de façon régulière et échantillonne en un passage, avec un profil de qualité différent. Le Flow Matching combine un entraînement régulier et une intégration dont le coût dépend du nombre de pas choisi, ce qui en fait une piste à documenter dans un test mesuré.\n\n**Ce que cet exemple ne dit pas :** il ne désigne pas un gagnant. Il montre qu'une décision se prend en hiérarchisant les contraintes, puis en mesurant, pas en suivant un classement général."
+      },
+      "diagram": {
+        "title": "Matrice des familles et architecture hybride",
+        "description": "Schéma illustratif : une matrice croise quatre familles avec la vraisemblance et le coût d'échantillonnage, puis un schéma montre un autoencodeur, une diffusion latente et un conditionnement par texte. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 470\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Comparaison des familles génératives : vraisemblance, coût d'échantillonnage, et architecture hybride avec autoencodeur, diffusion latente et conditionnement\">\n  <defs>\n    <marker id=\"syn-fleche\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#94a3b8\"/>\n    </marker>\n  </defs>\n  <rect width=\"800\" height=\"470\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Comparer puis assembler</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"matrice-familles\">\n    <line x1=\"70\" y1=\"90\" x2=\"470\" y2=\"90\" stroke=\"#475569\" stroke-width=\"1.5\"/>\n    <line x1=\"70\" y1=\"90\" x2=\"70\" y2=\"330\" stroke=\"#475569\" stroke-width=\"1.5\"/>\n    <text x=\"250\" y=\"112\" fill=\"#e2e8f0\" font-size=\"11\" text-anchor=\"middle\">vraisemblance</text>\n    <text x=\"390\" y=\"112\" fill=\"#e2e8f0\" font-size=\"11\" text-anchor=\"middle\">échantillonnage</text>\n    <text x=\"80\" y=\"146\" fill=\"#7dd3fc\" font-size=\"11\">VAE</text>\n    <text x=\"250\" y=\"146\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">borne évaluable</text>\n    <text x=\"390\" y=\"146\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">un passage</text>\n    <text x=\"80\" y=\"188\" fill=\"#7dd3fc\" font-size=\"11\">GAN</text>\n    <text x=\"250\" y=\"188\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">aucune densité</text>\n    <text x=\"390\" y=\"188\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">un passage</text>\n    <text x=\"80\" y=\"230\" fill=\"#7dd3fc\" font-size=\"11\">diffusion</text>\n    <text x=\"250\" y=\"230\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">borne, variante</text>\n    <text x=\"390\" y=\"230\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">plusieurs centaines</text>\n    <text x=\"80\" y=\"272\" fill=\"#7dd3fc\" font-size=\"11\">Flow Matching</text>\n    <text x=\"250\" y=\"272\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">intégration coûteuse</text>\n    <text x=\"390\" y=\"272\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">selon le nombre de pas</text>\n    <line x1=\"70\" y1=\"146\" x2=\"470\" y2=\"146\" stroke=\"#1e293b\" stroke-width=\"1\"/>\n    <line x1=\"190\" y1=\"90\" x2=\"190\" y2=\"330\" stroke=\"#1e293b\" stroke-width=\"1\"/>\n    <line x1=\"310\" y1=\"90\" x2=\"310\" y2=\"330\" stroke=\"#1e293b\" stroke-width=\"1\"/>\n    <line x1=\"70\" y1=\"188\" x2=\"470\" y2=\"188\" stroke=\"#1e293b\" stroke-width=\"1\"/>\n    <line x1=\"70\" y1=\"230\" x2=\"470\" y2=\"230\" stroke=\"#1e293b\" stroke-width=\"1\"/>\n    <line x1=\"70\" y1=\"272\" x2=\"470\" y2=\"272\" stroke=\"#1e293b\" stroke-width=\"1\"/>\n    <line x1=\"70\" y1=\"330\" x2=\"470\" y2=\"330\" stroke=\"#475569\" stroke-width=\"1.5\"/>\n  </g>\n\n  <g id=\"hybride-latent\">\n    <rect x=\"520\" y=\"120\" width=\"90\" height=\"70\" rx=\"10\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"565\" y=\"150\" fill=\"#e2e8f0\" font-size=\"11\" text-anchor=\"middle\">encodeur</text>\n    <text x=\"565\" y=\"170\" fill=\"#94a3b8\" font-size=\"10\" text-anchor=\"middle\">image vers latent</text>\n    <line x1=\"610\" y1=\"155\" x2=\"648\" y2=\"155\" stroke=\"#64748b\" stroke-width=\"1.8\" marker-end=\"url(#syn-fleche)\"/>\n    <rect x=\"656\" y=\"120\" width=\"94\" height=\"70\" rx=\"10\" fill=\"#0f172a\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"703\" y=\"146\" fill=\"#e2e8f0\" font-size=\"11\" text-anchor=\"middle\">diffusion</text>\n    <text x=\"703\" y=\"166\" fill=\"#94a3b8\" font-size=\"10\" text-anchor=\"middle\">dans le latent</text>\n    <text x=\"660\" y=\"104\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">génération</text>\n  </g>\n\n  <g id=\"conditionnement\">\n    <path d=\"M570 240 L570 300\" fill=\"none\" stroke=\"#64748b\" stroke-width=\"1.8\" marker-end=\"url(#syn-fleche)\"/>\n    <rect x=\"520\" y=\"308\" width=\"230\" height=\"74\" rx=\"10\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <text x=\"635\" y=\"336\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">conditionnement par texte</text>\n    <text x=\"635\" y=\"358\" fill=\"#94a3b8\" font-size=\"10\" text-anchor=\"middle\">attention croisée vers le réseau</text>\n  </g>\n\n  <text x=\"400\" y=\"440\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">Les systèmes réels assemblent plusieurs familles plutôt que d'en choisir une seule.</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Comparer sur des critères",
+            "explanation": "La matrice croise les familles avec deux critères objectifs : la vraisemblance disponible et le coût d'échantillonnage. Aucune colonne ne désigne un gagnant.",
+            "highlight": [
+              "matrice-familles"
+            ]
+          },
+          {
+            "title": "2. L'autoencodeur et la diffusion",
+            "explanation": "Dans la diffusion latente, un encodeur comprime l'image et la diffusion génère dans cet espace réduit. Deux familles travaillent ensemble.",
+            "highlight": [
+              "hybride-latent"
+            ]
+          },
+          {
+            "title": "3. Le conditionnement",
+            "explanation": "Le texte de la demande est encodé puis injecté dans le réseau de débruitage, ce qui oriente la génération sans changer sa mécanique.",
+            "highlight": [
+              "conditionnement"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Quelle affirmation décrit correctement la vraisemblance selon les familles ?",
+          "options": [
+            "Toutes les familles évaluent une vraisemblance exacte",
+            "Le GAN ne définit aucune densité explicite pour son générateur, tandis que le VAE évalue une borne inférieure",
+            "Le VAE est la seule famille sans vraisemblance",
+            "La diffusion interdit toute évaluation de vraisemblance"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le GAN n'écrit pas de densité pour le générateur. Le VAE optimise et évalue une borne inférieure de la log-vraisemblance."
+        },
+        {
+          "question": "Pourquoi un chiffre unique, comme une distance entre distributions, ne suffit-il pas à juger un modèle génératif ?",
+          "options": [
+            "Parce que ces mesures ne s'exécutent que sur des images en couleurs",
+            "Parce qu'elles remplacent toujours l'inspection humaine",
+            "Parce que leur valeur est la même pour tous les modèles",
+            "Parce qu'elles dépendent du réseau pré-entraîné, de la résolution et du protocole, et masquent par exemple l'effondrement des modes"
+          ],
+          "correctIndex": 3,
+          "explanation": "Une mesure automatique résume certains écarts mais reste liée à son protocole. Un générateur qui ignore une partie de la distribution peut obtenir une valeur trompeuse."
+        },
+        {
+          "question": "Quelle combinaison décrit la diffusion latente de Rombach et al. (2021) ?",
+          "options": [
+            "Un discriminateur qui remplace complètement le décodeur",
+            "Une diffusion sur les pixels sans compression",
+            "Un autoencodeur, une diffusion dans l'espace latent et une perte adversariale pour l'autoencodeur",
+            "Un champ de vecteurs intégré en un seul pas"
+          ],
+          "correctIndex": 2,
+          "explanation": "Le système compresse l'image avec un autoencodeur, fait la diffusion dans cet espace, et entraîne l'autoencodeur avec une perte de reconstruction, une régularisation et une perte adversariale."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Architecture hybride",
+          "definition": "Système qui combine plusieurs familles de modèles génératifs, par exemple un autoencodeur et une diffusion travaillant dans son espace latent."
+        },
+        {
+          "term": "Attention croisée",
+          "definition": "Mécanisme qui injecte dans un réseau des informations extérieures, comme une représentation de texte, pour conditionner sa sortie."
+        },
+        {
+          "term": "Détection d'anomalies",
+          "definition": "Tâche qui consiste à repérer une donnée improbable selon un modèle ; elle demande une famille capable d'évaluer une densité ou une borne."
+        },
+        {
+          "term": "Compromis qualité-diversité",
+          "definition": "Tension entre produire des échantillons convaincants et couvrir l'ensemble de la distribution des données."
+        },
+        {
+          "term": "Protocole d'évaluation",
+          "definition": "Ensemble des choix qui rendent une comparaison reproductible : jeu de données, résolution, procédé d'échantillonnage et nombre d'échantillons."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Choisir une famille",
+          "prompt": "Une équipe a 4 Go de VRAM et veut générer en quatre pas. Quel compromis doit-elle mesurer ?",
+          "solution": "Elle doit mesurer la qualité à quatre pas, la mémoire du modèle, la latence et la diversité. Une famille rapide peut être moins fidèle ; une famille plus fidèle peut ne pas tenir en mémoire. Le choix se fait sur ces mesures."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Ho, Jain et Abbeel, Denoising Diffusion Probabilistic Models, 2020.",
+          "href": "https://arxiv.org/abs/2006.11239"
+        },
+        {
+          "label": "Lipman et al., Flow Matching for Generative Modeling, 2022.",
+          "href": "https://arxiv.org/abs/2210.02747"
+        }
+      ]
+    },
+    {
+      "id": "choisir-evaluer",
+      "title": "Choisir et évaluer un générateur",
+      "keyTakeaways": [
+        "Un générateur se choisit sur la qualité, la diversité, le coût d’échantillonnage et le conditionnement, pas sur une seule image réussie.",
+        "Les métriques automatiques sont sensibles au réseau utilisé, à la résolution et au nombre d’échantillons ; elles ne remplacent pas l’inspection humaine.",
+        "La latence d’un modèle de diffusion ou de flux dépend du nombre d’appels au réseau et du solveur.",
+        "Un modèle conditionné doit être évalué sur les conditions réelles, y compris les cas rares et ambigus.",
+        "La production ajoute le coût, la sécurité, les droits et la surveillance de la dérive."
+      ],
+      "theory": "### Ce que l'on compare vraiment\n\nDeux générateurs peuvent produire des images plaisantes et échouer sur des critères différents. L'un peut être fidèle mais peu divers, l'autre divers mais moins fidèle. Un troisième peut être excellent sur des visages et mauvais sur des textures. Une comparaison utile fixe la résolution, le nombre d'échantillons, le conditionnement, le budget de calcul et le protocole d'évaluation.\n\nLa qualité perçue n'est pas une mesure unique. Les métriques automatiques comparent des distributions de caractéristiques extraites par un réseau pré-entraîné. Elles dépendent de ce réseau, de la résolution et du nombre d'images. Un chiffre obtenu dans un article ne se transpose pas à un autre jeu de données. L'inspection humaine reste nécessaire pour repérer les artefacts, les modes manquants et les biais.\n\n### Qualité, diversité, fidélité\n\nLa fidélité mesure si les échantillons ressemblent aux données. La diversité mesure si le modèle couvre les différentes apparences. Un générateur qui reproduit toujours la même image moyenne peut avoir une bonne fidélité apparente et une diversité nulle. Une inspection par groupes, par classe ou par condition révèle ce que la moyenne cache.\n\nUn modèle conditionné doit être évalué condition par condition. Une légende rare, une orientation, une couleur ou un style peuvent être mal suivis. Il faut vérifier les cas difficiles et les combinaisons inédites. Une image réussie ne prouve pas que le modèle sait suivre une consigne.\n\n### Entraînement et stabilité\n\nLes GAN opposent un générateur et un discriminateur. L'équilibre est délicat : le discriminateur peut devenir trop fort, le générateur peut s'effondrer sur quelques modes, ou l'entraînement peut osciller. Les VAE optimisent une borne inférieure avec une reconstruction et une régularisation du latent. La diffusion apprend à retirer du bruit sur plusieurs niveaux. Le Flow Matching apprend un champ de vitesses.\n\nCes objectifs n'ont pas le même coût. Un GAN peut produire en un passage, mais demande un entraînement instable. Une diffusion demande de nombreux pas à l'échantillonnage. Un flux peut réduire le nombre de pas si les trajectoires sont proches de droites, sans garantie. Le choix dépend du budget d'entraînement et d'inférence.\n\n### Échantillonnage et latence\n\nLa latence d'un générateur ne se résume pas au nombre de paramètres. Un modèle de diffusion appelle le réseau plusieurs fois. Un modèle de flux appelle un solveur. Un GAN appelle le générateur une fois. Le coût par image dépend du nombre d'appels, de la résolution et du matériel.\n\nRéduire le nombre de pas accélère l'inférence, mais peut dégrader la qualité. Les solveurs d'ordre élevé, la distillation et les trajectoires rectifiées cherchent ce compromis. Il faut mesurer la qualité à budget fixé, pas comparer un modèle à 100 pas avec un modèle à 4 pas.\n\n### Conditionnement et contrôle\n\nUn générateur conditionné reçoit une légende, une classe, une image de référence ou un masque. Le conditionnement peut être injecté par concaténation, par attention croisée ou par un encodeur séparé. La qualité du texte, la résolution et la longueur de la condition changent le résultat.\n\nLes systèmes de contrôle ajoutent des contraintes : conserver une pose, une identité ou une composition. Ces contraintes peuvent améliorer l'usage et réduire la diversité. Il faut vérifier ce que le modèle sacrifie pour les respecter. Une image conforme à la contrainte peut être moins naturelle.\n\n### Production et droits\n\nUn générateur en production doit être surveillé : distribution des prompts, taux de rejet, latence, coût et signaux d'usage. Les données d'entraînement et les licences des modèles comptent. Une image générée peut ressembler à une œuvre protégée ou à une personne réelle. Les conditions d'utilisation et les obligations de transparence doivent être vérifiées.\n\nLe déploiement doit prévoir un filtre, une procédure de signalement et une trace des paramètres. Un modèle mis à jour peut changer le style ou les biais. Il faut versionner le modèle, les prompts et les résultats de test.\n\n### Un protocole minimal\n\nUn protocole minimal fixe le jeu de test, le nombre d’échantillons, la résolution, les conditions et le budget de pas. Il compare les modèles sur les mêmes prompts et ajoute une inspection humaine des cas difficiles. Les métriques automatiques servent à repérer un écart, pas à déclarer un gagnant. Un modèle qui gagne sur la moyenne peut perdre sur une classe ou une condition importante. Le protocole doit être écrit avant les résultats, sinon il s’adapte aux images qui arrangent.\n\n> **Repère.** Un générateur n'est pas meilleur parce qu'il produit une belle image. Il est meilleur s'il respecte les contraintes, couvre la diversité attendue et tient dans le budget.",
+      "diagram": {
+        "title": "Évaluer un générateur sur plusieurs axes",
+        "description": "Schéma illustratif : fidélité, diversité, conditionnement, latence et droits se mesurent séparément.",
+        "svg": "<svg viewBox=\"0 0 900 380\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Schéma illustratif : axes d'évaluation d'un modèle génératif\">\n  <rect width=\"900\" height=\"380\" rx=\"16\" fill=\"#0f172a\" />\n  <text x=\"450\" y=\"32\" fill=\"#7dd3fc\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"16\" text-anchor=\"middle\">Cinq axes, pas un classement unique</text>\n  <g id=\"alg7-quality\"><rect x=\"30\" y=\"62\" width=\"160\" height=\"100\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" /><text x=\"110\" y=\"92\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">Fidélité</text><text x=\"110\" y=\"116\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">ressemblance</text><text x=\"110\" y=\"136\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">artefacts</text></g>\n  <g id=\"alg7-diversity\"><rect x=\"205\" y=\"62\" width=\"160\" height=\"100\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#34d399\" /><text x=\"285\" y=\"92\" fill=\"#a7f3d0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">Diversité</text><text x=\"285\" y=\"116\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">modes couverts</text><text x=\"285\" y=\"136\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">pas d'effondrement</text></g>\n  <g id=\"alg7-condition\"><rect x=\"380\" y=\"62\" width=\"160\" height=\"100\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#a78bfa\" /><text x=\"460\" y=\"92\" fill=\"#ede9fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">Conditionnement</text><text x=\"460\" y=\"116\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">consigne suivie</text><text x=\"460\" y=\"136\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">cas rares</text></g>\n  <g id=\"alg7-cost\"><rect x=\"555\" y=\"62\" width=\"160\" height=\"100\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#fbbf24\" /><text x=\"635\" y=\"92\" fill=\"#fde68a\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">Latence</text><text x=\"635\" y=\"116\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">pas et résolution</text><text x=\"635\" y=\"136\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">coût par image</text></g>\n  <g id=\"alg7-rights\"><rect x=\"730\" y=\"62\" width=\"140\" height=\"100\" rx=\"10\" fill=\"#1c1420\" stroke=\"#fb923c\" /><text x=\"800\" y=\"92\" fill=\"#fed7aa\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">Droits</text><text x=\"800\" y=\"116\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">licences</text><text x=\"800\" y=\"136\" fill=\"#fca5a5\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">ressemblance</text></g>\n  <g id=\"alg7-protocol\"><rect x=\"80\" y=\"220\" width=\"740\" height=\"90\" rx=\"10\" fill=\"#0d1f2d\" stroke=\"#38bdf8\" /><text x=\"450\" y=\"248\" fill=\"#bae6fd\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Même protocole pour tous les modèles</text><text x=\"450\" y=\"274\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">résolution, nombre d'échantillons, conditions, budget de pas</text><text x=\"450\" y=\"296\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">inspection humaine et cas difficiles</text></g>\n</svg>",
+        "steps": [
+          {
+            "title": "Qualité et diversité",
+            "explanation": "Une image réussie ne prouve pas que le modèle couvre les données. Il faut regarder les groupes et les modes.",
+            "highlight": [
+              "alg7-quality",
+              "alg7-diversity"
+            ]
+          },
+          {
+            "title": "Conditionnement et coût",
+            "explanation": "Le modèle doit suivre la consigne dans un budget de pas et de résolution. Ces deux axes se mesurent ensemble.",
+            "highlight": [
+              "alg7-condition",
+              "alg7-cost"
+            ]
+          },
+          {
+            "title": "Droits et protocole",
+            "explanation": "Les licences, la ressemblance et la procédure d’évaluation font partie du choix. Un chiffre hors protocole ne suffit pas.",
+            "highlight": [
+              "alg7-rights",
+              "alg7-protocol"
+            ]
+          }
+        ]
+      },
+      "example": {
+        "title": "Choisir pour une campagne visuelle",
+        "text": "**Scénario illustratif.** Une équipe doit produire des visuels de produits sur fond neutre, avec une résolution de 1 024 pixels, en moins de deux secondes par image. Un GAN distillé peut tenir la latence, mais il faut vérifier la diversité des formes. Une diffusion à quatre pas peut être un compromis, à condition de mesurer la fidélité et le respect de la consigne. Le choix final se fait sur un jeu de 200 prompts, avec inspection humaine et contrôle des droits."
+      },
+      "quiz": [
+        {
+          "question": "Pourquoi une seule image réussie ne prouve-t-elle pas la qualité d’un générateur ?",
+          "options": [
+            "Parce qu’elle peut cacher un manque de diversité et des artefacts sur d’autres cas",
+            "Parce qu’une image n’a jamais de qualité",
+            "Parce que le modèle est toujours déterministe",
+            "Parce que la résolution est trop faible"
+          ],
+          "correctIndex": 0,
+          "explanation": "Un échantillon isolé ne montre ni la couverture des modes, ni les cas difficiles, ni la distribution des erreurs."
+        },
+        {
+          "question": "Que change le nombre de pas d’échantillonnage ?",
+          "options": [
+            "Rien, c’est seulement décoratif",
+            "Le compromis entre latence et qualité",
+            "La taille des données d’entraînement",
+            "Le nombre de classes"
+          ],
+          "correctIndex": 1,
+          "explanation": "Plus de pas coûtent plus cher et peuvent améliorer l’échantillon. Il faut comparer à budget fixé."
+        },
+        {
+          "question": "Pourquoi évaluer le conditionnement par condition ?",
+          "options": [
+            "Parce que toutes les conditions sont équivalentes",
+            "Parce que les cas rares ou ambigus peuvent échouer même si la moyenne est bonne",
+            "Parce que le modèle n’utilise pas la condition",
+            "Parce que la condition remplace les données"
+          ],
+          "correctIndex": 1,
+          "explanation": "Une moyenne globale peut masquer un mauvais suivi sur certaines légendes, orientations ou classes."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Fidélité",
+          "definition": "Degré de ressemblance entre les échantillons générés et les données de référence."
+        },
+        {
+          "term": "Diversité",
+          "definition": "Capacité à produire des échantillons variés plutôt que quelques modes répétés."
+        },
+        {
+          "term": "Conditionnement",
+          "definition": "Information fournie au générateur pour orienter l’échantillon, comme un texte ou une classe."
+        },
+        {
+          "term": "Distillation",
+          "definition": "Entraînement d’un modèle rapide à imiter un modèle plus coûteux."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Choisir sous contrainte",
+          "prompt": "Une équipe veut 1 000 images en 30 secondes, avec une grande diversité. Quels axes doit-elle mesurer avant de choisir entre GAN, diffusion et flux ?",
+          "solution": "Elle doit mesurer la qualité et la diversité sur un jeu fixe, la latence à budget de pas égal, le respect du conditionnement et les droits. Le nombre de paramètres seul ne répond pas à la contrainte de temps."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Lipman et al., Flow Matching for Generative Modeling, 2022.",
+          "href": "https://arxiv.org/abs/2210.02747"
+        },
+        {
+          "label": "Liu, Gong et Liu, Flow Straight and Fast: Learning to Generate and Transfer Data with Rectified Flow, 2022.",
+          "href": "https://arxiv.org/abs/2209.03003"
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "label": "Kingma et Welling, Auto-Encoding Variational Bayes, 2013.",
+      "href": "https://arxiv.org/abs/1312.6114"
+    },
+    {
+      "label": "Goodfellow et al., Generative Adversarial Nets, 2014.",
+      "href": "https://arxiv.org/abs/1406.2661"
+    },
+    {
+      "label": "Ho, Jain et Abbeel, Denoising Diffusion Probabilistic Models, 2020.",
+      "href": "https://arxiv.org/abs/2006.11239"
+    },
+    {
+      "label": "Rombach et al., High-Resolution Image Synthesis with Latent Diffusion Models, 2021.",
+      "href": "https://arxiv.org/abs/2112.10752"
+    },
+    {
+      "label": "Lipman et al., Flow Matching for Generative Modeling, 2022.",
+      "href": "https://arxiv.org/abs/2210.02747"
+    },
+    {
+      "label": "Liu, Gong et Liu, Flow Straight and Fast: Learning to Generate and Transfer Data with Rectified Flow, 2022.",
+      "href": "https://arxiv.org/abs/2209.03003"
+    }
+  ],
+  "related": [
+    {
+      "to": "/types-ia",
+      "title": "Les types d'IA",
+      "description": "Panorama des grandes familles d'IA, pour situer les modèles génératifs parmi les autres approches."
+    },
+    {
+      "to": "/ia-multimodale",
+      "title": "IA et création multimodale",
+      "description": "Usage concret des modèles génératifs sur le texte, l'image, le son et la vidéo."
+    },
+    {
+      "to": "/cours-approfondis",
+      "title": "Cours approfondis",
+      "description": "Les autres cours longs du site, pour situer ce sujet parmi des parcours plus spécialisés."
+    }
+  ]
+}

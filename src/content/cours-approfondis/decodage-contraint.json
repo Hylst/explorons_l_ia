@@ -1,0 +1,844 @@
+{
+  "slug": "decodage-contraint",
+  "title": "Le décodage contraint : forcer un format valide pendant la génération",
+  "subtitle": "Masquage des tokens, grammaires, JSON Schema, compromis de latence, de débit et de qualité, et limites, avec un exemple exécutable",
+  "level": "Intermédiaire",
+  "tags": [
+    "Décodage contraint",
+    "Sorties structurées",
+    "JSON Schema",
+    "Grammaires",
+    "Masquage des tokens",
+    "Outlines",
+    "XGrammar"
+  ],
+  "summary": "Ce cours explique comment obliger un modèle de langage à produire un format valide (JSON, choix fermé, grammaire) pendant la génération, en interdisant à chaque pas les tokens qui sortiraient du format, plutôt que de vérifier après coup. Il couvre le masquage des tokens, les automates et les grammaires, JSON Schema, les compromis de latence, de débit et de qualité, et les limites. L'exemple de code est une miniature exécutée : le masque et l'automate y sont réels, les scores du modèle sont simulés.",
+  "introduction": "### Pourquoi ce sujet\n\nDès qu'un programme lit la réponse d'un modèle de langage, la forme compte autant que le fond : un JSON mal fermé fait échouer toute la chaîne. Pendant longtemps, on a demandé poliment au modèle de respecter le format, puis on a vérifié et recommencé. Le décodage contraint change d'approche : on n'attend pas l'erreur, on retire à chaque pas les tokens qui la provoqueraient.\n\n### D'où viennent les idées\n\n- **Outlines** : Willard et Louf (2023) décrivent la génération guidée par expression régulière ou grammaire, avec un index des tokens permis calculé avant la génération.\n- **Grammaires et traitement du langage** : Geng et al. (2023) appliquent des grammaires pendant le décodage à des tâches de traitement du langage, sans réentraînement.\n- **XGrammar** : Dong et al. (2024) conçoivent un moteur de grammaires hors contexte pensé pour les serveurs d'inférence.\n- **Évaluation** : Geng et al. (2025) proposent JSONSchemaBench, et Tam et al. (2024) étudient l'effet des restrictions de format sur la qualité.\n- **Dans les outils** : la contrainte est documentée dans vLLM, TensorRT-LLM et llama.cpp.\n\n### Ce que ce cours ne prétend pas faire\n\nIl ne compare pas les moteurs entre eux et ne donne aucun classement de vitesse : ces résultats dépendent du matériel, du modèle et du schéma, et changent à chaque version. Les chiffres cités viennent d'articles, avec leur année. Les scénarios sont fictifs et signalés comme tels.\n\n### Ce que vous saurez faire à la fin\n\nExpliquer ce que fait un masque de tokens, dire pourquoi JSON demande une grammaire à pile, choisir entre contrainte et nouvelle tentative, repérer ce que la contrainte ne garantit pas (contenu, achèvement, couverture du schéma) et relire une documentation de moteur avec les bonnes questions.",
+  "prerequisites": [
+    "Savoir ce qu'est un modèle de langage, un token et une probabilité (le cours « Comment un modèle de langage produit le token suivant » est une bonne base)",
+    "Avoir déjà vu du JSON",
+    "Savoir lire un court script Python (l'exemple n'utilise que la bibliothèque standard)"
+  ],
+  "checkedOn": "2026-10-19",
+  "cover": {
+    "src": "pics/cours/decodage-contraint.webp",
+    "alt": "Flux de particules traversant un cadre géométrique de cristal, dont seules certaines forment une structure ordonnée."
+  },
+  "modules": [
+    {
+      "id": "pourquoi-contraindre",
+      "title": "Pourquoi contraindre la sortie pendant la génération",
+      "keyTakeaways": [
+        "Un modèle de langage produit du texte libre. Dès qu'un programme doit lire sa réponse (JSON, choix parmi une liste, appel d'outil), une sortie à peine hors format fait échouer l'analyse.",
+        "Deux stratégies : valider après coup et redemander en cas d'échec, ou **interdire pendant la génération** les tokens qui sortiraient du format.",
+        "Le décodage contraint agit sur le choix du token, pas sur le modèle : les poids ne changent pas, aucun réentraînement n'est nécessaire.",
+        "Il garantit une **forme** (la syntaxe, ou la conformité à un schéma). Il ne garantit pas que le contenu soit juste."
+      ],
+      "theory": "### Le problème\n\nUn modèle de langage ne « remplit » pas un formulaire : il écrit une suite de tokens, un à la fois (voir le cours sur la génération mot par mot). Quand un programme attend un JSON, une étiquette parmi trois, ou les arguments d'un appel d'outil, la moindre fantaisie casse la chaîne : une accolade oubliée, un commentaire avant l'objet, une virgule en trop, un champ qui s'appelle `Age` au lieu de `age`.\n\n### Deux stratégies\n\n1. **Valider après coup.** On laisse le modèle écrire, on analyse le résultat, et en cas d'échec on redemande, éventuellement en renvoyant le message d'erreur. C'est simple et compatible avec tous les modèles. Chaque échec coûte une génération complète, et rien ne garantit que la nouvelle tentative réussisse.\n2. **Contraindre pendant la génération.** À chaque pas, on calcule l'ensemble des tokens qui laissent le texte **encore extensible vers une sortie valide**, et on interdit les autres. Une sortie invalide devient impossible à produire.\n\n### Ce que le cours couvre\n\nLe masquage des tokens (module 2), les grammaires et les automates qui disent quels tokens sont permis (module 3), les schémas JSON et les moteurs qui les appliquent (module 4), les compromis de latence, de débit et de qualité (module 5), puis les limites (module 6).\n\n### Une garantie de forme, pas de fond\n\nSi le schéma impose `{\"age\": entier}`, la sortie sera de cette forme. Mais l'entier peut être faux : le modèle n'a pas appris à être plus exact parce qu'on l'a contraint. Ce point revient dans le module 6.",
+      "analogy": {
+        "title": "Le formulaire à cases",
+        "text": "Valider après coup, c'est laisser quelqu'un écrire une lettre libre puis la renvoyer s'il a oublié une information. Contraindre pendant la génération, c'est lui donner un formulaire dont on ne peut écrire qu'un caractère valide dans chaque case.\n\n**Limite de l'analogie** : le formulaire n'indique pas la bonne réponse. Une case bien remplie peut contenir une valeur fausse."
+      },
+      "example": {
+        "title": "Un exemple fictif : extraire une date",
+        "text": "On demande à un modèle d'extraire la date d'un e-mail et de répondre par un objet JSON avec les champs `jour`, `mois`, `annee`. Sans contrainte, une réponse possible commence par « Voici la date demandée : », ce qui rend l'analyse JSON impossible. Avec une contrainte sur ce schéma, la première chose que le modèle peut écrire est une accolade ouvrante : le texte d'introduction n'existe jamais.\n\n*Scénario fictif, donné pour illustrer le mécanisme.*"
+      },
+      "quiz": [
+        {
+          "question": "Quelle est la différence essentielle entre valider après coup et contraindre pendant la génération ?",
+          "options": [
+            "Dans le second cas, les tokens qui sortiraient du format sont interdits à chaque pas, au lieu de vérifier le texte terminé",
+            "Dans le second cas, le modèle est réentraîné sur le format",
+            "Dans le premier cas, le contenu est toujours exact",
+            "Il n'y a aucune différence pour le résultat"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le décodage contraint intervient sur le choix du token à chaque pas. Les poids du modèle ne changent pas, et le contenu n'est pas rendu plus exact pour autant."
+        },
+        {
+          "question": "Un schéma impose un champ entier « age ». Que garantit le décodage contraint ?",
+          "options": [
+            "Que la valeur est l'âge réel de la personne",
+            "Que la sortie a la forme voulue, avec un entier à cet endroit",
+            "Que le modèle ne se trompera jamais",
+            "Que la réponse sera plus rapide"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le décodage contraint garantit la forme. La justesse du contenu dépend toujours du modèle et du prompt."
+        },
+        {
+          "question": "Que modifie le décodage contraint dans le modèle ?",
+          "options": [
+            "Ses poids",
+            "Son vocabulaire d'entraînement",
+            "Rien : il agit sur le choix du token à chaque pas",
+            "Sa fenêtre de contexte"
+          ],
+          "correctIndex": 2,
+          "explanation": "Le modèle calcule ses scores comme d'habitude. La contrainte est appliquée en dehors de lui, entre les scores et le choix du token."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Décodage contraint",
+          "definition": "Génération pendant laquelle un mécanisme externe interdit, à chaque pas, les tokens qui feraient sortir la sortie d'un format donné."
+        },
+        {
+          "term": "Sortie structurée",
+          "definition": "Réponse d'un modèle qui respecte un format lisible par un programme (JSON, choix fermé, grammaire)."
+        },
+        {
+          "term": "Validation a posteriori",
+          "definition": "Vérification du texte une fois la génération terminée, avec une nouvelle tentative en cas d'échec."
+        }
+      ],
+      "diagram": {
+        "title": "Deux stratégies face à une sortie hors format",
+        "description": "Schéma illustratif : valider après coup et redemander, ou masquer les tokens interdits pendant la génération.",
+        "svg": "<svg viewBox=\"0 0 900 370\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Schéma illustratif : validation après coup contre décodage contraint\">\n  <defs>\n    <marker id=\"dc1-arrow\" markerWidth=\"10\" markerHeight=\"8\" refX=\"8\" refY=\"4\" orient=\"auto\"><path d=\"M0,0 L10,4 L0,8 z\" fill=\"#38bdf8\" /></marker>\n    <marker id=\"dc1-arrow-red\" markerWidth=\"10\" markerHeight=\"8\" refX=\"8\" refY=\"4\" orient=\"auto\"><path d=\"M0,0 L10,4 L0,8 z\" fill=\"#f87171\" /></marker>\n  </defs>\n  <rect width=\"900\" height=\"370\" rx=\"16\" fill=\"#0f172a\" />\n  <text x=\"450\" y=\"34\" fill=\"#7dd3fc\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"16\" text-anchor=\"middle\">Produire une sortie valide : deux stratégies</text>\n  <g id=\"dc1-left\">\n    <rect x=\"30\" y=\"60\" width=\"400\" height=\"250\" rx=\"12\" fill=\"#1c1420\" stroke=\"#f87171\" stroke-width=\"1.6\" />\n    <text x=\"230\" y=\"88\" fill=\"#fecaca\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"15\" text-anchor=\"middle\">Valider après coup</text>\n    <rect x=\"80\" y=\"108\" width=\"300\" height=\"48\" rx=\"7\" fill=\"#2a1a24\" stroke=\"#fb923c\" />\n    <text x=\"230\" y=\"138\" fill=\"#fed7aa\" font-family=\"sans-serif\" font-size=\"13\" text-anchor=\"middle\">Le modèle écrit librement</text>\n    <rect x=\"80\" y=\"180\" width=\"300\" height=\"48\" rx=\"7\" fill=\"#2a1a24\" stroke=\"#f87171\" />\n    <text x=\"230\" y=\"210\" fill=\"#fecaca\" font-family=\"sans-serif\" font-size=\"13\" text-anchor=\"middle\">JSON invalide ou incomplet</text>\n    <rect x=\"80\" y=\"252\" width=\"300\" height=\"42\" rx=\"7\" fill=\"#2a1a24\" stroke=\"#fb923c\" />\n    <text x=\"230\" y=\"278\" fill=\"#fed7aa\" font-family=\"sans-serif\" font-size=\"13\" text-anchor=\"middle\">Redemander une génération</text>\n    <path d=\"M230,156 L230,178\" stroke=\"#f87171\" stroke-width=\"2\" fill=\"none\" marker-end=\"url(#dc1-arrow-red)\" />\n    <path d=\"M230,228 L230,250\" stroke=\"#f87171\" stroke-width=\"2\" fill=\"none\" marker-end=\"url(#dc1-arrow-red)\" />\n    <path d=\"M80,273 C45,273 45,132 78,132\" stroke=\"#f87171\" stroke-width=\"1.8\" stroke-dasharray=\"5 4\" fill=\"none\" marker-end=\"url(#dc1-arrow-red)\" />\n  </g>\n  <g id=\"dc1-right\">\n    <rect x=\"470\" y=\"60\" width=\"400\" height=\"250\" rx=\"12\" fill=\"#0d1f2d\" stroke=\"#34d399\" stroke-width=\"1.6\" />\n    <text x=\"670\" y=\"88\" fill=\"#a7f3d0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"15\" text-anchor=\"middle\">Contraindre pendant la génération</text>\n    <rect x=\"520\" y=\"108\" width=\"300\" height=\"48\" rx=\"7\" fill=\"#0b2635\" stroke=\"#38bdf8\" />\n    <text x=\"670\" y=\"138\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-size=\"13\" text-anchor=\"middle\">Le modèle propose des scores</text>\n    <g id=\"dc1-mask\">\n      <rect x=\"520\" y=\"180\" width=\"300\" height=\"48\" rx=\"7\" fill=\"#0b2635\" stroke=\"#a78bfa\" />\n      <text x=\"670\" y=\"210\" fill=\"#ede9fe\" font-family=\"sans-serif\" font-size=\"13\" text-anchor=\"middle\">Le masque retire les tokens interdits</text>\n    </g>\n    <rect x=\"520\" y=\"252\" width=\"300\" height=\"42\" rx=\"7\" fill=\"#0b2635\" stroke=\"#34d399\" />\n    <text x=\"670\" y=\"278\" fill=\"#a7f3d0\" font-family=\"sans-serif\" font-size=\"13\" text-anchor=\"middle\">La sortie reste dans le format</text>\n    <path d=\"M670,156 L670,178\" stroke=\"#38bdf8\" stroke-width=\"2\" fill=\"none\" marker-end=\"url(#dc1-arrow)\" />\n    <path d=\"M670,228 L670,250\" stroke=\"#38bdf8\" stroke-width=\"2\" fill=\"none\" marker-end=\"url(#dc1-arrow)\" />\n  </g>\n  <g id=\"dc1-form\">\n    <rect x=\"190\" y=\"326\" width=\"520\" height=\"30\" rx=\"15\" fill=\"#2a2415\" stroke=\"#fbbf24\" />\n    <text x=\"450\" y=\"346\" fill=\"#fde68a\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">La contrainte garantit la forme, pas la vérité du contenu</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "Deux stratégies",
+            "explanation": "La validation après coup accepte une sortie libre, puis la rejette si elle est invalide. La contrainte agit avant le choix du token.",
+            "highlight": [
+              "dc1-left",
+              "dc1-right"
+            ]
+          },
+          {
+            "title": "Le masque agit pendant la génération",
+            "explanation": "Le modèle produit toujours ses scores. Le masque empêche seulement les tokens qui feraient sortir du format d’être choisis.",
+            "highlight": [
+              "dc1-mask"
+            ]
+          },
+          {
+            "title": "La garantie porte sur la forme",
+            "explanation": "Une sortie conforme au schéma peut contenir une valeur fausse. La contrainte ne remplace ni la vérification du contenu ni la validation finale.",
+            "highlight": [
+              "dc1-form"
+            ]
+          }
+        ]
+      },
+      "exercises": [
+        {
+          "title": "Contraindre ou redemander",
+          "prompt": "Deux équipes doivent obtenir du JSON d’un modèle. L’une valide après coup et redemande en cas d’échec, l’autre contraint le décodage. Quel coût propre chacune supporte-t-elle, et quelle garantie la seconde apporte-t-elle exactement ?",
+          "solution": "La validation après coup est simple et compatible avec tous les modèles, mais chaque échec coûte une génération complète, sans garantie que la nouvelle tentative réussisse. Le décodage contraint interdit pendant la génération les tokens qui sortiraient du format : une sortie invalide devient impossible pour les contraintes que le moteur sait appliquer, sans réentraînement ni modification des poids. Il garantit la forme, pas le contenu : un objet conforme peut contenir une valeur fausse, donc une validation du résultat reste utile."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Willard et Louf, « Efficient Guided Generation for Large Language Models » (Normal Computing, 2023) : auteurs, année et principe consultés dans des résultats de recherche, texte intégral non lu",
+          "href": "https://arxiv.org/abs/2307.09702"
+        },
+        {
+          "label": "Geng et al., « Grammar-Constrained Decoding for Structured NLP Tasks without Finetuning » (EMNLP 2023) : résumé consulté dans des résultats de recherche, texte intégral non lu",
+          "href": "https://arxiv.org/abs/2305.13971"
+        }
+      ]
+    },
+    {
+      "id": "masquage-des-tokens",
+      "title": "Le masquage des tokens",
+      "keyTakeaways": [
+        "À chaque pas, le modèle produit un score (logit) par token du vocabulaire. Le masque est un booléen par token : permis ou interdit.",
+        "Les scores des tokens interdits sont remplacés par $-\\infty$ avant le softmax : leur probabilité devient exactement 0, et celle des tokens permis est renormalisée.",
+        "Le choix du token (glouton, température, top-p) s'applique ensuite parmi les tokens permis seulement.",
+        "Le masque dépend de l'état de l'automate, donc il est recalculé (ou relu dans un cache) à chaque pas."
+      ],
+      "theory": "### Ce que fait le masque\n\nRappel : à chaque pas, le modèle renvoie un vecteur de logits $z$, un score par token du vocabulaire. Sans contrainte, on calcule $p = \\text{softmax}(z)$ puis on choisit un token. Avec contrainte, un **masque** $m_i \\in \\{0, 1\\}$ dit si le token $i$ est permis dans l'état courant $s$. Les probabilités deviennent :\n\n$$p_i = \\frac{m_i(s)\\, e^{z_i}}{\\sum_{j} m_j(s)\\, e^{z_j}}$$\n\nC'est ce que donne un softmax appliqué après avoir remplacé par $-\\infty$ les scores des tokens interdits, puisque $e^{-\\infty} = 0$. Les tokens permis gardent leurs probabilités relatives : si le token A valait deux fois le token B avant le masque, il vaut toujours deux fois B après.\n\n### Qui décide de ce qui est permis\n\nUn **automate** (ou, pour les grammaires plus riches, un automate à pile) suit où en est le texte déjà produit. Dans un état donné, certains caractères sont acceptés, d'autres non. Un token est permis si **tous ses caractères** peuvent être lus de suite à partir de l'état courant. Comme les tokens contiennent souvent plusieurs caractères (`{\"`, `age`, `\":`), la vérification porte sur le token entier, pas sur un caractère.\n\n### Où se place le masque dans la boucle\n\nEntre le calcul des logits et le choix du token. Il se combine donc avec la température, le top-k ou le top-p, à condition de les appliquer aux scores déjà masqués. Le coût en calcul est celui de la fabrication du masque : tout l'enjeu des moteurs récents (modules 3 et 5) est de le fabriquer vite.\n\n### Fin de génération\n\nLe token de fin de texte n'est permis que dans un état où le format est **complet**. Tant que l'objet n'est pas fermé, le modèle ne peut pas s'arrêter.\n\n### Ce que montre l'exemple de code\n\nLe code ci-dessous est une miniature : les « logits » sont tirés au hasard avec une graine fixe, avec un biais volontaire vers un texte libre, et le vocabulaire compte 15 tokens, certains de plusieurs caractères. Ce n'est pas un modèle de langage, mais le masque, la renormalisation et l'avance de l'automate y sont réels. Sans contrainte, ce « modèle » écrit surtout `Bonjour`. Avec la contrainte, il ne peut produire que `{\"age\":` suivi d'un entier et d'une accolade fermante. La sortie affichée est celle de l'exécution.",
+      "analogy": {
+        "title": "Le clavier dont des touches se verrouillent",
+        "text": "Imaginez un clavier où, après chaque frappe, seules les touches compatibles avec le format restent actives. Le modèle choisit toujours librement, mais parmi les touches actives. Après `{\"age\":`, les chiffres restent actifs, et les lettres sont verrouillées.\n\n**Limite de l'analogie** : un clavier verrouille des caractères. Ici, le verrouillage porte sur des tokens, qui peuvent compter plusieurs caractères et ne coïncident pas toujours avec les frontières du format (module 6)."
+      },
+      "example": {
+        "title": "Un pas à la main (valeurs d'illustration)",
+        "text": "Quatre tokens ont pour scores 2, 1, 0 et 3. Sans masque, les probabilités sont proportionnelles à $e^2, e^1, e^0, e^3$, soit environ 7,39 ; 2,72 ; 1,00 ; 20,09, de total 31,2. Le quatrième token a donc une probabilité d'environ 0,64.\n\nSi le quatrième token est interdit, il reste $7{,}39 + 2{,}72 + 1{,}00 = 11{,}11$. Les probabilités deviennent environ 0,67 ; 0,24 ; 0,09, et le quatrième vaut 0. Les rapports entre les trois autres n'ont pas changé.\n\n*Valeurs choisies pour le calcul, sans lien avec un modèle réel.*"
+      },
+      "diagram": {
+        "title": "Un pas de génération avec masque",
+        "description": "Schéma illustratif : le modèle produit des scores, l'automate fournit le masque, le softmax renormalise, un token permis est choisi et l'état avance.",
+        "svg": "<svg viewBox=\"0 0 880 330\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Schéma illustratif : le masque de tokens appliqué aux logits avant le choix du token suivant\">\n  <defs>\n    <marker id=\"fl\" markerWidth=\"10\" markerHeight=\"8\" refX=\"8\" refY=\"4\" orient=\"auto\"><path d=\"M0,0 L10,4 L0,8 z\" fill=\"#38bdf8\" /></marker>\n  </defs>\n  <rect width=\"880\" height=\"330\" rx=\"16\" fill=\"#0f172a\" />\n  <text x=\"40\" y=\"34\" fill=\"#7dd3fc\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"15\">Un pas de génération, avec contrainte (schéma illustratif)</text>\n  <g id=\"dc-model\">\n    <rect x=\"30\" y=\"70\" width=\"150\" height=\"110\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" stroke-width=\"1.5\" />\n    <text x=\"105\" y=\"108\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Modèle</text>\n    <text x=\"105\" y=\"134\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">un score (logit)</text>\n    <text x=\"105\" y=\"152\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">par token</text>\n  </g>\n  <g id=\"dc-state\">\n    <rect x=\"30\" y=\"210\" width=\"150\" height=\"90\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#a78bfa\" stroke-width=\"1.5\" />\n    <text x=\"105\" y=\"242\" fill=\"#ede9fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Automate</text>\n    <text x=\"105\" y=\"266\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">état courant</text>\n    <text x=\"105\" y=\"284\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">(ou pile)</text>\n  </g>\n  <g id=\"dc-mask\">\n    <rect x=\"260\" y=\"130\" width=\"170\" height=\"130\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#a78bfa\" stroke-width=\"1.5\" />\n    <text x=\"345\" y=\"166\" fill=\"#ede9fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Masque</text>\n    <text x=\"345\" y=\"192\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">permis : score gardé</text>\n    <text x=\"345\" y=\"210\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">interdit : score = −∞</text>\n    <text x=\"345\" y=\"236\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">un booléen par token</text>\n  </g>\n  <g id=\"dc-softmax\">\n    <rect x=\"500\" y=\"130\" width=\"150\" height=\"130\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" stroke-width=\"1.5\" />\n    <text x=\"575\" y=\"172\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Softmax</text>\n    <text x=\"575\" y=\"198\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">probabilités</text>\n    <text x=\"575\" y=\"216\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">renormalisées</text>\n  </g>\n  <g id=\"dc-pick\">\n    <rect x=\"710\" y=\"130\" width=\"140\" height=\"130\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#22c55e\" stroke-width=\"1.5\" />\n    <text x=\"780\" y=\"172\" fill=\"#dcfce7\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Choix</text>\n    <text x=\"780\" y=\"198\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">un token permis,</text>\n    <text x=\"780\" y=\"216\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">l'état avance</text>\n  </g>\n  <g id=\"dc-arrows\" stroke=\"#38bdf8\" stroke-width=\"2\" fill=\"none\" marker-end=\"url(#fl)\">\n    <path d=\"M180,125 C220,125 220,170 258,170\" />\n    <path d=\"M180,255 C220,255 220,225 258,225\" />\n    <path d=\"M430,195 L498,195\" />\n    <path d=\"M650,195 L708,195\" />\n    <path d=\"M780,262 C780,310 105,320 105,302\" stroke-dasharray=\"5 4\" />\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "Le modèle calcule ses scores",
+            "explanation": "Comme sans contrainte, le modèle produit un score par token du vocabulaire. Il ignore tout de la contrainte : rien dans ses poids n'est modifié.",
+            "highlight": [
+              "dc-model"
+            ]
+          },
+          {
+            "title": "L'automate dit ce qui est permis",
+            "explanation": "Selon l'état courant (par exemple « on vient d'écrire les deux-points »), l'automate ou la grammaire détermine quels tokens peuvent être écrits sans quitter le format.",
+            "highlight": [
+              "dc-state",
+              "dc-mask"
+            ]
+          },
+          {
+            "title": "Les tokens interdits sont écartés",
+            "explanation": "Le score des tokens interdits est remplacé par moins l'infini : après le softmax, leur probabilité est exactement nulle, et celle des tokens permis est renormalisée.",
+            "highlight": [
+              "dc-mask",
+              "dc-softmax"
+            ]
+          },
+          {
+            "title": "Un token permis est choisi, l'état avance",
+            "explanation": "Le choix (glouton, température, top-p) se fait parmi les tokens permis seulement. Le token choisi fait avancer l'automate, et le pas suivant recommence avec un nouveau masque.",
+            "highlight": [
+              "dc-pick",
+              "dc-arrows"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "code": "# Décodage contraint en miniature : un automate sur les caractères, un vocabulaire de tokens à plusieurs\n# caractères, et un masque recalculé à chaque pas. Les « logits » sont tirés au hasard (graine fixe) :\n# ce n'est pas un modèle, c'est la mécanique du masque qui est réelle.\nimport math\nimport random\n\nPREFIX = '{\"age\":'          # le format voulu : {\"age\":<entier>}\nACCEPT = 9\n\ndef pas(etat, c):\n    \"\"\"Transition de l'automate sur un caractère ; None si le caractère est interdit.\"\"\"\n    if etat < len(PREFIX):\n        return etat + 1 if c == PREFIX[etat] else None\n    if etat == 7:                          # juste après les deux-points : au moins un chiffre\n        return 8 if c.isdigit() else None\n    if etat == 8:                          # chiffres, puis accolade fermante\n        if c.isdigit():\n            return 8\n        return ACCEPT if c == \"}\" else None\n    return None                            # état final : plus aucun caractère\n\ndef avance(etat, token):\n    for c in token:\n        etat = pas(etat, c)\n        if etat is None:\n            return None\n    return etat\n\nVOCAB = ['{\"', 'age', '\":', ':', '{\"age\":', ' ', '7', '42', '1}', '}', 'Bonjour', 'ans', ',', '\"', '<fin>']\n\ndef masque(etat):\n    \"\"\"Un token est permis si l'automate peut lire tous ses caractères depuis l'état courant.\"\"\"\n    ok = []\n    for t in VOCAB:\n        if t == \"<fin>\":\n            ok.append(etat == ACCEPT)\n        else:\n            ok.append(avance(etat, t) is not None)\n    return ok\n\ndef softmax(z):\n    m = max(z)\n    e = [math.exp(x - m) for x in z]\n    s = sum(e)\n    return [x / s for x in e]\n\ndef generer(contraint, graine=0, max_pas=8):\n    rng = random.Random(graine)\n    etat, sortie = 0, []\n    for _ in range(max_pas):\n        logits = [rng.gauss(0, 1) for _ in VOCAB]\n        logits[VOCAB.index(\"Bonjour\")] += 3          # le « modèle » préfère répondre par du texte libre\n        p = softmax(logits)\n        if contraint:\n            ok = masque(etat)\n            assert any(ok), \"impasse : aucun token permis\"\n            perdu = sum(pi for pi, o in zip(p, ok) if not o)\n            p = softmax([l if o else -math.inf for l, o in zip(logits, ok)])\n            note = f\"masse écartée {perdu:.2f}, tokens permis {sum(ok)}/{len(VOCAB)}\"\n        else:\n            note = \"\"\n        i = max(range(len(VOCAB)), key=lambda k: p[k])    # choix glouton\n        tok = VOCAB[i]\n        if tok == \"<fin>\":\n            break\n        sortie.append(tok)\n        if contraint:\n            etat = avance(etat, tok)\n        print(f\"  pas {len(sortie)}: {tok!r:10} {note}\")\n    return \"\".join(sortie)\n\nprint(\"Sans contrainte :\")\nprint(\"  ->\", repr(generer(False)))\nprint(\"Avec contrainte :\")\nr = generer(True)\nprint(\"  ->\", repr(r))",
+        "explanation": "Un automate lit le format `{\"age\":<entier>}` caractère par caractère. À chaque pas, `masque()` marque comme permis les tokens dont tous les caractères sont lisibles depuis l'état courant, les scores des autres sont mis à moins l'infini, et le choix glouton se fait sur le reste. La première génération ignore la contrainte, la seconde l'applique. L'assertion de `generer` signalerait une impasse (aucun token permis), cas que le module 6 évoque.",
+        "output": "Sans contrainte :\n  pas 1: 'Bonjour'  \n  pas 2: 'Bonjour'  \n  pas 3: 'Bonjour'  \n  pas 4: 'Bonjour'  \n  pas 5: 'Bonjour'  \n  pas 6: 'Bonjour'  \n  pas 7: '{\"age\":'  \n  pas 8: 'Bonjour'  \n  -> 'BonjourBonjourBonjourBonjourBonjourBonjour{\"age\":Bonjour'\nAvec contrainte :\n  pas 1: '{\"'       masse écartée 0.96, tokens permis 2/15\n  pas 2: 'age'      masse écartée 0.81, tokens permis 1/15\n  pas 3: '\":'       masse écartée 0.98, tokens permis 2/15\n  pas 4: '42'       masse écartée 0.93, tokens permis 3/15\n  pas 5: '}'        masse écartée 0.94, tokens permis 4/15\n  -> '{\"age\":42}'",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Que devient la probabilité d'un token interdit après le masque ?",
+          "options": [
+            "Elle est divisée par deux",
+            "Elle vaut exactement 0",
+            "Elle devient très petite mais non nulle",
+            "Elle est reportée sur le token précédent"
+          ],
+          "correctIndex": 1,
+          "explanation": "Son score est remplacé par moins l'infini avant le softmax, et l'exponentielle de moins l'infini vaut 0."
+        },
+        {
+          "question": "Quand le token de fin de texte est-il permis ?",
+          "options": [
+            "À tout moment",
+            "Seulement quand le format est complet",
+            "Jamais",
+            "Seulement après 100 tokens"
+          ],
+          "correctIndex": 1,
+          "explanation": "Tant que l'objet n'est pas fermé, l'automate n'est pas dans un état final : la fin de texte est masquée comme les autres tokens interdits."
+        },
+        {
+          "question": "Pourquoi vérifier le token entier plutôt qu'un seul caractère ?",
+          "options": [
+            "Parce qu'un token peut contenir plusieurs caractères, et tous doivent être lisibles depuis l'état courant",
+            "Parce que les caractères ne sont jamais utilisés",
+            "Parce que l'automate ne lit que des mots",
+            "Pour réduire la taille du vocabulaire"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le modèle choisit des tokens, souvent de plusieurs caractères. Un token n'est permis que si la lecture de tous ses caractères laisse l'automate dans un état valide."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Logit",
+          "definition": "Score brut qu'un modèle attribue à chaque token avant le softmax."
+        },
+        {
+          "term": "Masque de tokens",
+          "definition": "Un booléen par token du vocabulaire : permis ou interdit dans l'état courant."
+        },
+        {
+          "term": "Renormalisation",
+          "definition": "Division des probabilités restantes par leur somme, pour que le total vaille de nouveau 1."
+        },
+        {
+          "term": "Token de fin de texte (EOS)",
+          "definition": "Token spécial qui termine la génération. Sous contrainte, il n'est permis que dans un état final."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Masque et renormalisation",
+          "prompt": "Trois tokens ont pour logits 1, 0 et 0 ; le deuxième est interdit. Donnez les probabilités après masquage et expliquez ce que devient la somme des probabilités.",
+          "solution": "On remplace le logit interdit par −∞ avant le softmax, donc son exponentielle vaut 0. Il reste l’exponentielle de 1, environ 2,718, et celle de 0, égale à 1, de total 3,718. Le premier token reçoit environ 0,731 et le troisième environ 0,269 ; le deuxième vaut exactement 0. La somme reste 1 : les probabilités des tokens permis sont renormalisées, et leurs rapports ne changent pas. Le masque se place entre les logits et le choix du token, donc la température et le top-p s’appliquent ensuite aux scores masqués."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Willard et Louf, « Efficient Guided Generation for Large Language Models » (Normal Computing, 2023) : auteurs, année et principe consultés dans des résultats de recherche, texte intégral non lu",
+          "href": "https://arxiv.org/abs/2307.09702"
+        },
+        {
+          "label": "Geng et al., « Grammar-Constrained Decoding for Structured NLP Tasks without Finetuning » (EMNLP 2023) : résumé consulté dans des résultats de recherche, texte intégral non lu",
+          "href": "https://arxiv.org/abs/2305.13971"
+        },
+        {
+          "label": "Beurer-Kellner, Fischer, Vechev, « Guiding LLMs The Right Way: Fast, Non-Invasive Constrained Generation » (ICML 2024) : résumé consulté dans des résultats de recherche, texte intégral non lu",
+          "href": "https://arxiv.org/abs/2403.06988"
+        }
+      ]
+    },
+    {
+      "id": "grammaires-automates",
+      "title": "Expressions régulières, grammaires et automates",
+      "keyTakeaways": [
+        "Une expression régulière se traduit en automate fini : un petit nombre d'états, une transition par caractère. Cela suffit pour un choix fermé, une date, un identifiant.",
+        "Un JSON peut imbriquer des objets sans limite de profondeur. Un automate fini ne peut pas compter les accolades : il faut une **grammaire hors contexte** et un automate à pile.",
+        "Outlines (Willard et Louf, 2023) construit, avant la génération, un index qui associe à chaque état de l'automate l'ensemble des tokens permis.",
+        "XGrammar (Dong et al., 2024) traite les grammaires hors contexte avec une pile, et précalcule ce qui peut l'être indépendamment de la pile."
+      ],
+      "theory": "### Trois niveaux de contrainte\n\n- **Choix fermé** : la sortie doit être l'un des mots d'une liste, par exemple `positif`, `neutre` ou `négatif`. C'est le cas le plus simple : la contrainte est une alternance de mots.\n- **Expression régulière** : la sortie doit correspondre à un motif, comme une date `JJ/MM/AAAA` ou un identifiant de format fixe. Le motif se compile en **automate fini**.\n- **Grammaire hors contexte** : la sortie suit des règles qui s'emboîtent, comme JSON, une expression arithmétique parenthésée ou un langage de programmation. Il faut une **pile** pour se souvenir des structures ouvertes.\n\n### Pourquoi une pile pour JSON\n\nPour qu'une accolade fermante soit permise, il faut qu'une accolade ait été ouverte et pas encore fermée, à n'importe quelle profondeur. Un automate qui n'a qu'un nombre fixe d'états ne peut pas compter sans limite. Une grammaire hors contexte, écrite en règles du type « un objet est une accolade, des paires séparées par des virgules, une accolade », est lue par un **automate à pile**.\n\n### De l'automate au masque\n\nPour chaque état, il faut savoir quels tokens du vocabulaire sont permis. Le calculer à chaque pas en testant tout le vocabulaire (plusieurs dizaines de milliers de tokens) est lent. L'article d'Outlines (Willard et Louf, 2023) propose de le faire **une fois, avant la génération** : on parcourt le vocabulaire, et on stocke pour chaque état l'ensemble des tokens permis et l'état d'arrivée. À chaque pas, le masque est alors une simple consultation. Cette approche vise les expressions régulières et les grammaires hors contexte.\n\nPour les grammaires hors contexte, l'état n'est plus seulement un numéro : il dépend aussi du contenu de la pile, et on ne peut pas tout précalculer. XGrammar (Dong et al., 2024) sépare les tokens en deux catégories : ceux dont la validité **ne dépend pas de la pile** (précalculés) et ceux qui en dépendent (vérifiés pendant la génération), avec une représentation de la pile conçue pour être copiée et restaurée à bas coût.\n\n### Les ancêtres de l'idée\n\nLe principe de contrainte par grammaire pendant la génération est antérieur : Geng et al. (EMNLP 2023) l'appliquent à des tâches de traitement du langage sans réentraînement, avec des grammaires.\n\n### Un format de grammaire courant : GBNF\n\nLe projet llama.cpp décrit les contraintes dans un format de grammaire nommé GBNF. Chaque règle associe un nom à une suite de symboles, par exemple `racine ::= \"oui\" | \"non\"` pour un choix fermé. Les autres moteurs ont leurs propres formats, souvent proches de la notation de Backus-Naur.",
+      "analogy": {
+        "title": "Le plan de ville et le compteur de rues",
+        "text": "Un automate fini est un plan de ville où l'on sait seulement dans quel quartier on se trouve. Pour vérifier qu'on ne ferme pas plus de portes qu'on n'en a ouvertes, il faut un compteur : c'est le rôle de la pile.\n\n**Limite de l'analogie** : la pile ne compte pas des portes mais des structures du langage en cours d'écriture (objet, tableau, chaîne), dans l'ordre où elles ont été ouvertes."
+      },
+      "example": {
+        "title": "Même contrainte, deux représentations (fictif)",
+        "text": "Pour un code postal français à cinq chiffres, l'expression régulière `[0-9]{5}` donne un automate de six états : on compte les chiffres, et le sixième état est final. Pour un tableau JSON de profondeur quelconque, aucun nombre fini d'états ne suffit : on utilise la grammaire et une pile.\n\n*Exemple construit pour illustrer la différence entre les deux niveaux.*"
+      },
+      "quiz": [
+        {
+          "question": "Pourquoi une expression régulière ne suffit-elle pas pour un JSON de profondeur quelconque ?",
+          "options": [
+            "Parce qu'elle ne sait pas lire les chiffres",
+            "Parce qu'elle ne peut pas compter sans limite les structures ouvertes, ce qui demande une pile",
+            "Parce que JSON n'a pas de syntaxe",
+            "Parce qu'elle est trop lente"
+          ],
+          "correctIndex": 1,
+          "explanation": "L'imbrication à profondeur non bornée dépasse ce qu'un nombre fixe d'états peut mémoriser : on utilise une grammaire hors contexte et un automate à pile."
+        },
+        {
+          "question": "Quel est l'intérêt de précalculer un index des tokens permis par état avant la génération ?",
+          "options": [
+            "Rendre le modèle plus précis",
+            "Remplacer, à chaque pas, un parcours du vocabulaire par une consultation",
+            "Supprimer le besoin d'un automate",
+            "Réduire le nombre de paramètres"
+          ],
+          "correctIndex": 1,
+          "explanation": "C'est l'idée d'Outlines (2023) pour les expressions régulières et les grammaires : payer une fois le parcours du vocabulaire, puis lire le masque à chaque pas."
+        },
+        {
+          "question": "Dans XGrammar, que sont les tokens « indépendants du contexte » ?",
+          "options": [
+            "Les tokens dont la validité ne dépend pas du contenu de la pile, donc précalculables",
+            "Les tokens inconnus du modèle",
+            "Les tokens de fin de texte",
+            "Les tokens interdits dans tous les cas"
+          ],
+          "correctIndex": 0,
+          "explanation": "Les auteurs séparent les tokens précalculables des tokens qui dépendent de la pile, vérifiés pendant la génération."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Automate fini",
+          "definition": "Machine à nombre fixe d'états, dont l'état change à chaque caractère lu. Elle reconnaît les langages décrits par une expression régulière."
+        },
+        {
+          "term": "Grammaire hors contexte",
+          "definition": "Ensemble de règles de réécriture qui permet de décrire des structures emboîtées, comme JSON ou un langage de programmation."
+        },
+        {
+          "term": "Automate à pile",
+          "definition": "Automate muni d'une pile, qui lui permet de suivre des structures ouvertes à profondeur non bornée."
+        },
+        {
+          "term": "GBNF",
+          "definition": "Format de grammaire utilisé par llama.cpp pour contraindre la génération."
+        }
+      ],
+      "diagram": {
+        "title": "Trois niveaux de contrainte",
+        "description": "Schéma illustratif : choix fermé, expression régulière et grammaire hors contexte avec pile.",
+        "svg": "<svg viewBox=\"0 0 900 390\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Schéma illustratif : choix fermé, expression régulière et grammaire hors contexte\">\n  <defs>\n    <marker id=\"dc2-arrow\" markerWidth=\"9\" markerHeight=\"7\" refX=\"7\" refY=\"3.5\" orient=\"auto\"><path d=\"M0,0 L9,3.5 L0,7 z\" fill=\"#38bdf8\" /></marker>\n  </defs>\n  <rect width=\"900\" height=\"390\" rx=\"16\" fill=\"#0f172a\" />\n  <text x=\"450\" y=\"32\" fill=\"#7dd3fc\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"16\" text-anchor=\"middle\">Du choix fermé à la grammaire hors contexte</text>\n  <g id=\"dc2-choice\">\n    <rect x=\"30\" y=\"54\" width=\"840\" height=\"82\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" stroke-width=\"1.4\" />\n    <text x=\"52\" y=\"82\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\">Choix fermé</text>\n    <rect x=\"240\" y=\"68\" width=\"160\" height=\"34\" rx=\"17\" fill=\"#123047\" stroke=\"#38bdf8\" />\n    <text x=\"320\" y=\"90\" fill=\"#bae6fd\" font-family=\"sans-serif\" font-size=\"13\" text-anchor=\"middle\">positif</text>\n    <rect x=\"420\" y=\"68\" width=\"160\" height=\"34\" rx=\"17\" fill=\"#123047\" stroke=\"#38bdf8\" />\n    <text x=\"500\" y=\"90\" fill=\"#bae6fd\" font-family=\"sans-serif\" font-size=\"13\" text-anchor=\"middle\">neutre</text>\n    <rect x=\"600\" y=\"68\" width=\"160\" height=\"34\" rx=\"17\" fill=\"#123047\" stroke=\"#38bdf8\" />\n    <text x=\"680\" y=\"90\" fill=\"#bae6fd\" font-family=\"sans-serif\" font-size=\"13\" text-anchor=\"middle\">négatif</text>\n    <text x=\"52\" y=\"112\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"12\">Une liste de valeurs autorisées.</text>\n  </g>\n  <g id=\"dc2-regex\">\n    <rect x=\"30\" y=\"150\" width=\"840\" height=\"96\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#a78bfa\" stroke-width=\"1.4\" />\n    <text x=\"52\" y=\"178\" fill=\"#ede9fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\">Expression régulière</text>\n    <circle cx=\"250\" cy=\"208\" r=\"17\" fill=\"#1e1b3a\" stroke=\"#c4b5fd\" />\n    <text x=\"250\" y=\"213\" fill=\"#ede9fe\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">q0</text>\n    <circle cx=\"390\" cy=\"208\" r=\"17\" fill=\"#1e1b3a\" stroke=\"#c4b5fd\" />\n    <text x=\"390\" y=\"213\" fill=\"#ede9fe\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">q1</text>\n    <circle cx=\"530\" cy=\"208\" r=\"17\" fill=\"#1e1b3a\" stroke=\"#34d399\" />\n    <text x=\"530\" y=\"213\" fill=\"#a7f3d0\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">q2</text>\n    <path d=\"M268,208 L370,208\" stroke=\"#38bdf8\" stroke-width=\"2\" fill=\"none\" marker-end=\"url(#dc2-arrow)\" />\n    <path d=\"M408,208 L510,208\" stroke=\"#38bdf8\" stroke-width=\"2\" fill=\"none\" marker-end=\"url(#dc2-arrow)\" />\n    <text x=\"310\" y=\"198\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">chiffre</text>\n    <text x=\"452\" y=\"198\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">chiffre</text>\n    <text x=\"620\" y=\"202\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\">JJ/MM/AAAA</text>\n    <text x=\"52\" y=\"234\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"12\">Un automate fini suffit pour un motif sans imbrication.</text>\n  </g>\n  <g id=\"dc2-stack\">\n    <rect x=\"30\" y=\"262\" width=\"840\" height=\"104\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#fbbf24\" stroke-width=\"1.4\" />\n    <text x=\"52\" y=\"290\" fill=\"#fde68a\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\">Grammaire hors contexte</text>\n    <text x=\"52\" y=\"314\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\">JSON peut imbriquer des objets sans limite : il faut une pile.</text>\n    <rect x=\"500\" y=\"286\" width=\"70\" height=\"28\" rx=\"4\" fill=\"#2a2415\" stroke=\"#fbbf24\" />\n    <text x=\"535\" y=\"305\" fill=\"#fde68a\" font-family=\"sans-serif\" font-size=\"13\" text-anchor=\"middle\">{</text>\n    <rect x=\"580\" y=\"286\" width=\"70\" height=\"28\" rx=\"4\" fill=\"#2a2415\" stroke=\"#fbbf24\" />\n    <text x=\"615\" y=\"305\" fill=\"#fde68a\" font-family=\"sans-serif\" font-size=\"13\" text-anchor=\"middle\">{</text>\n    <rect x=\"660\" y=\"286\" width=\"70\" height=\"28\" rx=\"4\" fill=\"#2a2415\" stroke=\"#fbbf24\" />\n    <text x=\"695\" y=\"305\" fill=\"#fde68a\" font-family=\"sans-serif\" font-size=\"13\" text-anchor=\"middle\">}</text>\n    <rect x=\"740\" y=\"286\" width=\"70\" height=\"28\" rx=\"4\" fill=\"#2a2415\" stroke=\"#fbbf24\" />\n    <text x=\"775\" y=\"305\" fill=\"#fde68a\" font-family=\"sans-serif\" font-size=\"13\" text-anchor=\"middle\">}</text>\n    <text x=\"500\" y=\"335\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\">ouvrir</text>\n    <text x=\"665\" y=\"335\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\">fermer</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "Trois niveaux de contrainte",
+            "explanation": "Le choix fermé est le plus simple, l’expression régulière ajoute un motif, la grammaire hors contexte ajoute l’imbrication.",
+            "highlight": [
+              "dc2-choice",
+              "dc2-regex",
+              "dc2-stack"
+            ]
+          },
+          {
+            "title": "L’automate fini",
+            "explanation": "Un motif comme une date se traduit en un petit nombre d’états et de transitions. Il ne compte pas les accolades.",
+            "highlight": [
+              "dc2-regex"
+            ]
+          },
+          {
+            "title": "La pile pour JSON",
+            "explanation": "Une accolade fermante n’est permise que si une accolade a été ouverte. La pile retient les structures encore ouvertes.",
+            "highlight": [
+              "dc2-stack"
+            ]
+          }
+        ]
+      },
+      "exercises": [
+        {
+          "title": "Précalculer, ou pas",
+          "prompt": "Pourquoi Outlines construit-il avant la génération un index des tokens permis par état, et pourquoi XGrammar ne peut-il pas tout précalculer pour une grammaire de JSON ?",
+          "solution": "Tester tout le vocabulaire à chaque pas serait lent : Outlines parcourt le vocabulaire une fois et stocke, pour chaque état de l’automate, les tokens permis et l’état d’arrivée ; le masque devient une consultation. Avec une grammaire hors contexte, l’état dépend aussi du contenu de la pile, qui varie pendant la génération. XGrammar sépare donc les tokens dont la validité ne dépend pas de la pile, précalculés, de ceux qui en dépendent, vérifiés à chaque pas, avec une pile peu coûteuse à copier."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Dépôt d'Outlines (dottxt), fichier README, consulté le 19/10/2026",
+          "href": "https://github.com/dottxt-ai/outlines"
+        },
+        {
+          "label": "llama.cpp, documentation des grammaires GBNF, consultée le 19/10/2026",
+          "href": "https://github.com/ggml-org/llama.cpp/blob/master/grammars/README.md"
+        }
+      ]
+    },
+    {
+      "id": "json-schema-moteurs",
+      "title": "JSON Schema et moteurs de décodage contraint",
+      "keyTakeaways": [
+        "JSON Schema décrit la forme d'un document JSON : types, champs obligatoires, valeurs permises. Les moteurs le convertissent en grammaire ou en automate.",
+        "Les moteurs ne gèrent en général qu'une partie des mots-clés de JSON Schema : la couverture varie d'un moteur à l'autre et d'une version à l'autre.",
+        "Plusieurs serveurs d'inférence proposent la contrainte (vLLM, TensorRT-LLM, llama.cpp), souvent en s'appuyant sur des bibliothèques comme XGrammar, LLGuidance ou Outlines. Leurs options évoluent, il faut lire la documentation de la version utilisée.",
+        "JSONSchemaBench (Geng et al., 2025) mesure des moteurs sur environ dix mille schémas réels, selon trois axes : efficacité, couverture, qualité."
+      ],
+      "theory": "### JSON Schema comme langage de contrainte\n\nJSON Schema est un format, lui-même écrit en JSON, qui décrit ce qu'un document JSON doit contenir. On y indique le type d'une valeur (`object`, `string`, `integer`...), les champs obligatoires (`required`), une liste de valeurs permises (`enum`), des bornes (`minimum`, `maximum`), et si des champs supplémentaires sont tolérés (`additionalProperties`). Il sert aussi hors des modèles de langage, pour valider des fichiers de configuration ou des API.\n\n### Du schéma à la contrainte\n\nUn moteur de décodage contraint compile le schéma en **grammaire** (ou en automate), puis applique le masquage vu au module 2. Le cas de llama.cpp est documenté : un sous-ensemble de JSON Schema est converti en grammaire, et les mots-clés hors de ce sous-ensemble ne sont pas pris en charge. Un champ `enum` devient une alternance de chaînes, un champ entier devient une suite de chiffres. Certaines propriétés se traduisent mal : une contrainte sur la valeur d'un nombre (par exemple « divisible par 3 ») ou sur la cohérence entre deux champs ne s'écrit pas simplement en grammaire.\n\n### Les moteurs et serveurs\n\nCe qui suit résume les pages consultées pour ce cours (voir les sources). Les options et les moteurs par défaut changent d'une version à l'autre : lisez la documentation de la version que vous utilisez.\n\n- **Outlines** : son dépôt présente des sorties contraintes par expression régulière, par schéma JSON ou modèle Pydantic, par grammaire, par choix parmi une liste, et à partir de la signature d'une fonction. Il est issu de l'article de Willard et Louf (2023).\n- **XGrammar** : son dépôt le présente comme une bibliothèque de génération structurée qui prend en charge JSON, les expressions régulières et des grammaires hors contexte, et cite parmi ses intégrations vLLM, SGLang, TensorRT-LLM et MLC-LLM. Les affirmations de performance de ce dépôt sont celles de ses auteurs.\n- **vLLM** : sa documentation décrit cinq modes de sorties structurées (choix, expression régulière, JSON, grammaire, balise structurelle). Elle indique que les moteurs `xgrammar` ou `guidance` servent de moteurs de contrainte, mentionne aussi `outlines` et `lm-format-enforcer` à propos des expressions régulières, et propose un réglage `auto` qui choisit un moteur selon la requête.\n- **TensorRT-LLM** : sa documentation de « guided decoding » décrit deux moteurs de grammaire, XGrammar et LLGuidance, choisis par le réglage `guided_decoding_backend`. Les balises structurelles ne fonctionnent qu'avec XGrammar.\n- **llama.cpp** : sa documentation décrit le format GBNF, ainsi que la conversion d'un sous-ensemble de JSON Schema en grammaire. Elle précise que certaines fonctions ne sont pas prises en charge (par exemple `uniqueItems` et `not`) et que le schéma sert seulement à contraindre la sortie, sans être ajouté au prompt.\n\n### Mesurer plutôt que supposer\n\nJSONSchemaBench (Geng et al., 2025) rassemble environ dix mille schémas JSON issus de projets réels. Il compare des moteurs sur l'**efficacité** (temps de génération), la **couverture** (parts de schémas que le moteur sait appliquer) et la **qualité** (exactitude des sorties). Retenez surtout la méthode : un moteur n'est comparable à un autre que sur un même ensemble de schémas, et la couverture compte autant que la vitesse.\n\n### Un exemple de schéma\n\nLe bloc de code ci-dessous décrit une classification de sentiment avec un niveau de confiance de 1 à 5. Avec un moteur qui prend en charge ces mots-clés, le modèle ne peut produire que ces deux champs, avec `sentiment` parmi trois valeurs et `confiance` entier entre 1 et 5.",
+      "example": {
+        "title": "Choisir entre contrainte et nouvelle tentative (fictif)",
+        "text": "Un outil interne classe des tickets de support en trois catégories. La sortie est lue par un programme, et la forme `{categorie}` est simple : un choix fermé suffit, sans schéma complexe. À l'inverse, pour un extracteur dont le schéma imbrique des listes d'objets avec des contraintes numériques, il faut vérifier que le moteur utilisé prend en charge **tous** les mots-clés employés, et garder une validation du résultat.\n\n*Situation fictive illustrant une démarche de choix.*"
+      },
+      "code": {
+        "language": "text",
+        "code": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"sentiment\": { \"enum\": [\"positif\", \"neutre\", \"negatif\"] },\n    \"confiance\": { \"type\": \"integer\", \"minimum\": 1, \"maximum\": 5 }\n  },\n  \"required\": [\"sentiment\", \"confiance\"],\n  \"additionalProperties\": false\n}",
+        "explanation": "Schéma JSON d'une classification de sentiment. Il n'est pas exécuté ici : il illustre le format. La prise en charge de chaque mot-clé (`enum`, `minimum`, `maximum`, `additionalProperties`) dépend du moteur."
+      },
+      "quiz": [
+        {
+          "question": "Que fait un moteur de décodage contraint d'un schéma JSON ?",
+          "options": [
+            "Il le convertit en grammaire ou en automate dont il tire un masque de tokens à chaque pas",
+            "Il réentraîne le modèle sur le schéma",
+            "Il le recopie dans le prompt sans autre effet",
+            "Il le valide après la génération uniquement"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le schéma est compilé en une contrainte lisible par le masquage. C'est la différence avec une simple vérification après coup."
+        },
+        {
+          "question": "Pourquoi vérifier la couverture d'un moteur avant de l'adopter ?",
+          "options": [
+            "Parce que tous les moteurs gèrent tous les mots-clés de JSON Schema",
+            "Parce que chaque moteur ne prend en charge qu'une partie de JSON Schema, et que cette partie varie",
+            "Parce que la couverture ne change jamais",
+            "Parce que la couverture remplace la vitesse"
+          ],
+          "correctIndex": 1,
+          "explanation": "JSONSchemaBench (2025) mesure justement la couverture, à côté de l'efficacité et de la qualité, car les moteurs ne gèrent pas les mêmes parties des schémas."
+        },
+        {
+          "question": "Quelle contrainte s'écrit mal sous forme de grammaire ?",
+          "options": [
+            "Un champ `enum` de trois valeurs",
+            "Un entier entre 1 et 5",
+            "Une cohérence arithmétique entre deux champs du document",
+            "Un objet avec deux champs obligatoires"
+          ],
+          "correctIndex": 2,
+          "explanation": "Les contraintes de forme se traduisent bien en grammaire. Les relations de valeurs entre champs sont difficiles à exprimer et sont à vérifier après la génération."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "JSON Schema",
+          "definition": "Format qui décrit la forme attendue d'un document JSON : types, champs obligatoires, valeurs permises."
+        },
+        {
+          "term": "Couverture",
+          "definition": "Part des schémas ou des mots-clés qu'un moteur sait appliquer."
+        },
+        {
+          "term": "Guided decoding",
+          "definition": "Nom que donnent plusieurs serveurs d'inférence au décodage contraint."
+        },
+        {
+          "term": "Pydantic",
+          "definition": "Bibliothèque Python qui décrit des données par des classes et sait en tirer un schéma JSON."
+        }
+      ],
+      "diagram": {
+        "title": "Du schéma JSON au masque",
+        "description": "Schéma illustratif : un schéma décrit la forme, le moteur le compile, puis applique le masque et vérifie sa couverture.",
+        "svg": "<svg viewBox=\"0 0 900 370\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Schéma illustratif : compilation d'un schéma JSON en grammaire et masque\">\n  <defs>\n    <marker id=\"dc3-arrow\" markerWidth=\"10\" markerHeight=\"8\" refX=\"8\" refY=\"4\" orient=\"auto\"><path d=\"M0,0 L10,4 L0,8 z\" fill=\"#38bdf8\" /></marker>\n  </defs>\n  <rect width=\"900\" height=\"370\" rx=\"16\" fill=\"#0f172a\" />\n  <text x=\"450\" y=\"34\" fill=\"#7dd3fc\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"16\" text-anchor=\"middle\">Du schéma JSON à la sortie contrainte</text>\n  <g id=\"dc3-schema\">\n    <rect x=\"30\" y=\"74\" width=\"230\" height=\"180\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" stroke-width=\"1.5\" />\n    <text x=\"145\" y=\"104\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">JSON Schema</text>\n    <text x=\"50\" y=\"136\" fill=\"#bae6fd\" font-family=\"monospace\" font-size=\"12\">type: object</text>\n    <text x=\"50\" y=\"160\" fill=\"#bae6fd\" font-family=\"monospace\" font-size=\"12\">required: [...]</text>\n    <text x=\"50\" y=\"184\" fill=\"#bae6fd\" font-family=\"monospace\" font-size=\"12\">enum: [...]</text>\n    <text x=\"50\" y=\"208\" fill=\"#bae6fd\" font-family=\"monospace\" font-size=\"12\">minimum: 1</text>\n    <text x=\"145\" y=\"238\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">La forme attendue</text>\n  </g>\n  <g id=\"dc3-compile\">\n    <rect x=\"320\" y=\"98\" width=\"210\" height=\"132\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#a78bfa\" stroke-width=\"1.5\" />\n    <text x=\"425\" y=\"128\" fill=\"#ede9fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Compilation</text>\n    <text x=\"425\" y=\"154\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">schéma</text>\n    <text x=\"425\" y=\"174\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">vers grammaire</text>\n    <text x=\"425\" y=\"194\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">ou automate</text>\n    <text x=\"425\" y=\"216\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">une fois, puis cache</text>\n  </g>\n  <g id=\"dc3-mask\">\n    <rect x=\"590\" y=\"98\" width=\"280\" height=\"132\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#34d399\" stroke-width=\"1.5\" />\n    <text x=\"730\" y=\"128\" fill=\"#a7f3d0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Masque</text>\n    <text x=\"730\" y=\"154\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">tokens permis</text>\n    <text x=\"730\" y=\"174\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">tokens interdits</text>\n    <text x=\"730\" y=\"198\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">à chaque pas</text>\n    <text x=\"730\" y=\"220\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">sortie conforme au schéma</text>\n  </g>\n  <path d=\"M260,164 L318,164\" stroke=\"#38bdf8\" stroke-width=\"2\" fill=\"none\" marker-end=\"url(#dc3-arrow)\" />\n  <path d=\"M530,164 L588,164\" stroke=\"#38bdf8\" stroke-width=\"2\" fill=\"none\" marker-end=\"url(#dc3-arrow)\" />\n  <g id=\"dc3-coverage\">\n    <rect x=\"250\" y=\"276\" width=\"620\" height=\"62\" rx=\"9\" fill=\"#2a2415\" stroke=\"#fbbf24\" stroke-width=\"1.4\" />\n    <text x=\"560\" y=\"300\" fill=\"#fde68a\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">Couverture partielle : vérifier la version du moteur</text>\n    <text x=\"560\" y=\"322\" fill=\"#fef3c7\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">uniqueItems, not, relations entre champs et contraintes de valeur ne passent pas toujours en grammaire.</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "Le schéma décrit la forme",
+            "explanation": "Le schéma indique les types, les champs obligatoires, les valeurs permises et les bornes. Il ne décrit pas la vérité du contenu.",
+            "highlight": [
+              "dc3-schema"
+            ]
+          },
+          {
+            "title": "Le moteur compile le schéma",
+            "explanation": "Le moteur transforme le schéma en grammaire ou en automate, puis applique le masque à chaque pas. Le résultat peut être mis en cache.",
+            "highlight": [
+              "dc3-compile",
+              "dc3-mask"
+            ]
+          },
+          {
+            "title": "Vérifier la couverture",
+            "explanation": "Tous les mots-clés ne sont pas pris en charge. Un schéma ignoré en silence donne une sortie non contrainte alors que le code la croit valide.",
+            "highlight": [
+              "dc3-coverage"
+            ]
+          }
+        ]
+      },
+      "exercises": [
+        {
+          "title": "Un schéma partiellement pris en charge",
+          "prompt": "Un schéma JSON emploie `uniqueItems` et une contrainte « divisible par 3 ». Que peut-on attendre de la conversion en grammaire décrite pour llama.cpp, et que faut-il ajouter au programme ?",
+          "solution": "Le moteur ne convertit qu’un sous-ensemble de JSON Schema : une énumération devient une alternance de chaînes, un entier une suite de chiffres, mais `uniqueItems` et `not` ne sont pas pris en charge, et une contrainte sur la valeur d’un nombre ne s’écrit pas simplement en grammaire. La sortie peut donc respecter la forme sans respecter ces règles. Il faut vérifier ces propriétés après coup, par du code, et garder une validation du résultat : un schéma ignoré en silence est le pire cas."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Geng et al., « JSONSchemaBench: A Rigorous Benchmark of Structured Outputs for Language Models » (2025) : résumé consulté dans des résultats de recherche, texte intégral non lu",
+          "href": "https://arxiv.org/abs/2501.10868"
+        },
+        {
+          "label": "Dépôt de XGrammar (projet MLC), fichier README, consulté le 19/10/2026",
+          "href": "https://github.com/mlc-ai/xgrammar"
+        },
+        {
+          "label": "vLLM, documentation « Structured Outputs » (fichier du dépôt, version principale), consultée le 19/10/2026",
+          "href": "https://github.com/vllm-project/vllm/blob/main/docs/features/structured_outputs.md"
+        },
+        {
+          "label": "Dépôt de JSONSchemaBench (Guidance), fichier README, consulté le 19/10/2026",
+          "href": "https://github.com/guidance-ai/jsonschemabench"
+        }
+      ]
+    },
+    {
+      "id": "compromis",
+      "title": "Latence, débit et qualité : les compromis",
+      "keyTakeaways": [
+        "Le masque doit être prêt avant chaque choix de token. S'il est lent à fabriquer, il retarde la génération ; s'il est précalculé, le coût est déplacé vers une compilation initiale.",
+        "Compiler une grammaire ou un schéma a un coût, payé à la première requête avec ce schéma. Les moteurs mettent en cache les schémas déjà vus.",
+        "Le masque est calculé par requête : sur un serveur qui traite beaucoup de requêtes à la fois, la fabrication des masques peut limiter le débit.",
+        "Contraindre la forme peut dégrader la qualité de certaines tâches (Tam et al., 2024). Le résultat dépend de la tâche et du format : il se mesure sur ses propres données."
+      ],
+      "theory": "### Latence\n\nLa **latence** est le temps que met une requête à produire sa réponse. Le décodage contraint ajoute deux coûts :\n\n1. **La compilation** du schéma en grammaire ou en automate, payée avant le premier token. Pour un schéma volumineux, elle peut se remarquer. Les moteurs gardent en mémoire les schémas déjà compilés, ce qui rend les requêtes suivantes avec le même schéma moins coûteuses.\n2. **Le masque à chaque pas**, qui s'ajoute au calcul du modèle. Avec un automate précalculé (Outlines), c'est une consultation. Avec une grammaire hors contexte, une partie du travail dépend de la pile et reste à faire pendant la génération.\n\n### Débit\n\nUn serveur traite de nombreuses requêtes simultanément sur des cartes graphiques. Le masque, lui, est souvent calculé sur le processeur central, requête par requête. Si cette partie est lente, la carte graphique attend. XGrammar (Dong et al., 2024) est conçu pour que le calcul des masques **se superpose** à celui du modèle. Ses auteurs rapportent, dans le résumé de leur article, des gains pouvant atteindre un facteur 100 par rapport à d'autres solutions de décodage contraint, mesurés sur leurs propres tests : c'est un chiffre annoncé par les auteurs, à ne pas transposer à un autre matériel, un autre modèle ou un autre schéma.\n\n### Qualité\n\nDeux questions distinctes :\n\n- **La sortie est-elle valide ?** Oui, par construction, pour les contraintes que le moteur sait appliquer.\n- **Le contenu est-il aussi bon que sans contrainte ?** Pas nécessairement. Tam et al. (EMNLP 2024, volet industrie) étudient si imposer un format comme JSON ou XML affaiblit le raisonnement des modèles. D'après leur résumé, ils comparent des réponses sous règles de format et des réponses libres, et constatent une baisse nette de la capacité de raisonnement sous règles de format, d'autant plus marquée que les règles sont strictes. Hypothèse courante, que ce cours ne démontre pas : si le format impose de répondre tout de suite, le modèle n'a pas la place d'écrire son raisonnement avant la réponse. Les résultats dépendent des modèles et des tâches ; JSONSchemaBench (Geng et al., 2025) inclut aussi un axe de qualité pour cette raison.\n\n### Une règle pratique pour les schémas\n\nPlacer dans le schéma un champ de texte libre pour le raisonnement **avant** le champ de réponse laisse au modèle la possibilité de raisonner avant de s'engager. C'est une pratique à tester, pas une garantie.\n\n### Tokens et frontières\n\nLe vocabulaire d'un modèle découpe le texte en tokens qui ne coïncident pas avec les frontières de la grammaire. Un moteur qui ne tient pas compte de ce décalage peut forcer le modèle à écrire des suites de tokens peu naturelles pour lui, ce qui dégrade la qualité. Beurer-Kellner et al. (ICML 2024) indiquent, dans leur résumé, que certaines méthodes de décodage contraint dégradent nettement l'exactitude quand elles n'alignent pas le vocabulaire en sous-mots du modèle et les contraintes externes. Ils analysent ce problème et proposent une méthode pour le limiter.",
+      "analogy": {
+        "title": "La dictée surveillée",
+        "text": "Un élève écrit sous la surveillance d'un correcteur qui barre toute lettre hors format. Le format est toujours respecté. Mais si l'élève doit remplir la case réponse sans avoir le droit de poser son raisonnement sur un brouillon, il risque de se tromper davantage.\n\n**Limite de l'analogie** : un modèle ne se fatigue pas ni ne se vexe, et le brouillon se traduit ici par des tokens de raisonnement avant la réponse, que le schéma peut autoriser."
+      },
+      "example": {
+        "title": "Deux schémas pour la même question (fictif)",
+        "text": "Schéma A : `{\"reponse\": entier}`. Schéma B : `{\"raisonnement\": texte, \"reponse\": entier}`. Dans le schéma B, le modèle écrit d'abord quelques lignes de raisonnement, puis l'entier. Le schéma B coûte des tokens de sortie en plus (donc du temps et, avec une API, de l'argent), et peut mieux se comporter sur une tâche de calcul. Seul un test sur vos propres exemples permet de décider.\n\n*Comparaison fictive pour illustrer l'arbitrage, sans mesure.*"
+      },
+      "quiz": [
+        {
+          "question": "Pourquoi le calcul du masque peut-il limiter le débit d'un serveur ?",
+          "options": [
+            "Parce qu'il est calculé par requête, souvent sur le processeur central, et peut faire attendre la carte graphique",
+            "Parce qu'il augmente la taille du modèle",
+            "Parce qu'il supprime la mémoire cache",
+            "Il ne peut jamais le limiter"
+          ],
+          "correctIndex": 0,
+          "explanation": "Un masque lent à fabriquer retarde le choix du token. D'où l'intérêt de précalculer et de superposer ce calcul à celui du modèle."
+        },
+        {
+          "question": "Que rapporte, d'après son résumé, l'étude de Tam et al. (2024) ?",
+          "options": [
+            "Contraindre le format améliore toujours la qualité",
+            "Une baisse du raisonnement sous règles de format, d'autant plus marquée que les règles sont strictes",
+            "Le format n'a jamais d'effet",
+            "Seuls les formats libres sont valides"
+          ],
+          "correctIndex": 1,
+          "explanation": "L'effet dépend de la tâche, du modèle et du format. Il faut le mesurer sur ses propres données."
+        },
+        {
+          "question": "Pourquoi placer un champ de raisonnement avant le champ de réponse dans un schéma ?",
+          "options": [
+            "Pour que le modèle puisse écrire son raisonnement avant de s'engager sur la réponse",
+            "Pour supprimer la compilation du schéma",
+            "Pour garantir que la réponse soit juste",
+            "Pour rendre le masque inutile"
+          ],
+          "correctIndex": 0,
+          "explanation": "C'est une pratique à tester : elle donne de la place au raisonnement, au prix de tokens de sortie supplémentaires, sans garantie de justesse."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Latence",
+          "definition": "Temps écoulé entre l'envoi d'une requête et la réception de la réponse."
+        },
+        {
+          "term": "Débit",
+          "definition": "Quantité de travail traitée par seconde par un serveur, par exemple le nombre de tokens produits."
+        },
+        {
+          "term": "Compilation du schéma",
+          "definition": "Conversion d'un schéma ou d'une grammaire en automate, effectuée avant le premier token et mise en cache."
+        },
+        {
+          "term": "Alignement des tokens",
+          "definition": "Accord entre les frontières des tokens du vocabulaire et celles de la grammaire. Un mauvais alignement force des découpages peu naturels pour le modèle."
+        }
+      ],
+      "diagram": {
+        "title": "Trois coûts à mesurer",
+        "description": "Schéma illustratif : compilation, masque à chaque pas et qualité de la sortie.",
+        "svg": "<svg viewBox=\"0 0 900 370\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Schéma illustratif : compilation, débit du masque et qualité\">\n  <rect width=\"900\" height=\"370\" rx=\"16\" fill=\"#0f172a\" />\n  <text x=\"450\" y=\"34\" fill=\"#7dd3fc\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"16\" text-anchor=\"middle\">Latence, débit et qualité : trois coûts distincts</text>\n  <g id=\"dc4-compile\">\n    <rect x=\"30\" y=\"70\" width=\"260\" height=\"180\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" stroke-width=\"1.5\" />\n    <text x=\"160\" y=\"102\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"15\" text-anchor=\"middle\">Compilation</text>\n    <text x=\"160\" y=\"132\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">coût à la première requête</text>\n    <text x=\"160\" y=\"156\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">schéma vers grammaire</text>\n    <text x=\"160\" y=\"180\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">puis cache</text>\n    <text x=\"160\" y=\"218\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">visible sur les gros schémas</text>\n  </g>\n  <g id=\"dc4-mask\">\n    <rect x=\"320\" y=\"70\" width=\"260\" height=\"180\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#a78bfa\" stroke-width=\"1.5\" />\n    <text x=\"450\" y=\"102\" fill=\"#ede9fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"15\" text-anchor=\"middle\">Masque</text>\n    <text x=\"450\" y=\"132\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">calcul à chaque pas</text>\n    <text x=\"450\" y=\"156\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">souvent sur le processeur</text>\n    <text x=\"450\" y=\"180\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">peut limiter le débit</text>\n    <text x=\"450\" y=\"218\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">mesurer sur son serveur</text>\n  </g>\n  <g id=\"dc4-quality\">\n    <rect x=\"610\" y=\"70\" width=\"260\" height=\"180\" rx=\"10\" fill=\"#2a2415\" stroke=\"#fbbf24\" stroke-width=\"1.5\" />\n    <text x=\"740\" y=\"102\" fill=\"#fde68a\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"15\" text-anchor=\"middle\">Qualité</text>\n    <text x=\"740\" y=\"132\" fill=\"#fef3c7\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">format plus strict</text>\n    <text x=\"740\" y=\"156\" fill=\"#fef3c7\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">raisonnement parfois gêné</text>\n    <text x=\"740\" y=\"180\" fill=\"#fef3c7\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">dépend de la tâche</text>\n    <text x=\"740\" y=\"218\" fill=\"#fde68a\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">à mesurer, pas à supposer</text>\n  </g>\n  <g id=\"dc4-measure\">\n    <rect x=\"190\" y=\"286\" width=\"520\" height=\"34\" rx=\"17\" fill=\"#0c1d2e\" stroke=\"#38bdf8\" />\n    <text x=\"450\" y=\"308\" fill=\"#bae6fd\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Comparer sur ses propres cas : latence, débit, exactitude</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "Compiler et cacher",
+            "explanation": "La compilation du schéma se paie avant le premier token. Les moteurs mettent les schémas déjà vus en cache.",
+            "highlight": [
+              "dc4-compile"
+            ]
+          },
+          {
+            "title": "Le masque pèse sur le débit",
+            "explanation": "Le masque est recalculé à chaque pas. Sur un serveur chargé, sa fabrication peut devenir le facteur limitant.",
+            "highlight": [
+              "dc4-mask"
+            ]
+          },
+          {
+            "title": "La qualité ne se suppose pas",
+            "explanation": "Une contrainte stricte peut gêner certaines tâches de raisonnement. Le résultat dépend du modèle, de la tâche et du format.",
+            "highlight": [
+              "dc4-quality",
+              "dc4-measure"
+            ]
+          }
+        ]
+      },
+      "exercises": [
+        {
+          "title": "Un champ pour raisonner",
+          "prompt": "Deux schémas pour la même question : `{\"reponse\": entier}` et `{\"raisonnement\": texte, \"reponse\": entier}`. Quel arbitrage faites-vous, et pourquoi une contrainte de format peut-elle dégrader le raisonnement ?",
+          "solution": "Le second schéma laisse le modèle écrire son raisonnement avant de s’engager sur un entier ; il coûte en revanche plus de tokens de sortie, donc du temps et, par API, de l’argent. Tam et al. (2024) rapportent une baisse nette du raisonnement sous des règles de format, d’autant plus marquée que les règles sont strictes. Une hypothèse courante, non démontrée, est que le format empêche d’écrire le raisonnement avant la réponse. Le résultat dépend de la tâche : à tester sur vos exemples."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Tam et al., « Let Me Speak Freely? A Study on the Impact of Format Restrictions on Performance of Large Language Models » (EMNLP 2024, volet industrie) : résumé consulté dans des résultats de recherche, texte intégral non lu",
+          "href": "https://arxiv.org/abs/2408.02442"
+        },
+        {
+          "label": "Beurer-Kellner, Fischer, Vechev, « Guiding LLMs The Right Way: Fast, Non-Invasive Constrained Generation » (ICML 2024) : résumé consulté dans des résultats de recherche, texte intégral non lu",
+          "href": "https://arxiv.org/abs/2403.06988"
+        },
+        {
+          "label": "TensorRT-LLM (NVIDIA), documentation « Guided Decoding » (fichier du dépôt, version principale), consultée le 19/10/2026",
+          "href": "https://github.com/NVIDIA/TensorRT-LLM/blob/main/docs/source/features/guided-decoding.md"
+        }
+      ]
+    },
+    {
+      "id": "limites",
+      "title": "Les limites du décodage contraint",
+      "keyTakeaways": [
+        "La forme est garantie, pas le contenu : un JSON valide peut contenir une valeur fausse ou inventée.",
+        "Une contrainte mal conçue peut piéger la génération : impasse (aucun token permis), texte tronqué par la limite de longueur, ou contenu absurde mais conforme.",
+        "Les moteurs ne gèrent qu'une partie des schémas. Une contrainte non prise en charge doit être vérifiée après coup.",
+        "Garder une validation du résultat reste utile : sécurité, contraintes entre champs, erreurs de configuration."
+      ],
+      "theory": "### 1. Valide ne veut pas dire exact\n\nSi le schéma impose un entier, le modèle écrira un entier, même s'il ne connaît pas la réponse. La contrainte peut même rendre l'erreur moins visible : une réponse « je ne sais pas » en texte libre est évidente, un `{\"age\": 37}` bien formé a l'air d'une donnée. Si le schéma ne prévoit pas de valeur pour exprimer l'incertitude (`null`, une étiquette `inconnu`), le modèle n'a pas d'autre choix que de répondre.\n\n### 2. La limite de longueur\n\nUne génération s'arrête à un nombre maximal de tokens. Si cette limite tombe au milieu d'un objet, la sortie est **tronquée et donc invalide**, malgré la contrainte : celle-ci garantit que tout préfixe est valide, pas que la sortie soit terminée. Il faut prévoir une limite assez large, et détecter les sorties tronquées.\n\n### 3. Les impasses\n\nIl arrive qu'un état n'autorise aucun token : par exemple si le vocabulaire ne contient pas la suite de tokens nécessaire pour écrire un caractère requis. Les moteurs sérieux s'en protègent en vérifiant le vocabulaire à la compilation, mais l'assertion du code du module 2 rappelle que le cas existe.\n\n### 4. Les contraintes non exprimables\n\nUne relation entre champs (la somme des lignes égale le total), une contrainte sur une valeur (un nombre premier), un lien avec le monde (l'adresse existe) ne passent pas dans une grammaire. Elles se vérifient après coup, par du code.\n\n### 5. La couverture des moteurs\n\nSelon le moteur, certains mots-clés de JSON Schema sont ignorés ou refusés. Un schéma ignoré en silence est le pire cas : la sortie n'est alors pas contrainte, alors que le code appelant suppose qu'elle l'est. Garder une validation du résultat sert aussi à cela.\n\n### 6. Données de l'utilisateur dans la sortie\n\nUne contrainte de forme ne protège pas des contenus : un champ de texte libre peut contenir une injection de prompt reprise d'un document, ou des données sensibles. Un JSON valide reste une donnée non fiable quand il vient d'un modèle, surtout s'il déclenche des actions (voir les cours sur MCP et les boucles agentiques).\n\n### 7. Ce que le décodage contraint ne remplace pas\n\nIl ne remplace ni de bons exemples dans le prompt, ni une évaluation sur des cas réels, ni un modèle adapté à la tâche. Pour de très petits modèles, il peut aider à obtenir une sortie lisible, mais le contenu reste limité par ce que le modèle sait faire.",
+      "analogy": {
+        "title": "L'emballage et le contenu",
+        "text": "La contrainte garantit l'emballage : une boîte aux bonnes dimensions, avec les bonnes étiquettes. Elle ne dit rien de ce que contient la boîte.\n\n**Limite de l'analogie** : l'emballage influence parfois le contenu, car imposer une forme change ce que le modèle peut écrire (module 5)."
+      },
+      "example": {
+        "title": "Une sortie tronquée (fictif)",
+        "text": "Un schéma demande une liste de produits. La limite est fixée à 50 tokens, et la liste en demande davantage. La génération s'arrête à `{\"produits\": [{\"nom\": \"stylo\", \"prix\": 1`. Chaque préfixe était valide, mais le texte final ne se lit pas comme du JSON. Le programme doit tester l'achèvement de la génération (raison d'arrêt) avant de lire la sortie.\n\n*Exemple fictif.*"
+      },
+      "quiz": [
+        {
+          "question": "Une génération contrainte s'arrête à la limite de longueur au milieu d'un objet. Que peut-on dire de la sortie ?",
+          "options": [
+            "Elle est valide car le schéma était respecté",
+            "Elle est un préfixe valide mais incomplète, donc non lisible comme document complet",
+            "Elle sera complétée automatiquement",
+            "Le moteur recommence tout seul"
+          ],
+          "correctIndex": 1,
+          "explanation": "La contrainte assure que tout préfixe reste extensible vers un document valide, pas que le document soit terminé."
+        },
+        {
+          "question": "Pourquoi prévoir une valeur « inconnu » ou null dans un schéma ?",
+          "options": [
+            "Pour accélérer la génération",
+            "Pour éviter que le modèle soit forcé d'inventer une valeur quand il ne sait pas",
+            "Pour désactiver la contrainte",
+            "Pour réduire la taille du vocabulaire"
+          ],
+          "correctIndex": 1,
+          "explanation": "Sans issue prévue dans le schéma, le modèle doit produire une valeur du type demandé, même sans information."
+        },
+        {
+          "question": "Quelle vérification reste nécessaire après un décodage contraint ?",
+          "options": [
+            "Aucune",
+            "Celles que la grammaire ne peut pas exprimer : cohérence entre champs, justesse, sécurité du contenu",
+            "Seulement la syntaxe JSON",
+            "Uniquement la longueur du prompt"
+          ],
+          "correctIndex": 1,
+          "explanation": "La forme est garantie pour les contraintes prises en charge. Le reste se contrôle par du code et par une évaluation."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Impasse",
+          "definition": "État dans lequel aucun token du vocabulaire n'est permis par la contrainte."
+        },
+        {
+          "term": "Troncature",
+          "definition": "Arrêt de la génération par la limite de longueur avant la fin du document : le texte obtenu est un préfixe."
+        },
+        {
+          "term": "Injection de prompt",
+          "definition": "Texte placé dans une donnée pour détourner le comportement d'un modèle. Un JSON valide peut en contenir."
+        }
+      ],
+      "diagram": {
+        "title": "Ce que la contrainte ne couvre pas",
+        "description": "Schéma illustratif : forme valide, troncature, impasse et validation après coup.",
+        "svg": "<svg viewBox=\"0 0 900 410\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Schéma illustratif : quatre limites du décodage contraint\">\n  <rect width=\"900\" height=\"410\" rx=\"16\" fill=\"#0f172a\" />\n  <text x=\"450\" y=\"32\" fill=\"#7dd3fc\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"16\" text-anchor=\"middle\">Quatre limites à garder en tête</text>\n  <g id=\"dc5-valid\">\n    <rect x=\"30\" y=\"58\" width=\"400\" height=\"128\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#34d399\" stroke-width=\"1.4\" />\n    <text x=\"54\" y=\"86\" fill=\"#a7f3d0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\">Valide n’est pas exact</text>\n    <rect x=\"54\" y=\"100\" width=\"352\" height=\"34\" rx=\"6\" fill=\"#0b2635\" stroke=\"#38bdf8\" />\n    <text x=\"230\" y=\"123\" fill=\"#e0f2fe\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">{\"age\": 37}</text>\n    <text x=\"54\" y=\"158\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\">La forme est garantie, la valeur ne l’est pas.</text>\n  </g>\n  <g id=\"dc5-trunc\">\n    <rect x=\"470\" y=\"58\" width=\"400\" height=\"128\" rx=\"10\" fill=\"#1c1420\" stroke=\"#f87171\" stroke-width=\"1.4\" />\n    <text x=\"494\" y=\"86\" fill=\"#fecaca\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\">Troncature</text>\n    <text x=\"494\" y=\"112\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\">la limite de tokens tombe au milieu</text>\n    <text x=\"494\" y=\"134\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\">d’un objet ouvert</text>\n    <text x=\"494\" y=\"164\" fill=\"#fca5a5\" font-family=\"sans-serif\" font-size=\"12\">la sortie peut être incomplète</text>\n  </g>\n  <g id=\"dc5-impasse\">\n    <rect x=\"30\" y=\"208\" width=\"400\" height=\"128\" rx=\"10\" fill=\"#1c1420\" stroke=\"#fb923c\" stroke-width=\"1.4\" />\n    <text x=\"54\" y=\"236\" fill=\"#fed7aa\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\">Impasse</text>\n    <text x=\"54\" y=\"262\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\">aucun token permis dans l’état courant</text>\n    <text x=\"54\" y=\"284\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\">vocabulaire ou grammaire incompatible</text>\n    <text x=\"54\" y=\"314\" fill=\"#fdba74\" font-family=\"sans-serif\" font-size=\"12\">prévoir un contrôle à la compilation</text>\n  </g>\n  <g id=\"dc5-validation\">\n    <rect x=\"470\" y=\"208\" width=\"400\" height=\"128\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#38bdf8\" stroke-width=\"1.4\" />\n    <text x=\"494\" y=\"236\" fill=\"#bae6fd\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\">Validation après coup</text>\n    <text x=\"494\" y=\"262\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\">relations entre champs</text>\n    <text x=\"494\" y=\"284\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\">sécurité et données non fiables</text>\n    <text x=\"494\" y=\"314\" fill=\"#7dd3fc\" font-family=\"sans-serif\" font-size=\"12\">garder un contrôle du résultat</text>\n  </g>\n  <g id=\"dc5-rule\">\n    <rect x=\"170\" y=\"360\" width=\"560\" height=\"30\" rx=\"15\" fill=\"#2a2415\" stroke=\"#fbbf24\" />\n    <text x=\"450\" y=\"380\" fill=\"#fde68a\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">La contrainte garantit la forme, pas la vérité</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "Valide n’est pas exact",
+            "explanation": "Un entier bien formé peut être faux. Si le schéma ne prévoit pas d’exprimer l’incertitude, le modèle doit tout de même répondre.",
+            "highlight": [
+              "dc5-valid"
+            ]
+          },
+          {
+            "title": "Deux pièges de génération",
+            "explanation": "Une limite de longueur peut couper un objet, et un état peut n’autoriser aucun token. La contrainte ne protège pas de ces cas.",
+            "highlight": [
+              "dc5-trunc",
+              "dc5-impasse"
+            ]
+          },
+          {
+            "title": "Garder une validation",
+            "explanation": "Les relations entre champs, la sécurité et les données non fiables se vérifient après la génération, par du code.",
+            "highlight": [
+              "dc5-validation",
+              "dc5-rule"
+            ]
+          }
+        ]
+      },
+      "exercises": [
+        {
+          "title": "Valide mais faux",
+          "prompt": "Un modèle contraint par un schéma JSON renvoie un objet valide. Pourquoi faut-il tout de même vérifier le contenu et la fin de la sortie ?",
+          "solution": "La contrainte garantit la forme, pas la vérité. Un champ peut être inventé, une sortie peut être tronquée par la limite de longueur, et le moteur ne couvre pas tous les schémas. Il faut valider après coup et prévoir une valeur pour l’incertitude."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Dong et al., « XGrammar: Flexible and Efficient Structured Generation Engine for Large Language Models » (2024, révisé en 2025) : résumé consulté dans des résultats de recherche, texte intégral non lu",
+          "href": "https://arxiv.org/abs/2411.15100"
+        },
+        {
+          "label": "Geng et al., « JSONSchemaBench: A Rigorous Benchmark of Structured Outputs for Language Models » (2025) : résumé consulté dans des résultats de recherche, texte intégral non lu",
+          "href": "https://arxiv.org/abs/2501.10868"
+        },
+        {
+          "label": "Tam et al., « Let Me Speak Freely? A Study on the Impact of Format Restrictions on Performance of Large Language Models » (EMNLP 2024, volet industrie) : résumé consulté dans des résultats de recherche, texte intégral non lu",
+          "href": "https://arxiv.org/abs/2408.02442"
+        },
+        {
+          "label": "Beurer-Kellner, Fischer, Vechev, « Guiding LLMs The Right Way: Fast, Non-Invasive Constrained Generation » (ICML 2024) : résumé consulté dans des résultats de recherche, texte intégral non lu",
+          "href": "https://arxiv.org/abs/2403.06988"
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "label": "Willard et Louf, « Efficient Guided Generation for Large Language Models » (Normal Computing, 2023) : auteurs, année et principe consultés dans des résultats de recherche, texte intégral non lu",
+      "href": "https://arxiv.org/abs/2307.09702"
+    },
+    {
+      "label": "Dong et al., « XGrammar: Flexible and Efficient Structured Generation Engine for Large Language Models » (2024, révisé en 2025) : résumé consulté dans des résultats de recherche, texte intégral non lu",
+      "href": "https://arxiv.org/abs/2411.15100"
+    },
+    {
+      "label": "Geng et al., « JSONSchemaBench: A Rigorous Benchmark of Structured Outputs for Language Models » (2025) : résumé consulté dans des résultats de recherche, texte intégral non lu",
+      "href": "https://arxiv.org/abs/2501.10868"
+    },
+    {
+      "label": "Geng et al., « Grammar-Constrained Decoding for Structured NLP Tasks without Finetuning » (EMNLP 2023) : résumé consulté dans des résultats de recherche, texte intégral non lu",
+      "href": "https://arxiv.org/abs/2305.13971"
+    },
+    {
+      "label": "Tam et al., « Let Me Speak Freely? A Study on the Impact of Format Restrictions on Performance of Large Language Models » (EMNLP 2024, volet industrie) : résumé consulté dans des résultats de recherche, texte intégral non lu",
+      "href": "https://arxiv.org/abs/2408.02442"
+    },
+    {
+      "label": "Beurer-Kellner, Fischer, Vechev, « Guiding LLMs The Right Way: Fast, Non-Invasive Constrained Generation » (ICML 2024) : résumé consulté dans des résultats de recherche, texte intégral non lu",
+      "href": "https://arxiv.org/abs/2403.06988"
+    },
+    {
+      "label": "Dépôt d'Outlines (dottxt), fichier README, consulté le 19/10/2026",
+      "href": "https://github.com/dottxt-ai/outlines"
+    },
+    {
+      "label": "Dépôt de XGrammar (projet MLC), fichier README, consulté le 19/10/2026",
+      "href": "https://github.com/mlc-ai/xgrammar"
+    },
+    {
+      "label": "vLLM, documentation « Structured Outputs » (fichier du dépôt, version principale), consultée le 19/10/2026",
+      "href": "https://github.com/vllm-project/vllm/blob/main/docs/features/structured_outputs.md"
+    },
+    {
+      "label": "TensorRT-LLM (NVIDIA), documentation « Guided Decoding » (fichier du dépôt, version principale), consultée le 19/10/2026",
+      "href": "https://github.com/NVIDIA/TensorRT-LLM/blob/main/docs/source/features/guided-decoding.md"
+    },
+    {
+      "label": "llama.cpp, documentation des grammaires GBNF, consultée le 19/10/2026",
+      "href": "https://github.com/ggml-org/llama.cpp/blob/master/grammars/README.md"
+    },
+    {
+      "label": "Dépôt de JSONSchemaBench (Guidance), fichier README, consulté le 19/10/2026",
+      "href": "https://github.com/guidance-ai/jsonschemabench"
+    }
+  ],
+  "related": [
+    {
+      "to": "/cours/generation-mot-par-mot",
+      "title": "Comment un modèle de langage produit le token suivant",
+      "description": "Logits, softmax, température et top-p : le mécanisme sur lequel s'appuie le masque."
+    },
+    {
+      "to": "/cours/mcp",
+      "title": "Le Model Context Protocol (MCP)",
+      "description": "Les appels d'outils échangent des arguments JSON : la forme de ces arguments est un cas d'usage de la contrainte."
+    },
+    {
+      "to": "/cours/boucles-agentiques",
+      "title": "Les boucles agentiques",
+      "description": "Les agents lisent des sorties structurées à chaque tour : validation et garde-fous."
+    },
+    {
+      "to": "/cours/rag",
+      "title": "Le RAG",
+      "description": "Un pipeline RAG demande souvent une réponse structurée avec ses sources."
+    }
+  ]
+}

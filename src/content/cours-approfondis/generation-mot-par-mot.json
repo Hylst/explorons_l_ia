@@ -1,0 +1,1171 @@
+{
+  "slug": "generation-mot-par-mot",
+  "title": "Comment un modèle de langage produit le token suivant",
+  "subtitle": "Tokens, embeddings, attention, blocs Transformer, probabilités, échantillonnage et cache KV, avec GPT-2 comme exemple que l'on peut exécuter",
+  "level": "Intermédiaire",
+  "tags": [
+    "Tokenisation",
+    "Transformer",
+    "Attention",
+    "Échantillonnage",
+    "Cache KV",
+    "GPT-2"
+  ],
+  "summary": "Ce cours suit le trajet complet d'un texte dans un modèle de langage de type GPT, jusqu'au choix du token suivant : découpage en tokens, embeddings et positions, attention et masque causal, blocs Transformer, logits, softmax, température, top-k, top-p, puis génération token par token avec le cache KV. Il s'adresse à des personnes qui savent ce qu'est un prompt et un modèle de langage, et qui veulent comprendre ce qui se passe entre la question et la réponse. Les exemples de code utilisent GPT-2, un petit modèle publié en 2019 que l'on peut télécharger et exécuter chez soi : les valeurs affichées (logits, poids d'attention, taille du cache) sont de vraies mesures.",
+  "introduction": "### Pourquoi ce sujet\n\nUn assistant conversationnel donne l'impression de « répondre ». Mécaniquement, un modèle de langage de type GPT fait autre chose, et de beaucoup plus simple à énoncer : à partir d'une suite de tokens, il calcule une distribution de probabilité sur le token suivant, on en choisit un, on l'ajoute au texte, et on recommence. Comprendre cette boucle aide à interpréter ce que l'on observe en pratique : pourquoi deux réponses à la même question diffèrent, pourquoi la langue ou la longueur du texte changent le coût, pourquoi la mémoire d'un serveur limite la taille du contexte, ou pourquoi une réponse fausse peut être écrite avec le même aplomb qu'une réponse juste.\n\n### D'où viennent les idées\n\n- **Le Transformer** est présenté en 2017 par Vaswani et al. dans l'article *Attention Is All You Need* (arXiv 1706.03762). Il remplace la récurrence des réseaux précédents par un mécanisme d'attention, calculable en parallèle sur toute la séquence.\n- **Le découpage en sous-mots par BPE** (*byte pair encoding*) est adapté au traitement du langage par Sennrich, Haddow et Birch (arXiv 1508.07909, ACL 2016), pour la traduction automatique.\n- **GPT-2** est décrit par Radford et al. (OpenAI, 2019) dans *Language Models are Unsupervised Multitask Learners*. C'est un modèle « décodeur seul » dont les poids sont publiés. Sa plus petite version compte environ 124 millions de paramètres, ce qui permet de l'exécuter sur un ordinateur ordinaire.\n- **Les méthodes d'échantillonnage** viennent de plusieurs travaux : top-k (Fan, Lewis et Dauphin, 2018), top-p ou *nucleus sampling* (Holtzman et al., ICLR 2020), min-p (Nguyen et al., ICLR 2025).\n- **Les architectures plus récentes** à poids ouverts, comme LLaMA (Touvron et al., 2023) et Llama 3 (Grattafiori et al., 2024), reprennent ce schéma avec des variantes : encodage de position rotatif, attention à requêtes groupées, autres normalisations.\n\n### Ce que ce cours ne prétend pas décrire\n\nLe titre ne mentionne aucun produit, volontairement. Les détails internes des modèles fermés récents ne sont pas publiés : le rapport technique de GPT-4 indique lui-même ne donner « aucun détail supplémentaire » sur l'architecture (taille comprise), le matériel, le calcul d'entraînement ou la construction des données (OpenAI, 2023). Ce cours ne décrit donc pas « ce que fait ChatGPT » à l'intérieur. Il décrit le mécanisme commun aux modèles de type GPT dont l'architecture est publiée, avec GPT-2 comme cas que l'on peut ouvrir et mesurer. On peut raisonnablement penser que les assistants actuels reposent sur le même principe de génération, mais cela ne se vérifie pas de l'extérieur.\n\n### Ce qu'il faut savoir avant\n\n- ce qu'est un modèle de langage, un prompt et un token (voir [Les paramètres des LLM](/cours/parametres-llm) et [le cours sur le traitement du langage](/cours/nlp-comprehension)) ;\n- ce qu'est un vecteur et une multiplication de matrices, au niveau d'un cours de lycée ou de première année ;\n- pour les exemples, savoir lire un court script Python avec PyTorch.\n\n### Ce que vous saurez expliquer à la fin\n\n- ce que calcule réellement le modèle à chaque étape, et pourquoi on parle de génération autorégressive ;\n- comment un texte devient une suite d'identifiants, puis une matrice de vecteurs, et pourquoi la position doit être ajoutée ;\n- ce que font la requête, la clé et la valeur, pourquoi on divise par √d_k et à quoi sert le masque causal ;\n- ce qu'un bloc Transformer ajoute au vecteur d'un token (attention, MLP, connexions résiduelles) ;\n- comment on passe de 50 257 scores à un seul token, et ce que changent la température, top-k, top-p et min-p ;\n- pourquoi le cache KV rend la génération praticable et ce qu'il coûte en mémoire.\n\n### Ses limites\n\nGPT-2 est petit et ancien : il répond souvent mal, et plusieurs choix de conception ont changé depuis (voir le module 3 pour les positions, le module 5 pour les normalisations et le module 7 pour l'attention à requêtes groupées). Le cours ne traite ni l'entraînement, ni l'affinage sur des conversations ou l'apprentissage par préférences (voir [la page sur les LLM](/types-ia/llm)), ni les architectures à experts, ni les modèles multimodaux ou de raisonnement. Enfin, **expliquer le mécanisme n'explique pas tout** : pourquoi un tel calcul produit des réponses utiles est un sujet de recherche, et certaines interprétations citées (rôle des têtes d'attention, du MLP) sont des hypothèses étayées par des expériences, pas des faits établis. Les références ont été vérifiées le 19/10/2026 ; les exemples de code ont été exécutés avec Python 3.12, PyTorch 2.14 et transformers 5.17.",
+  "prerequisites": [
+    "Savoir ce qu'est un modèle de langage, un prompt et un token",
+    "Connaître les vecteurs et le produit matriciel (niveau lycée ou début d'études supérieures)",
+    "Savoir lire un court script Python avec PyTorch (pour les exemples de code)"
+  ],
+  "checkedOn": "2026-10-19",
+  "cover": {
+    "src": "pics/cours/generation-mot-par-mot.webp",
+    "alt": "Prisme de verre facetté émettant une file de petits cubes lumineux reliés par de fins filaments."
+  },
+  "modules": [
+    {
+      "id": "boucle-autoregressive",
+      "title": "Un modèle de langage prédit le token suivant, en boucle",
+      "keyTakeaways": [
+        "À chaque étape, un modèle de type GPT calcule une distribution de probabilité sur le token suivant, à partir de tous les tokens qui précèdent. Il ne produit pas la phrase d'un seul coup.",
+        "Un texte entier s'obtient en répétant : calculer la distribution, choisir un token, l'ajouter au texte, recommencer. On parle de génération autorégressive.",
+        "Les poids du modèle ne changent pas pendant la génération : le modèle ne « apprend » rien de la conversation en cours, il lit un contexte de plus en plus long.",
+        "Le Transformer (Vaswani et al., 2017) remplace la lecture séquentielle des réseaux récurrents par l'attention, calculable en parallèle sur toute la séquence.",
+        "Les détails internes des modèles fermés récents ne sont pas publiés : ce cours s'appuie sur des architectures publiées, GPT-2 en tête."
+      ],
+      "theory": "### Ce que calcule le modèle\n\nUn modèle de langage de type GPT reçoit une suite de tokens (des morceaux de texte, définis au module suivant) et renvoie, pour chaque token du vocabulaire, une probabilité d'être le prochain. Rien de plus. Tout le reste, réponses, traductions, code, découle de la répétition de cette opération.\n\nÉcrit en formule, la probabilité d'un texte $x_1, \\dots, x_n$ se décompose en un produit de probabilités conditionnelles (c'est la règle de la chaîne, une identité mathématique, pas une hypothèse) :\n\n$$P(x_1, \\dots, x_n) = \\prod_{t=1}^{n} P(x_t \\mid x_1, \\dots, x_{t-1})$$\n\nLe modèle apprend à approcher chacun de ces facteurs : « sachant ce qui précède, quelle est la loi du token suivant ? ». On dit qu'il est **autorégressif** : chaque token produit devient une partie de l'entrée du calcul suivant.\n\n### La boucle de génération\n\n1. Le texte (le prompt) est converti en tokens.\n2. Le modèle calcule la distribution sur le token suivant.\n3. Une règle de choix en sélectionne un : le plus probable, ou un tirage au sort (module 6).\n4. Ce token est ajouté au texte. On retourne à l'étape 2, jusqu'à un token de fin ou une longueur maximale.\n\nL'exemple de code ci-dessous écrit cette boucle à la main avec GPT-2. On y voit aussi une chose utile : le modèle choisit parmi des candidats, avec des probabilités souvent modestes. Au premier pas, le token le plus probable n'a que 8,5 % de chances.\n\n### D'où vient l'entraînement\n\nPendant l'entraînement, on donne au modèle de très nombreux textes et on lui demande, pour chaque position, de prédire le token qui suit réellement. L'écart entre la probabilité qu'il attribue à ce token et la valeur idéale (1) est mesuré par une perte (entropie croisée), que l'on réduit en ajustant les paramètres. Le cours ne détaille pas cette phase. Retenez que le même calcul sert à l'entraînement et à la génération.\n\nCe que ce calcul implique sur la « compréhension » est un sujet débattu. Ce cours se limite au mécanisme, qui est, lui, précis et vérifiable.\n\n### Pourquoi le Transformer\n\nAvant 2017, les modèles de langage les plus utilisés étaient des réseaux récurrents (RNN, LSTM) : ils lisaient le texte token après token, en résumant le passé dans un vecteur d'état. Deux difficultés en découlent.\n\n- **Un calcul séquentiel.** Pour traiter la position 50, il faut avoir traité les 49 précédentes. Cela se parallélise mal sur les GPU.\n- **Un passé résumé de loin.** Une information située au début du texte doit traverser de nombreuses étapes pour influencer la fin. Les gradients (les signaux qui servent à corriger le modèle pendant l'entraînement) peuvent alors disparaître ou exploser, ce qui rend l'apprentissage de dépendances lointaines difficile (Pascanu, Mikolov et Bengio, 2013). Les LSTM atténuent le problème sans le supprimer.\n\nLe Transformer, présenté par Vaswani et al. en 2017, remplace la récurrence par l'**attention** : chaque position peut consulter directement toutes les positions précédentes. Le tableau 1 de l'article compare les types de couches : l'attention relie deux positions quelconques par un chemin de longueur constante, contre une longueur proportionnelle à la distance pour une couche récurrente, et ses calculs sur toutes les positions sont indépendants les uns des autres. Le prix à payer est un coût qui croît comme le **carré** de la longueur de la séquence ($O(n^2 \\cdot d)$ par couche, avec $d$ la taille des vecteurs). Pour une vue d'ensemble de cette histoire, voir [le cours sur le traitement du langage](/cours/nlp-comprehension).\n\n### Quels modèles décrit ce cours\n\nLe mot « ChatGPT » désigne un produit, pas une architecture. Pour GPT-4, OpenAI indique dans son rapport technique ne donner aucun détail supplémentaire sur l'architecture (taille comprise), le matériel, le calcul d'entraînement ou les données (2023). Ce cours s'appuie donc sur ce qui est publié :\n\n- **GPT-2** (Radford et al., 2019) : un décodeur Transformer dont les poids sont téléchargeables. Sa plus petite version est exécutable sur un ordinateur ordinaire, ce qui permet de mesurer chaque étape.\n- **LLaMA** (Touvron et al., 2023) et **Llama 3** (Grattafiori et al., 2024) : des architectures plus récentes à poids ouverts, citées quand elles diffèrent de GPT-2.\n\nLes assistants du commerce ajoutent à ce socle un affinage sur des conversations et un alignement sur des préférences humaines (voir [la page sur les LLM](/types-ia/llm)). Cela modifie les poids, pas la boucle de génération décrite ici, autant que l'on puisse le savoir de l'extérieur.",
+      "analogy": {
+        "title": "La saisie prédictive du clavier, en beaucoup plus riche",
+        "text": "Sur un téléphone, la saisie prédictive propose le mot suivant ; si vous acceptez, elle en propose un autre, et ainsi de suite. Un modèle de langage fait la même chose en répétant l'opération, mais en tenant compte de **tout** le contexte et non des deux ou trois derniers mots, et en attribuant une probabilité à des dizaines de milliers de candidats.\n\n**Limite de l'analogie** : le clavier de téléphone repose en général sur des statistiques simples. Un modèle de langage calcule sa distribution avec des centaines de millions à plusieurs centaines de milliards de paramètres, et ce qu'il en tire est qualitativement différent."
+      },
+      "example": {
+        "title": "Une distribution pour la phrase « La capitale de la France est »",
+        "text": "Les valeurs ci-dessous sont **fictives** et servent à fixer les idées. Elles ne viennent d'aucun modèle.\n\n| Token candidat | Probabilité (fictive) |\n|---|---|\n| ` Paris` | 0,90 |\n| ` située` | 0,04 |\n| ` la` | 0,02 |\n| (des dizaines de milliers d'autres) | 0,04 au total |\n\nLe modèle ne « sait » pas qu'il répond à une question : il attribue des probabilités à des suites de caractères. Si l'on choisit toujours la plus probable, on obtient ` Paris`. Si l'on tire au sort, on obtient ` Paris` neuf fois sur dix environ, et autre chose le reste du temps. Les exemples réels de code ci-dessous, avec GPT-2, montrent des distributions bien moins nettes."
+      },
+      "diagram": {
+        "title": "La boucle de génération",
+        "description": "Le trajet d'un texte dans un modèle de langage, de l'entrée au token choisi, puis le retour du token vers l'entrée.",
+        "svg": "<svg viewBox=\"0 0 880 330\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"La boucle de génération : texte, tokens, modèle, distribution, choix, puis le token choisi est ajouté au texte\">\n<defs><marker id=\"g1-fl\" markerWidth=\"10\" markerHeight=\"8\" refX=\"8\" refY=\"4\" orient=\"auto\"><path d=\"M0,0 L10,4 L0,8 z\" fill=\"#38bdf8\" /></marker></defs>\n<rect width=\"880\" height=\"330\" rx=\"16\" fill=\"#0f172a\" />\n<g id=\"g1-texte\">\n<rect x=\"20\" y=\"50\" width=\"160\" height=\"110\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" stroke-width=\"1.5\" />\n<text x=\"100.0\" y=\"74\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Texte</text>\n<text x=\"100.0\" y=\"96\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">le prompt, puis les</text>\n<text x=\"100.0\" y=\"114\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">tokens déjà produits</text>\n</g>\n<g id=\"g1-tokens\">\n<rect x=\"190\" y=\"50\" width=\"160\" height=\"110\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" stroke-width=\"1.5\" />\n<text x=\"270.0\" y=\"74\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Tokens</text>\n<text x=\"270.0\" y=\"96\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">texte découpé en</text>\n<text x=\"270.0\" y=\"114\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">identifiants entiers</text>\n</g>\n<g id=\"g1-modele\">\n<rect x=\"360\" y=\"50\" width=\"160\" height=\"110\" rx=\"10\" fill=\"#1a1530\" stroke=\"#a78bfa\" stroke-width=\"1.5\" />\n<text x=\"440.0\" y=\"74\" fill=\"#ede9fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Modèle</text>\n<text x=\"440.0\" y=\"96\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">blocs Transformer</text>\n<text x=\"440.0\" y=\"114\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">(poids fixes)</text>\n</g>\n<g id=\"g1-distribution\">\n<rect x=\"530\" y=\"50\" width=\"160\" height=\"110\" rx=\"10\" fill=\"#0d1f2d\" stroke=\"#34d399\" stroke-width=\"1.5\" />\n<text x=\"610.0\" y=\"74\" fill=\"#d1fae5\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Distribution</text>\n<text x=\"610.0\" y=\"96\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">une probabilité pour</text>\n<text x=\"610.0\" y=\"114\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">chaque token du</text>\n<text x=\"610.0\" y=\"132\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">vocabulaire</text>\n</g>\n<g id=\"g1-choix\">\n<rect x=\"700\" y=\"50\" width=\"160\" height=\"110\" rx=\"10\" fill=\"#2a1d0a\" stroke=\"#f59e0b\" stroke-width=\"1.5\" />\n<text x=\"780.0\" y=\"74\" fill=\"#fef3c7\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Choix</text>\n<text x=\"780.0\" y=\"96\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">le plus probable,</text>\n<text x=\"780.0\" y=\"114\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">ou tirage au sort</text>\n<text x=\"780.0\" y=\"132\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">(module 6)</text>\n</g>\n<line x1=\"182\" y1=\"105\" x2=\"186\" y2=\"105\" stroke=\"#38bdf8\" stroke-width=\"2.5\" marker-end=\"url(#g1-fl)\" />\n<line x1=\"352\" y1=\"105\" x2=\"356\" y2=\"105\" stroke=\"#38bdf8\" stroke-width=\"2.5\" marker-end=\"url(#g1-fl)\" />\n<line x1=\"522\" y1=\"105\" x2=\"526\" y2=\"105\" stroke=\"#38bdf8\" stroke-width=\"2.5\" marker-end=\"url(#g1-fl)\" />\n<line x1=\"692\" y1=\"105\" x2=\"696\" y2=\"105\" stroke=\"#38bdf8\" stroke-width=\"2.5\" marker-end=\"url(#g1-fl)\" />\n<g id=\"g1-boucle\">\n<path d=\"M 780,164 L 780,235 L 100,235 L 100,166\" fill=\"none\" stroke=\"#f59e0b\" stroke-width=\"2.5\" stroke-dasharray=\"6 5\" marker-end=\"url(#g1-fl)\" />\n<text x=\"440\" y=\"226\" fill=\"#fcd34d\" font-family=\"sans-serif\" font-size=\"13\" text-anchor=\"middle\">le token choisi est ajouté à la fin du texte, puis tout recommence</text>\n</g>\n<text x=\"440\" y=\"290\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"13\" text-anchor=\"middle\">Les poids du modèle ne changent pas pendant la génération : seul le texte s'allonge.</text>\n</svg>",
+        "steps": [
+          {
+            "title": "Le texte entre dans le modèle",
+            "explanation": "Le prompt, suivi des tokens déjà produits, est découpé en tokens (identifiants entiers) puis traité par la pile de blocs Transformer.",
+            "highlight": [
+              "g1-texte",
+              "g1-tokens",
+              "g1-modele"
+            ]
+          },
+          {
+            "title": "Le modèle sort une distribution",
+            "explanation": "Pour la dernière position, le modèle calcule un score par token du vocabulaire. Après normalisation, on obtient une distribution de probabilité sur le token suivant.",
+            "highlight": [
+              "g1-modele",
+              "g1-distribution"
+            ]
+          },
+          {
+            "title": "Un token est choisi",
+            "explanation": "On prend le token le plus probable (choix glouton) ou on en tire un au sort selon la distribution. La température, top-k et top-p règlent ce choix.",
+            "highlight": [
+              "g1-distribution",
+              "g1-choix"
+            ]
+          },
+          {
+            "title": "Le token est ajouté, la boucle continue",
+            "explanation": "Le token choisi est ajouté au texte et le calcul recommence, jusqu'à un token de fin ou une longueur maximale.",
+            "highlight": [
+              "g1-boucle",
+              "g1-texte"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "code": "# Boucle de génération écrite à la main avec GPT-2 (petit modèle de 2019, téléchargé au premier appel)\nimport torch\nfrom transformers import AutoTokenizer, AutoModelForCausalLM\n\ntok = AutoTokenizer.from_pretrained(\"gpt2\")\nmodele = AutoModelForCausalLM.from_pretrained(\"gpt2\").eval()\n\nids = tok(\"The capital of France is\", return_tensors=\"pt\").input_ids\nprint(\"Prompt (identifiants) :\", ids[0].tolist())\n\nfor etape in range(6):\n    with torch.no_grad():\n        logits = modele(ids).logits          # forme : (1, longueur, 50257)\n    dernier = logits[0, -1]                  # on ne garde que la position finale\n    probas = torch.softmax(dernier, dim=-1)\n    haut = torch.topk(probas, 3)\n    candidats = \", \".join(f\"{tok.decode(i)!r} {p:.1%}\" for p, i in zip(haut.values, haut.indices))\n    choisi = int(haut.indices[0])            # choix glouton : le plus probable\n    print(f\"étape {etape + 1} : {candidats}  -> choisi {tok.decode(choisi)!r}\")\n    ids = torch.cat([ids, torch.tensor([[choisi]])], dim=1)   # on ajoute le token et on recommence\n\nprint(\"Texte final :\", tok.decode(ids[0]))",
+        "explanation": "La boucle de génération écrite à la main : à chaque tour, on calcule les logits de toute la séquence, on ne garde que ceux de la dernière position, on les transforme en probabilités, on choisit le plus probable et on l'ajoute. Le résultat n'est pas une bonne réponse : GPT-2 est un petit modèle de 2019, et la phrase produite illustre surtout le mécanisme. Au premier pas, le meilleur candidat n'a que 8,5 % de chances.",
+        "output": "Prompt (identifiants) : [464, 3139, 286, 4881, 318]\nétape 1 : ' the' 8.5%, ' now' 4.8%, ' a' 4.6%  -> choisi ' the'\nétape 2 : ' capital' 17.0%, ' city' 3.4%, ' French' 2.4%  -> choisi ' capital'\nétape 3 : ' of' 92.7%, ',' 1.9%, ' city' 1.4%  -> choisi ' of'\nétape 4 : ' the' 28.3%, ' France' 20.3%, ' a' 5.8%  -> choisi ' the'\nétape 5 : ' French' 13.7%, ' Republic' 5.2%, ' European' 3.6%  -> choisi ' French'\nétape 6 : ' Republic' 30.1%, ' Empire' 8.1%, ' Revolution' 5.5%  -> choisi ' Republic'\nTexte final : The capital of France is the capital of the French Republic",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Que calcule un modèle de type GPT à chaque étape de la génération ?",
+          "options": [
+            "Une distribution de probabilité sur le token suivant, à partir de tous les tokens qui précèdent",
+            "La phrase complète la plus probable, calculée d'un seul coup",
+            "Une réponse cherchée dans une base de faits, puis reformulée",
+            "Le sens de la question, d'abord, puis les mots qui l'expriment"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le modèle produit une distribution sur le token suivant, rien de plus ; la phrase s'obtient en répétant l'opération. Il ne consulte pas de base de faits (c'est le rôle d'un système RAG, qui s'ajoute au modèle) et on n'observe pas d'étape distincte « comprendre puis formuler » dans le calcul de génération lui-même."
+        },
+        {
+          "question": "Pourquoi le Transformer a-t-il remplacé les réseaux récurrents pour les grands modèles de langage ?",
+          "options": [
+            "Ses calculs sur toutes les positions d'une séquence sont indépendants, donc parallélisables, et deux positions sont reliées directement",
+            "Son coût de calcul croît moins vite que celui d'un réseau récurrent quand le texte s'allonge",
+            "Il n'a pas besoin d'être entraîné sur de grandes quantités de texte",
+            "Il garde en mémoire tout le texte mot pour mot, sans perte"
+          ],
+          "correctIndex": 0,
+          "explanation": "L'attention relie directement deux positions quelconques et se calcule en parallèle, ce qui convient aux GPU. La deuxième réponse est tentante mais ne tient pas : le coût de l'attention croît comme le carré de la longueur, et Vaswani et al. notent que l'attention n'est plus rapide qu'une couche récurrente que lorsque la longueur est inférieure à la taille des vecteurs. Le Transformer n'est pas non plus plus économe en données."
+        },
+        {
+          "question": "Pendant que le modèle génère une réponse, que se passe-t-il pour ses poids ?",
+          "options": [
+            "Ils ne changent pas : seul le texte lu par le modèle s'allonge",
+            "Ils sont ajustés légèrement à chaque token, pour mémoriser la conversation",
+            "Ils sont ajustés à la fin de chaque réponse, selon que l'utilisateur est satisfait",
+            "Ils sont remplacés par ceux d'une version plus récente en cours de route"
+          ],
+          "correctIndex": 0,
+          "explanation": "La génération (l'inférence) ne modifie pas les poids. La « mémoire » d'une conversation est le texte fourni de nouveau au modèle à chaque tour. Les ajustements de poids ont lieu pendant l'entraînement et l'affinage, avant la mise en service."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Autorégressif",
+          "definition": "Se dit d'un modèle qui produit une séquence élément par élément, chaque élément produit servant d'entrée pour calculer le suivant."
+        },
+        {
+          "term": "Token",
+          "definition": "Unité de texte manipulée par le modèle : un mot, un morceau de mot ou un signe. Le modèle manipule des identifiants entiers, pas des lettres."
+        },
+        {
+          "term": "Distribution de probabilité",
+          "definition": "Liste de probabilités positives dont la somme vaut 1, une par token du vocabulaire pour le token suivant."
+        },
+        {
+          "term": "Inférence",
+          "definition": "Utilisation d'un modèle déjà entraîné pour produire une sortie. Les poids ne changent pas."
+        },
+        {
+          "term": "Transformer",
+          "definition": "Architecture de réseau de neurones fondée sur l'attention, présentée en 2017 par Vaswani et al."
+        },
+        {
+          "term": "Contexte",
+          "definition": "Ensemble des tokens que le modèle lit pour calculer la distribution suivante : le prompt et les tokens déjà produits."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Ce qui change d’un tour à l’autre",
+          "prompt": "Le modèle vient de finir une réponse. A-t-il appris quelque chose de l’échange ? Décrivez ce qui change réellement entre deux tours de la boucle de génération.",
+          "solution": "Rien ne change dans les poids : le modèle n’apprend pas de la conversation, il relit un contexte plus long. Le token choisi au tour précédent est ajouté à l’entrée, puis le modèle recalcule une distribution sur le token suivant et une règle de choix en sélectionne un. La boucle s’arrête sur un token de fin, une longueur maximale ou une séquence d’arrêt. C’est ce qui rend la génération autorégressive : chaque token produit devient une partie de l’entrée du calcul suivant."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Vaswani et al., « Attention Is All You Need » (2017)",
+          "href": "https://arxiv.org/abs/1706.03762"
+        },
+        {
+          "label": "Radford et al., « Language Models are Unsupervised Multitask Learners » (GPT-2, OpenAI, 2019)",
+          "href": "https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf"
+        }
+      ]
+    },
+    {
+      "id": "tokens",
+      "title": "Du texte aux tokens",
+      "keyTakeaways": [
+        "Un modèle ne lit ni des lettres ni des mots entiers, mais des tokens : des morceaux de texte pris dans un vocabulaire fixe, remplacés par des identifiants entiers.",
+        "Le BPE (byte pair encoding) construit ce vocabulaire en fusionnant, étape après étape, les paires de symboles les plus fréquentes d'un corpus (Sennrich et al., 2016). Le découpage est statistique, pas linguistique.",
+        "GPT-2 applique le BPE sur les octets du texte (UTF-8) : son vocabulaire compte 50 257 tokens et tout texte peut être encodé, sans « mot inconnu ».",
+        "L'espace avant un mot fait partie du token : « chat » et « Ġchat » (avec espace) sont deux tokens distincts.",
+        "Le nombre de tokens d'un texte dépend du tokenizer et de la langue. Sur la paire de phrases testée avec GPT-2, le français demande plus de deux fois plus de tokens que l'anglais."
+      ],
+      "theory": "### Pourquoi ni lettres ni mots\n\nUn réseau de neurones calcule sur des nombres : il faut donc transformer le texte en une suite d'entiers. Deux choix évidents ont chacun un défaut.\n\n- **Découper en lettres (ou en octets)** donne un vocabulaire minuscule, mais des séquences très longues. Or le coût de l'attention croît avec le carré de la longueur (module 4).\n- **Découper en mots** donne des séquences courtes, mais un vocabulaire énorme et des mots inconnus : une faute de frappe, un nom propre ou un mot composé n'existent pas dans la liste.\n\nLe compromis est le **sous-mot** : les suites de caractères fréquentes deviennent un seul token, les mots rares sont assemblés à partir de morceaux plus petits.\n\n### Le BPE : fusionner les paires les plus fréquentes\n\nLe *byte pair encoding* est d'abord une méthode de compression. Sennrich, Haddow et Birch (ACL 2016) l'adaptent à la traduction automatique pour représenter des mots rares par des sous-mots. Le principe de l'apprentissage du vocabulaire :\n\n1. On part des symboles de base (des caractères, ou des octets) et d'un corpus.\n2. On compte les paires de symboles adjacents dans le corpus.\n3. On fusionne la paire la plus fréquente en un nouveau symbole, qui entre dans le vocabulaire.\n4. On recommence jusqu'à atteindre la taille de vocabulaire voulue.\n\nSur le mot « banane » découpé en lettres, la paire « an » apparaît deux fois, plus souvent que toute autre : on la fusionne et le mot devient `b | an | an | e`. Avec un vrai corpus, les fusions suivantes construisent peu à peu des syllabes, des mots fréquents puis des suites plus longues. Une fois les fusions apprises, **encoder** un texte consiste à rejouer ces fusions dans le même ordre.\n\n### Le cas de GPT-2 : le BPE sur les octets\n\nGPT-2 (Radford et al., 2019) applique le BPE non pas sur les caractères Unicode, qui en compteraient plus de 130 000, mais sur les **octets** du texte en UTF-8. La base de départ ne compte que 256 symboles, et tout texte, accents, emojis ou langues rares compris, peut être représenté. Le vocabulaire de GPT-2 compte **50 257 tokens** : 256 octets, 50 000 fusions et un token spécial de fin de texte, `<|endoftext|>` (identifiant 50 256). L'exemple de code le vérifie sur le tokenizer lui-même.\n\nUne particularité visible dans le code : l'espace placé avant un mot est intégré au token et noté « Ġ ». Ainsi « chat » en début de texte et « Ġchat » au milieu d'une phrase sont deux tokens différents, avec deux identifiants différents (17 006 et 8 537).\n\n### Ce que le découpage a de statistique\n\nLe découpage suit les fréquences du corpus, pas la grammaire. Avec le tokenizer de GPT-2, « anticonstitutionnellement » est coupé en `ant | icon | st | itution | nel | lement`, ce qui ne correspond pas au découpage en préfixe, radical et suffixe qu'on attendrait. Conséquences concrètes :\n\n- le modèle ne voit jamais les lettres d'un mot, seulement des identifiants : compter les lettres d'un mot ou les épeler est plus difficile pour lui qu'il n'y paraît ;\n- un même mot peut avoir plusieurs identifiants selon l'espace qui le précède et les majuscules ;\n- un nombre long est souvent coupé en plusieurs tokens, d'une façon qui dépend du tokenizer.\n\n### Une affaire de langue et de coût\n\nUn vocabulaire appris surtout sur de l'anglais découpe plus finement les autres langues. Sur la seule paire de phrases testée dans l'exemple de code, GPT-2 produit 11 tokens pour la phrase anglaise et 26 pour la phrase française équivalente. Une paire ne fait pas une statistique, mais l'effet est bien connu. Les tokenizers plus récents le réduisent : celui de Llama 3 compte 128 000 tokens (100 000 repris du tokenizer tiktoken et 28 000 ajoutés pour mieux couvrir d'autres langues), et son taux de compression sur un échantillon d'anglais passe de 3,17 à 3,94 caractères par token par rapport à Llama 2 (Grattafiori et al., 2024). Comme les services d'API facturent en général au nombre de tokens, la langue et le tokenizer pèsent sur le coût : voir le [cours sur le coût des tokens](/cours/cout-des-tokens) et le [calculateur de coûts](/calculateur-couts-ia).\n\n### Les tokens spéciaux\n\nLe vocabulaire contient aussi des tokens qui ne correspondent pas à du texte : fin de texte, début de séquence, ou, pour les modèles de conversation, des marqueurs qui délimitent les messages de l'utilisateur et de l'assistant. Leur forme dépend du modèle : le format exact d'une conversation est défini par chaque éditeur.",
+      "analogy": {
+        "title": "Un jeu de briques de tailles variées",
+        "text": "Imaginez un jeu de briques où les formes que l'on utilise souvent (un mur, un toit) existent en grandes pièces, et où les formes rares se construisent en assemblant de petites briques. Le vocabulaire de tokens joue ce rôle : « chat » est une pièce entière, tandis qu'un mot rare est assemblé à partir de morceaux.\n\n**Limite de l'analogie** : les pièces sont choisies par des statistiques de fréquence sur un corpus, pas pour leur sens. Un token n'est pas forcément un syllabe, un préfixe ou une unité de sens."
+      },
+      "example": {
+        "title": "Un même sens, deux nombres de tokens",
+        "text": "Avec le tokenizer de GPT-2, mesuré par le code de ce module :\n\n| Texte | Caractères | Tokens |\n|---|---|---|\n| `Artificial intelligence helps doctors analyse medical images more quickly.` | 74 | 11 |\n| `L'intelligence artificielle aide les médecins à analyser plus rapidement des images médicales.` | 94 | 26 |\n\nLes deux phrases disent la même chose, mais la seconde coûte plus de deux fois plus de tokens. C'est une mesure sur une paire de phrases et un tokenizer précis : le rapport varie selon le texte et le tokenizer, et il se réduit avec des tokenizers plus récents. Pour votre usage, mesurez sur vos propres textes."
+      },
+      "diagram": {
+        "title": "Du texte aux identifiants",
+        "description": "Le découpage de « Le chat dort » par le tokenizer de GPT-2, puis les identifiants obtenus.",
+        "svg": "<svg viewBox=\"0 0 880 360\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Du texte aux identifiants de tokens avec le tokenizer de GPT-2 : Le chat dort devient quatre tokens\">\n<defs><marker id=\"g2-fl\" markerWidth=\"10\" markerHeight=\"8\" refX=\"8\" refY=\"4\" orient=\"auto\"><path d=\"M0,0 L10,4 L0,8 z\" fill=\"#38bdf8\" /></marker></defs>\n<rect width=\"880\" height=\"360\" rx=\"16\" fill=\"#0f172a\" />\n<g id=\"g2-texte\">\n<rect x=\"20\" y=\"60\" width=\"190\" height=\"100\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" stroke-width=\"1.5\" />\n<text x=\"115.0\" y=\"84\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Texte</text>\n<text x=\"115.0\" y=\"106\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">« Le chat dort »</text>\n</g>\n<g id=\"g2-tokens\">\n<rect x=\"250\" y=\"60\" width=\"290\" height=\"100\" rx=\"10\" fill=\"#0d1f2d\" stroke=\"#34d399\" stroke-width=\"1.5\" />\n<text x=\"395.0\" y=\"84\" fill=\"#d1fae5\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Tokens (BPE sur les octets)</text>\n<text x=\"395.0\" y=\"106\" fill=\"#cbd5e1\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">Le | Ġchat | Ġd | ort</text>\n</g>\n<g id=\"g2-ids\">\n<rect x=\"580\" y=\"60\" width=\"280\" height=\"100\" rx=\"10\" fill=\"#2a1d0a\" stroke=\"#f59e0b\" stroke-width=\"1.5\" />\n<text x=\"720.0\" y=\"84\" fill=\"#fef3c7\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Identifiants entiers</text>\n<text x=\"720.0\" y=\"106\" fill=\"#cbd5e1\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">[3123, 8537, 288, 419]</text>\n</g>\n<line x1=\"212\" y1=\"110\" x2=\"246\" y2=\"110\" stroke=\"#38bdf8\" stroke-width=\"2.5\" marker-end=\"url(#g2-fl)\" />\n<line x1=\"542\" y1=\"110\" x2=\"576\" y2=\"110\" stroke=\"#38bdf8\" stroke-width=\"2.5\" marker-end=\"url(#g2-fl)\" />\n<g id=\"g2-note\">\n<rect x=\"20\" y=\"200\" width=\"420\" height=\"120\" rx=\"10\" fill=\"#1e293b\" stroke=\"#64748b\" stroke-width=\"1.5\" />\n<text x=\"230\" y=\"226\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Lecture</text>\n<text x=\"230\" y=\"250\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Le « Ġ » note l'espace placé avant un mot.</text>\n<text x=\"230\" y=\"270\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">« chat » et « Ġchat » sont deux tokens différents.</text>\n<text x=\"230\" y=\"290\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">« dort » est coupé en deux : « Ġd » et « ort ».</text>\n</g>\n<g id=\"g2-suite\">\n<rect x=\"470\" y=\"200\" width=\"390\" height=\"120\" rx=\"10\" fill=\"#1a1530\" stroke=\"#a78bfa\" stroke-width=\"1.5\" />\n<text x=\"665\" y=\"226\" fill=\"#ede9fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Étape suivante (module 3)</text>\n<text x=\"665\" y=\"252\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Chaque identifiant sert d'indice dans une table</text>\n<text x=\"665\" y=\"272\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">de vecteurs apprise : c'est là que le</text>\n<text x=\"665\" y=\"292\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">texte devient des nombres exploitables.</text>\n</g>\n</svg>",
+        "steps": [
+          {
+            "title": "Le découpage",
+            "explanation": "Le tokenizer découpe le texte en sous-mots d'un vocabulaire fixe. Les mots fréquents forment un seul token, les autres sont coupés. Ces valeurs sont celles du tokenizer de GPT-2.",
+            "highlight": [
+              "g2-texte",
+              "g2-tokens",
+              "g2-note"
+            ]
+          },
+          {
+            "title": "Les identifiants",
+            "explanation": "Chaque token est remplacé par son numéro dans le vocabulaire (50 257 entrées pour GPT-2). Le modèle ne voit jamais de lettres, seulement ces entiers.",
+            "highlight": [
+              "g2-tokens",
+              "g2-ids"
+            ]
+          },
+          {
+            "title": "La suite du trajet",
+            "explanation": "Les identifiants ne portent pas de sens par eux-mêmes : ils servent à aller chercher un vecteur dans la table des embeddings.",
+            "highlight": [
+              "g2-ids",
+              "g2-suite"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "code": "# Découpage en tokens avec le tokenizer de GPT-2 (BPE au niveau des octets, 50 257 tokens)\nfrom transformers import AutoTokenizer\n\ntok = AutoTokenizer.from_pretrained(\"gpt2\")\nprint(\"Taille du vocabulaire :\", len(tok))\n\nfor texte in [\"chat\", \" chat\", \"anticonstitutionnellement\"]:\n    ids = tok.encode(texte)\n    print(f\"{texte!r:28} -> {ids} {tok.convert_ids_to_tokens(ids)}\")\n# Le « Ġ » est la façon dont GPT-2 note l'espace placé avant un mot.\n\n# Même idée, deux langues : on compare le nombre de tokens (une seule paire de phrases, à titre d'exemple)\nen = \"Artificial intelligence helps doctors analyse medical images more quickly.\"\nfr = \"L'intelligence artificielle aide les médecins à analyser plus rapidement des images médicales.\"\nfor nom, texte in [(\"anglais\", en), (\"français\", fr)]:\n    ids = tok.encode(texte)\n    print(f\"{nom:9}: {len(texte):3} caractères -> {len(ids):2} tokens\")\n\n# Aucun texte n'est perdu : décoder redonne exactement le texte d'origine, accents et emojis compris\ntexte = \"Café ☕ : très bien !\"\nassert tok.decode(tok.encode(texte)) == texte\nprint(\"Octets UTF-8 :\", len(texte.encode(\"utf-8\")), \"-> tokens :\", len(tok.encode(texte)))",
+        "explanation": "Le tokenizer de GPT-2 se télécharge en quelques secondes. Le code affiche la taille du vocabulaire, montre que « chat » et « Ġchat » ont des identifiants différents, compare deux phrases équivalentes en anglais et en français, puis vérifie que décoder redonne exactement le texte d'origine.",
+        "output": "Taille du vocabulaire : 50257\n'chat'                       -> [17006] ['chat']\n' chat'                      -> [8537] ['Ġchat']\n'anticonstitutionnellement'  -> [415, 4749, 301, 2738, 4954, 1732] ['ant', 'icon', 'st', 'itution', 'nel', 'lement']\nanglais  :  74 caractères -> 11 tokens\nfrançais :  94 caractères -> 26 tokens\nOctets UTF-8 : 24 -> tokens : 12",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Pourquoi les modèles de langage utilisent-ils des sous-mots plutôt que des mots entiers ?",
+          "options": [
+            "Cela évite les mots inconnus tout en gardant des séquences plus courtes qu'avec des lettres",
+            "Les sous-mots correspondent exactement aux préfixes et aux suffixes de la grammaire",
+            "Un vocabulaire de sous-mots coûte moins de mémoire que n'importe quel autre vocabulaire",
+            "Le modèle comprend ainsi mieux le sens de chaque syllabe"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le sous-mot est un compromis : un mot rare reste représentable (assemblé à partir de morceaux) et les séquences restent plus courtes qu'en lettres. Le découpage est statistique, pas grammatical (« anticonstitutionnellement » n'est pas coupé en préfixe, radical et suffixe). Aucun gain n'est garanti sur la mémoire, et rien n'indique que le modèle gagne en « sens » par syllabe."
+        },
+        {
+          "question": "Avec le tokenizer de GPT-2, « chat » (sans espace) et « Ġchat » (avec l'espace qui le précède) sont...",
+          "options": [
+            "Deux tokens différents, avec deux identifiants différents",
+            "Un seul token, l'espace étant ignoré",
+            "Le même token, mais avec une position différente",
+            "Deux tokens, mais seulement pour les langues autres que l'anglais"
+          ],
+          "correctIndex": 0,
+          "explanation": "L'espace fait partie du token : « chat » a l'identifiant 17 006 et « Ġchat » l'identifiant 8 537, comme le montre le code. La position, elle, est ajoutée plus tard (module 3) et n'a rien à voir avec l'identifiant."
+        },
+        {
+          "question": "Un texte français demande en général plus de tokens que son équivalent anglais avec le tokenizer de GPT-2. Quelle est l'explication la plus plausible ?",
+          "options": [
+            "Le vocabulaire a été construit sur un corpus surtout anglophone, donc il découpe plus finement les autres langues",
+            "Le français comporte plus de lettres par mot que l'anglais, ce qui impose des tokens plus nombreux dans tous les cas",
+            "Le modèle traduit d'abord le texte en anglais avant de le traiter",
+            "Les accents sont toujours comptés comme trois tokens"
+          ],
+          "correctIndex": 0,
+          "explanation": "Les fusions du BPE suivent les fréquences du corpus d'apprentissage : les suites de caractères anglaises, plus fréquentes, deviennent des tokens entiers, pas les françaises. Il n'y a pas de traduction préalable, et les accents ne sont pas systématiquement coûteux. La longueur des mots intervient peu à côté de ce facteur."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Tokenisation",
+          "definition": "Découpage d'un texte en tokens et conversion de chaque token en identifiant entier."
+        },
+        {
+          "term": "BPE (byte pair encoding)",
+          "definition": "Méthode qui construit un vocabulaire de sous-mots en fusionnant à répétition la paire de symboles adjacents la plus fréquente d'un corpus."
+        },
+        {
+          "term": "BPE au niveau des octets",
+          "definition": "Variante qui part des 256 valeurs d'octet plutôt que des caractères Unicode : tout texte UTF-8 est représentable."
+        },
+        {
+          "term": "Vocabulaire",
+          "definition": "Liste fixe des tokens connus du modèle, chacun associé à un identifiant (50 257 pour GPT-2)."
+        },
+        {
+          "term": "Token spécial",
+          "definition": "Token qui ne correspond pas à du texte, par exemple le marqueur de fin de texte (<|endoftext|> dans GPT-2)."
+        },
+        {
+          "term": "Ġ",
+          "definition": "Notation, dans le tokenizer de GPT-2, de l'espace placé avant un mot, intégré au token."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Pourquoi aucun mot inconnu",
+          "prompt": "Pourquoi le tokenizer de GPT-2 peut-il encoder n’importe quel texte, emoji compris, alors que son vocabulaire est fixé ? Et pourquoi `chat` en début de texte et `Ġchat` au milieu d’une phrase ont-ils deux identifiants ?",
+          "solution": "GPT-2 applique le BPE sur les octets du texte en UTF-8 : la base ne compte que 256 symboles, et tout texte peut être représenté, sans cas de mot inconnu. Le vocabulaire ajoute 50 000 fusions et un token de fin, soit 50 257 entrées. L’espace qui précède un mot fait partie du token, noté « Ġ » : `chat` et `Ġchat` sont deux morceaux distincts, d’où deux identifiants, 17 006 et 8 537 dans le module. Le découpage suit les fréquences du corpus, pas la grammaire."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Sennrich, Haddow, Birch, « Neural Machine Translation of Rare Words with Subword Units » (ACL 2016)",
+          "href": "https://arxiv.org/abs/1508.07909"
+        },
+        {
+          "label": "Fiche du modèle GPT-2 sur Hugging Face (124 M de paramètres, BPE au niveau des octets, 50 257 tokens, 1 024 tokens de contexte)",
+          "href": "https://huggingface.co/openai-community/gpt2"
+        }
+      ]
+    },
+    {
+      "id": "embeddings-positions",
+      "title": "Embeddings et positions",
+      "keyTakeaways": [
+        "Un identifiant de token n'a pas de sens en soi : il sert d'indice pour lire une ligne de la table d'embeddings, un vecteur de nombres appris pendant l'entraînement (768 nombres dans GPT-2).",
+        "À l'entrée du modèle, un même token a toujours le même vecteur. C'est dans les couches suivantes que le vecteur d'un token se « contextualise », grâce à l'attention.",
+        "L'attention ne tient pas compte de l'ordre des tokens par elle-même : il faut fournir la position. GPT-2 additionne au vecteur du token un vecteur de position appris, dans une seconde table de 1 024 lignes.",
+        "D'autres modèles utilisent des positions fixes (sinusoïdes, Vaswani et al., 2017) ou rotatives (RoPE, Su et al., 2021, utilisé par LLaMA et Llama 3).",
+        "La longueur maximale du contexte dépend du modèle et de son entraînement : 1 024 tokens pour GPT-2, jusqu'à 128 000 pour Llama 3."
+      ],
+      "theory": "### Du numéro au vecteur\n\nAprès la tokenisation, on dispose d'une suite d'entiers, par exemple `[464, 3797, 44263]`. Ces nombres ne se comparent pas (le token 3797 n'est pas « proche » du token 3798) : ce sont des numéros de rangement. La première couche du modèle est une simple **table de correspondance** : une matrice $W_E$ (E pour *embedding*) de taille (taille du vocabulaire) × (dimension du modèle), dont la ligne $i$ est le vecteur associé au token $i$.\n\nDans GPT-2 version 124 M, $W_E$ a 50 257 lignes et 768 colonnes (l'exemple de code l'affiche). Chaque token est donc représenté par 768 nombres. Ces nombres sont des **paramètres**, initialisés au hasard puis ajustés par l'entraînement : aucune coordonnée n'a de nom ni de signification isolée.\n\n### Ce que ces vecteurs capturent, et ce qu'ils ne capturent pas\n\nAu fil de l'entraînement, des tokens utilisés dans des contextes semblables reçoivent souvent des vecteurs voisins. On a longtemps illustré cela avec l'arithmétique de mots : le vecteur « roi » moins « homme » plus « femme » est proche de « reine ». Cette propriété a été observée surtout avec les embeddings statiques de type word2vec ; elle n'est pas garantie pour la table d'entrée d'un modèle de langage, et ne doit pas être présentée comme une propriété générale (voir [le cours sur le traitement du langage](/cours/nlp-comprehension)).\n\nUn point important : **à l'entrée, le vecteur d'un token ne dépend pas du contexte**. Le mot « avocat » (fruit ou juriste) reçoit la même ligne de $W_E$ dans toutes les phrases. Ce sont les couches suivantes, par l'attention, qui produisent des représentations contextuelles : le vecteur du même token en sortie d'une couche profonde dépend des tokens voisins.\n\n### Pourquoi il faut ajouter la position\n\nL'opération d'attention (module 4) compare des vecteurs entre eux, sans regarder où ils se trouvent. Vaswani et al. le formulent ainsi : pour que le modèle puisse utiliser l'ordre de la séquence, il faut lui injecter de l'information sur la position des tokens. Sans cela, « le chat mange la souris » et « la souris mange le chat » donneraient les mêmes vecteurs d'entrée, simplement rangés autrement.\n\n### Trois façons de donner la position\n\n| Famille | Principe | Exemples |\n|---|---|---|\n| Sinusoïdes fixes | Un vecteur de position calculé par une formule (sinus et cosinus de fréquences différentes), ajouté à l'embedding | Transformer d'origine (Vaswani et al., 2017) |\n| Positions apprises | Une seconde table, $W_P$, avec une ligne par position, apprise comme $W_E$ | GPT-2 (1 024 lignes) |\n| Rotation (RoPE) | Les vecteurs de requête et de clé sont tournés d'un angle qui dépend de la position, de sorte que leur produit scalaire dépend de l'écart entre positions | RoFormer (Su et al., 2021), LLaMA, Llama 3 |\n\nDans l'article d'origine, remplacer les sinusoïdes par des positions apprises a donné des résultats presque identiques. Les auteurs ont gardé les sinusoïdes en supposant qu'elles pourraient mieux extrapoler à des séquences plus longues que celles de l'entraînement.\n\n**GPT-2 : addition.** Le vecteur d'entrée de la position $i$ est la somme des deux lignes :\n\n$$x_i = W_E[t_i] + W_P[i]$$\n\noù $t_i$ est l'identifiant du token en position $i$. On additionne plutôt que de concaténer, ce qui garde la même dimension d'un bout à l'autre du modèle (Vaswani et al. : les deux vecteurs ont la même taille « afin de pouvoir être additionnés »). L'exemple de code vérifie cette égalité sur le modèle réel : l'entrée du premier bloc est exactement $W_E[t_i] + W_P[i]$.\n\n**RoPE : rotation.** Dans LLaMA, les positions absolues sont supprimées, et des positions rotatives sont ajoutées à chaque couche (Touvron et al., 2023). Elles ne s'ajoutent pas à l'embedding d'entrée : elles agissent sur les requêtes et les clés, à l'intérieur de l'attention. Llama 3 augmente un paramètre de cette méthode (la fréquence de base, portée à 500 000) pour mieux gérer les longs contextes (Grattafiori et al., 2024).\n\n### La longueur du contexte\n\nAvec une table de positions apprises, le nombre de lignes fixe la longueur maximale : GPT-2 ne sait pas traiter plus de 1 024 tokens. Avec RoPE, la limite n'est plus dans une table, mais la longueur utilisable dépend toujours de ce sur quoi le modèle a été entraîné : pour Llama 3 405B, l'entraînement est parti d'un contexte de 8 000 tokens, étendu en six étapes jusqu'à 128 000 (Grattafiori et al., 2024). On ne peut donc pas dire qu'une méthode de position « permet » un contexte d'une taille donnée à elle seule.\n\n### Les tailles des vecteurs\n\nLa dimension du modèle (noté $d_{\\text{model}}$) varie : 512 dans le Transformer d'origine (version de base), 768 pour GPT-2 version 124 M, 4 096 pour Llama 3 8B et 16 384 pour Llama 3 405B. Plus le vecteur est grand, plus il peut porter d'information, au prix de plus de calcul et de mémoire.",
+      "analogy": {
+        "title": "Un spectateur et son numéro de siège",
+        "text": "La table d'embeddings donne à chaque token une identité, comme une fiche d'identité de spectateur. Mais pour savoir qui est devant qui, il faut aussi le numéro de siège. Le vecteur de position joue ce rôle : le modèle reçoit à chaque place « le spectateur et son siège » ensemble, additionnés en un seul vecteur.\n\n**Limite de l'analogie** : les fiches et les numéros de siège sont ici des vecteurs appris, sans signification lisible, et le modèle les mélange dans un même ensemble de nombres, sans les étiqueter."
+      },
+      "example": {
+        "title": "Deux fois le même mot dans une phrase",
+        "text": "Dans « I like the cat and the dog », le token `Ġthe` apparaît aux positions 2 et 5. Les deux lignes lues dans $W_E$ sont **identiques**, mais les lignes de $W_P$ pour les positions 2 et 5 sont différentes. Les vecteurs d'entrée $x_2$ et $x_5$ sont donc différents : leur similarité cosinus, mesurée sur GPT-2 par le code de ce module, vaut 0,952. C'est élevé (c'est le même token), mais pas 1 : la position a bien laissé une trace.\n\nLa phrase de 7 tokens entre ainsi dans le premier bloc sous la forme d'un tableau de 7 lignes et 768 colonnes."
+      },
+      "diagram": {
+        "title": "Le vecteur d'entrée : token plus position",
+        "description": "Deux occurrences du même token reçoivent la même ligne de la table des tokens, mais deux lignes différentes de la table des positions.",
+        "svg": "<svg viewBox=\"0 0 880 380\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Le vecteur d'entrée d'un token est la somme d'une ligne de la table des tokens et d'une ligne de la table des positions\">\n<defs><marker id=\"g3-fl\" markerWidth=\"10\" markerHeight=\"8\" refX=\"8\" refY=\"4\" orient=\"auto\"><path d=\"M0,0 L10,4 L0,8 z\" fill=\"#38bdf8\" /></marker></defs>\n<rect width=\"880\" height=\"380\" rx=\"16\" fill=\"#0f172a\" />\n<g id=\"g3-tokens\"><rect x=\"20\" y=\"65\" width=\"210\" height=\"80\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" stroke-width=\"1.5\" /><text x=\"125\" y=\"97\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">« Ġthe » (identifiant 262)</text><text x=\"125\" y=\"120\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">position 2</text><rect x=\"20\" y=\"235\" width=\"210\" height=\"80\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" stroke-width=\"1.5\" /><text x=\"125\" y=\"267\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">« Ġthe » (identifiant 262)</text><text x=\"125\" y=\"290\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">position 5</text></g>\n<g id=\"g3-we\"><rect x=\"280\" y=\"40\" width=\"250\" height=\"60\" rx=\"10\" fill=\"#0d1f2d\" stroke=\"#34d399\" stroke-width=\"1.5\" /><text x=\"405\" y=\"65\" fill=\"#d1fae5\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">Table des tokens W_E</text><text x=\"405\" y=\"86\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">ligne 262 : le vecteur e</text><rect x=\"280\" y=\"210\" width=\"250\" height=\"60\" rx=\"10\" fill=\"#0d1f2d\" stroke=\"#34d399\" stroke-width=\"1.5\" /><text x=\"405\" y=\"235\" fill=\"#d1fae5\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">Table des tokens W_E</text><text x=\"405\" y=\"256\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">ligne 262 : le même vecteur e</text></g>\n<g id=\"g3-wp\"><rect x=\"280\" y=\"115\" width=\"250\" height=\"60\" rx=\"10\" fill=\"#2a1d0a\" stroke=\"#f59e0b\" stroke-width=\"1.5\" /><text x=\"405\" y=\"140\" fill=\"#fef3c7\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">Table des positions W_P</text><text x=\"405\" y=\"161\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">ligne 2 : le vecteur p₂</text><rect x=\"280\" y=\"285\" width=\"250\" height=\"60\" rx=\"10\" fill=\"#2a1d0a\" stroke=\"#f59e0b\" stroke-width=\"1.5\" /><text x=\"405\" y=\"310\" fill=\"#fef3c7\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">Table des positions W_P</text><text x=\"405\" y=\"331\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">ligne 5 : le vecteur p₅</text></g>\n<g id=\"g3-somme\"><rect x=\"590\" y=\"65\" width=\"270\" height=\"80\" rx=\"10\" fill=\"#1a1530\" stroke=\"#a78bfa\" stroke-width=\"1.5\" /><text x=\"725\" y=\"97\" fill=\"#ede9fe\" font-family=\"monospace\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">x₂ = e + p₂</text><text x=\"725\" y=\"120\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">entrée du modèle, 768 nombres</text><rect x=\"590\" y=\"235\" width=\"270\" height=\"80\" rx=\"10\" fill=\"#1a1530\" stroke=\"#a78bfa\" stroke-width=\"1.5\" /><text x=\"725\" y=\"267\" fill=\"#ede9fe\" font-family=\"monospace\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">x₅ = e + p₅</text><text x=\"725\" y=\"290\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">même e, autre p : x₅ ≠ x₂</text></g>\n<line x1=\"232\" y1=\"105\" x2=\"276\" y2=\"70\" stroke=\"#34d399\" stroke-width=\"2.5\" marker-end=\"url(#g3-fl)\" />\n<line x1=\"232\" y1=\"105\" x2=\"276\" y2=\"145\" stroke=\"#f59e0b\" stroke-width=\"2.5\" marker-end=\"url(#g3-fl)\" />\n<line x1=\"532\" y1=\"70\" x2=\"586\" y2=\"95\" stroke=\"#34d399\" stroke-width=\"2.5\" marker-end=\"url(#g3-fl)\" />\n<line x1=\"532\" y1=\"145\" x2=\"586\" y2=\"115\" stroke=\"#f59e0b\" stroke-width=\"2.5\" marker-end=\"url(#g3-fl)\" />\n<line x1=\"232\" y1=\"275\" x2=\"276\" y2=\"240\" stroke=\"#34d399\" stroke-width=\"2.5\" marker-end=\"url(#g3-fl)\" />\n<line x1=\"232\" y1=\"275\" x2=\"276\" y2=\"315\" stroke=\"#f59e0b\" stroke-width=\"2.5\" marker-end=\"url(#g3-fl)\" />\n<line x1=\"532\" y1=\"240\" x2=\"586\" y2=\"265\" stroke=\"#34d399\" stroke-width=\"2.5\" marker-end=\"url(#g3-fl)\" />\n<line x1=\"532\" y1=\"315\" x2=\"586\" y2=\"285\" stroke=\"#f59e0b\" stroke-width=\"2.5\" marker-end=\"url(#g3-fl)\" />\n</svg>",
+        "steps": [
+          {
+            "title": "Une ligne par token",
+            "explanation": "L'identifiant du token sert d'indice dans la table des embeddings. Deux occurrences du même token reçoivent exactement le même vecteur e.",
+            "highlight": [
+              "g3-tokens",
+              "g3-we"
+            ]
+          },
+          {
+            "title": "Une ligne par position",
+            "explanation": "Une seconde table donne un vecteur par position (dans GPT-2, jusqu'à 1 024 positions, ce qui fixe la longueur maximale du contexte). Les positions 2 et 5 reçoivent deux vecteurs différents.",
+            "highlight": [
+              "g3-tokens",
+              "g3-wp"
+            ]
+          },
+          {
+            "title": "On additionne",
+            "explanation": "Les deux vecteurs ont la même taille et sont additionnés. Un même token n'a donc pas le même vecteur d'entrée à deux positions différentes.",
+            "highlight": [
+              "g3-we",
+              "g3-wp",
+              "g3-somme"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "code": "# Les deux tables d'entrée de GPT-2 : embeddings de tokens (wte) et embeddings de positions (wpe)\nimport torch\nfrom transformers import AutoTokenizer, AutoModelForCausalLM\n\ntok = AutoTokenizer.from_pretrained(\"gpt2\")\nmodele = AutoModelForCausalLM.from_pretrained(\"gpt2\").eval()\nwte = modele.transformer.wte.weight   # une ligne par token\nwpe = modele.transformer.wpe.weight   # une ligne par position\nprint(\"wte :\", tuple(wte.shape), \"| wpe :\", tuple(wpe.shape))\n\nids = tok(\"I like the cat and the dog\", return_tensors=\"pt\").input_ids   # le token « Ġthe » apparaît deux fois\nprint(\"tokens :\", [tok.decode(i) for i in ids[0]])\n\nwith torch.no_grad():\n    sortie = modele(ids, output_hidden_states=True)\nentree = sortie.hidden_states[0][0]                       # ce qui entre dans le premier bloc\nreconstruit = wte[ids[0]] + wpe[torch.arange(ids.shape[1])]\nprint(\"entrée = wte[token] + wpe[position] ?\", torch.allclose(entree, reconstruit, atol=1e-5))\n\n# Même token, deux positions : le vecteur d'entrée n'est pas le même\np, q = 2, 5                                               # les deux positions de « the »\ncos = torch.nn.functional.cosine_similarity(entree[p], entree[q], dim=0).item()\nprint(f\"« the » aux positions {p} et {q} : même ligne de wte = {torch.equal(wte[ids[0, p]], wte[ids[0, q]])}, \"\n      f\"entrées identiques = {torch.equal(entree[p], entree[q])}, cosinus = {cos:.3f}\")\n\n# Matrice de sortie liée à celle d'entrée (weight tying) dans cette implémentation de GPT-2\nprint(\"sortie liée à wte :\", modele.lm_head.weight.data_ptr() == wte.data_ptr())",
+        "explanation": "Le code charge GPT-2 et lit ses deux tables d'entrée. Il vérifie que l'entrée du premier bloc (hidden_states[0]) est exactement wte[token] + wpe[position], montre que deux occurrences du même token donnent le même wte mais des entrées différentes, et constate que la matrice de sortie est la même que wte (module 6).",
+        "output": "wte : (50257, 768) | wpe : (1024, 768)\ntokens : ['I', ' like', ' the', ' cat', ' and', ' the', ' dog']\nentrée = wte[token] + wpe[position] ? True\n« the » aux positions 2 et 5 : même ligne de wte = True, entrées identiques = False, cosinus = 0.952\nsortie liée à wte : True",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Pourquoi ajoute-t-on une information de position aux embeddings de tokens ?",
+          "options": [
+            "Parce que l'attention compare les vecteurs sans tenir compte de leur place : sans position, l'ordre des mots est perdu",
+            "Pour que le modèle sache quelle langue est utilisée",
+            "Pour réduire la taille de la table d'embeddings",
+            "Pour que les mots rares aient un vecteur plus long"
+          ],
+          "correctIndex": 0,
+          "explanation": "L'attention ne dépend pas de l'ordre par elle-même, d'où la nécessité d'injecter la position (Vaswani et al., 2017). La position n'indique pas la langue, ne réduit pas la table et ne change pas la taille des vecteurs : elle est additionnée au vecteur du token, qui garde la même dimension."
+        },
+        {
+          "question": "Dans GPT-2, le token « Ġthe » apparaît aux positions 2 et 5. À l'entrée du premier bloc, ses deux vecteurs sont...",
+          "options": [
+            "Différents, car la ligne de position s'ajoute à la même ligne de token",
+            "Identiques, car c'est le même token",
+            "Différents, car le modèle a déjà lu le contexte à ce stade",
+            "Identiques, mais ils deviennent différents seulement à la sortie du modèle"
+          ],
+          "correctIndex": 0,
+          "explanation": "La ligne de la table des tokens est la même, mais la ligne de la table des positions diffère, donc la somme diffère (cosinus mesuré de 0,952, pas 1). Le contexte n'est pas encore lu à l'entrée du premier bloc : la différence vient de la position seule. Elle apparaît dès l'entrée, pas seulement à la sortie."
+        },
+        {
+          "question": "Quelle affirmation sur RoPE (positions rotatives) est exacte ?",
+          "options": [
+            "Il agit sur les requêtes et les clés à l'intérieur de l'attention, et non sur l'embedding d'entrée",
+            "Il remplace la table d'embeddings de tokens",
+            "Il garantit à lui seul un contexte d'un million de tokens",
+            "Il est utilisé dans GPT-2"
+          ],
+          "correctIndex": 0,
+          "explanation": "RoPE tourne les requêtes et les clés, ce qui rend leur produit scalaire dépendant de l'écart entre positions. Il ne remplace pas la table de tokens, GPT-2 utilise des positions apprises additionnées, et la longueur de contexte utilisable dépend de l'entraînement (Llama 3 405B : 8 000 tokens, étendus par étapes à 128 000), pas de RoPE seul."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Embedding",
+          "definition": "Vecteur de nombres associé à un token, lu dans une table apprise pendant l'entraînement."
+        },
+        {
+          "term": "Dimension du modèle (d_model)",
+          "definition": "Taille des vecteurs qui circulent dans le modèle : 768 pour GPT-2 version 124 M."
+        },
+        {
+          "term": "Embedding statique",
+          "definition": "Vecteur fixe pour un mot, identique dans tous les contextes (word2vec, table d'entrée d'un modèle de langage)."
+        },
+        {
+          "term": "Représentation contextuelle",
+          "definition": "Vecteur d'un token en sortie d'une couche, qui dépend des tokens voisins grâce à l'attention."
+        },
+        {
+          "term": "Encodage de position",
+          "definition": "Information sur la place d'un token dans la séquence, ajoutée aux embeddings ou appliquée dans l'attention."
+        },
+        {
+          "term": "RoPE (rotary position embedding)",
+          "definition": "Méthode de position qui fait tourner les requêtes et les clés d'un angle dépendant de la position (Su et al., 2021)."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Sans information de position",
+          "prompt": "Pourquoi l’attention a-t-elle besoin qu’on lui fournisse la position des tokens ? Citez les trois familles de solutions du module et dites laquelle agit sur les requêtes et les clés plutôt que sur l’embedding.",
+          "solution": "L’attention compare des vecteurs entre eux sans regarder où ils se trouvent : sans position, « le chat mange la souris » et « la souris mange le chat » donneraient les mêmes vecteurs d’entrée, seulement rangés autrement. Trois familles existent : les sinusoïdes fixes du Transformer d’origine, les positions apprises de GPT-2, une seconde table additionnée à la ligne du token, et les positions rotatives RoPE de LLaMA. RoPE agit sur les requêtes et les clés, à l’intérieur de chaque couche, et non sur l’embedding d’entrée."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Fiche du modèle GPT-2 sur Hugging Face (124 M de paramètres, BPE au niveau des octets, 50 257 tokens, 1 024 tokens de contexte)",
+          "href": "https://huggingface.co/openai-community/gpt2"
+        },
+        {
+          "label": "Su et al., « RoFormer: Enhanced Transformer with Rotary Position Embedding » (2021)",
+          "href": "https://arxiv.org/abs/2104.09864"
+        },
+        {
+          "label": "Press et Wolf, « Using the Output Embedding to Improve Language Models » (2017)",
+          "href": "https://arxiv.org/abs/1608.05859"
+        }
+      ]
+    },
+    {
+      "id": "attention",
+      "title": "L'attention et le masque causal",
+      "keyTakeaways": [
+        "Chaque token produit une requête (Q), une clé (K) et une valeur (V) par trois projections apprises. Le score entre deux tokens est le produit scalaire de la requête de l'un et de la clé de l'autre.",
+        "La sortie d'un token est la moyenne des valeurs V des tokens regardés, pondérée par les poids du softmax : $\\text{softmax}(QK^\\top/\\sqrt{d_k})\\,V$.",
+        "La division par √d_k compense le fait que la variance d'un produit scalaire croît avec d_k (Vaswani et al., 2017). Sans elle, le softmax saturerait.",
+        "Le masque causal met −∞ sur les scores des tokens futurs avant le softmax : leur poids devient exactement 0. Il permet d'entraîner le modèle sur toutes les positions d'un texte en un seul passage, sans qu'il puisse copier la réponse.",
+        "Plusieurs têtes d'attention travaillent en parallèle, chacune sur un sous-espace (12 têtes de 64 dimensions dans GPT-2). Certaines ont un rôle identifié, comme les têtes d'induction, mais la plupart n'ont pas d'étiquette simple."
+      ],
+      "theory": "### Le problème que résout l'attention\n\nAprès les embeddings, chaque position possède un vecteur qui ne dépend que de son token et de sa place. Pour prédire le token suivant, il faut que chaque position puisse **aller chercher de l'information chez les positions précédentes** : le sujet d'une phrase pour accorder un verbe, le nom auquel renvoie un pronom, un motif répété plus haut dans le texte. C'est le rôle de l'attention.\n\n### Requête, clé, valeur\n\nÀ partir de son vecteur $x_i$, chaque position calcule trois vecteurs avec trois matrices apprises :\n\n- une **requête** $q_i = x_i W_Q$ : ce que cette position cherche ;\n- une **clé** $k_i = x_i W_K$ : ce que cette position offre comme repère ;\n- une **valeur** $v_i = x_i W_V$ : ce qu'elle transmet si on la consulte.\n\nDans GPT-2, une seule multiplication par une matrice de 768 × 2 304 donne les trois à la fois, puis on les sépare. Le **score** entre la position $i$ (qui regarde) et la position $j$ (regardée) est le produit scalaire $q_i \\cdot k_j$, divisé par $\\sqrt{d_k}$. Les scores d'une ligne passent ensuite dans un **softmax**, qui les transforme en poids positifs de somme 1. La sortie de la position $i$ est la somme des valeurs, pondérée par ces poids :\n\n$$\\text{Attention}(Q, K, V) = \\text{softmax}\\!\\left(\\frac{Q K^{\\top}}{\\sqrt{d_k}} + M\\right) V$$\n\noù $M$ est le masque causal, expliqué plus bas. Le « softmax » d'un vecteur $z$ est défini par $\\text{softmax}(z)_j = e^{z_j} / \\sum_l e^{z_l}$ : il met les scores à l'exponentielle puis divise par le total.\n\n### Pourquoi diviser par √d_k\n\nSi les composantes de $q$ et de $k$ sont des variables indépendantes de moyenne 0 et de variance 1, leur produit scalaire a pour moyenne 0 et pour variance $d_k$ (Vaswani et al., 2017, note 4). Pour $d_k = 64$, l'écart-type est donc 8 : les scores seraient de l'ordre de plusieurs unités. Or un softmax appliqué à des scores très écartés devient presque un choix « tout ou rien » : avec des scores (8, 0, −8), le premier token reçoit 99,97 % du poids, et le gradient (le signal qui sert à corriger les paramètres) devient minuscule. Avec des scores (1, 0, −1), les poids sont 66,5 %, 24,5 % et 9,0 %, ce qui laisse de la place à l'apprentissage. Les auteurs ont supposé que cet effet nuisait à l'entraînement et ont divisé par $\\sqrt{d_k}$ pour ramener la variance à 1. L'exemple de code mesure la variance avant et après la division.\n\n### Le masque causal\n\nUn modèle de génération ne doit prédire un token qu'à partir de ce qui le précède. On pourrait entraîner le modèle texte par texte, en lui cachant la suite à chaque fois, mais ce serait très lent. Le **masque causal** permet de traiter **toutes les positions d'un texte d'un seul coup** : on ajoute aux scores une matrice $M$ qui vaut 0 pour les paires où le token regardé est le token courant ou un précédent, et $-\\infty$ pour les tokens futurs :\n\n$$M_{ij} = \\begin{cases} 0 & \\text{si } j \\le i \\\\ -\\infty & \\text{si } j > i \\end{cases}$$\n\nComme $e^{-\\infty} = 0$, le softmax donne un poids exactement nul aux tokens futurs. Si l'on avait mis 0 à leur place, $e^{0} = 1$ aurait donné à chaque token futur un poids non nul, et le modèle aurait pu « lire la réponse ». Sans masque, la tâche « prédire le token suivant » serait triviale pendant l'entraînement (copier le token d'à côté), et inutilisable ensuite, puisqu'à la génération le futur n'existe pas.\n\n### Plusieurs têtes\n\nAu lieu d'une seule attention sur 768 dimensions, GPT-2 en lance 12 en parallèle, chacune sur 64 dimensions ($12 \\times 64 = 768$). Le Transformer d'origine en utilise 8 de 64 dimensions ($8 \\times 64 = 512$). Les 12 sorties de 64 nombres sont mises bout à bout, puis multipliées par une dernière matrice $W_O$. Chaque tête peut ainsi apprendre à regarder des choses différentes.\n\nQue fait chaque tête ? La réponse est nuancée.\n\n- Certaines têtes ont un rôle identifié. Les **têtes d'induction** repèrent un motif de la forme [A][B] … [A] et prédisent [B] : elles seraient, selon Olsson et al. (2022), un mécanisme important de l'apprentissage « en contexte », une hypothèse que les auteurs présentent comme étayée de façon préliminaire et indirecte pour les grands modèles.\n- Pour la plupart des têtes, il n'existe pas d'étiquette simple. Les numéros de têtes n'ont pas de sens fixe : « la tête 1 s'occupe de la grammaire » est une image, pas un fait, et chaque modèle entraîné répartit les rôles à sa façon.\n- Les poids d'attention ne sont pas à eux seuls une explication de la prédiction. Jain et Wallace (2019) ont montré, sur des modèles antérieurs, que des poids d'attention très différents peuvent donner la même sortie. Dans de nombreux modèles, les premiers tokens reçoivent aussi un poids élevé sans rapport avec leur sens (« attention sinks », Xiao et al., 2024). C'est pourquoi on évite de lire une carte d'attention comme un raisonnement.\n\n### Le coût\n\nPour une séquence de $n$ tokens, la matrice des scores compte $n \\times n$ valeurs par tête et par couche : le nombre d'interactions croît comme $n^2$ (Vaswani et al., 2017, tableau 1 : $O(n^2 \\cdot d)$). Pour 1 024 tokens, cela fait plus d'un million de scores par tête et par couche. Des implémentations optimisées réduisent la mémoire et le temps réel sans changer ce nombre d'interactions. C'est l'une des raisons pour lesquelles la longueur du contexte coûte cher.",
+      "analogy": {
+        "title": "La fiche de recherche d'une bibliothèque",
+        "text": "Une position qui calcule son attention ressemble à un lecteur dans une bibliothèque. Sa **requête** est la question qu'il a en tête. Chaque livre déjà rangé porte une **clé**, une étiquette sur la tranche. Plus la clé ressemble à la question, plus le lecteur y prête attention. Le lecteur ne prend pas un seul livre : il en lit un peu de chacun, proportionnellement à leur pertinence, et ce qu'il retient est un mélange des **valeurs** (les contenus).\n\n**Limite de l'analogie** : requêtes, clés et valeurs sont des vecteurs obtenus par des multiplications de matrices apprises, pas des mots ni des phrases. Et le lecteur ne peut consulter que les livres déjà posés sur les étagères, jamais ceux qui seront écrits après lui (c'est le masque causal)."
+      },
+      "example": {
+        "title": "Un calcul d'attention à la main",
+        "text": "Les valeurs ci-dessous sont des **valeurs d'illustration**, avec $d_k = 2$ pour que tout tienne en quelques lignes. Trois tokens ont pour clés $k_1 = (1, 0)$, $k_2 = (0, 1)$, $k_3 = (1, 1)$ et pour valeurs $v_1 = (10, 0)$, $v_2 = (0, 10)$, $v_3 = (5, 5)$. Le token 3 a pour requête $q_3 = (1, 0)$.\n\n1. Produits scalaires : $q_3 \\cdot k_1 = 1$, $q_3 \\cdot k_2 = 0$, $q_3 \\cdot k_3 = 1$.\n2. Division par $\\sqrt{2} \\approx 1{,}414$ : les scores sont environ 0,707, 0 et 0,707.\n3. Softmax : $e^{0{,}707} \\approx 2{,}03$, $e^{0} = 1$, $e^{0{,}707} \\approx 2{,}03$, de total 5,06. Les poids sont environ 0,40, 0,20 et 0,40.\n4. Sortie : $0{,}40 \\times (10, 0) + 0{,}20 \\times (0, 10) + 0{,}40 \\times (5, 5) \\approx (6{,}0\\; ;\\; 4{,}0)$.\n\nLe token 1, lui, ne peut regarder que lui-même à cause du masque : son poids est 1 et sa sortie est simplement $v_1$."
+      },
+      "diagram": {
+        "title": "Q, K, V, scores et masque causal",
+        "description": "Les trois projections d'un token, la matrice des scores d'une séquence de cinq tokens avec son masque causal, puis le softmax et la somme pondérée.",
+        "svg": "<svg viewBox=\"0 0 880 400\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Attention : projections Q, K, V, matrice de scores avec masque causal, puis moyenne pondérée des valeurs\">\n<defs><marker id=\"g4-fl\" markerWidth=\"10\" markerHeight=\"8\" refX=\"8\" refY=\"4\" orient=\"auto\"><path d=\"M0,0 L10,4 L0,8 z\" fill=\"#38bdf8\" /></marker></defs>\n<rect width=\"880\" height=\"400\" rx=\"16\" fill=\"#0f172a\" />\n<g id=\"g4-qkv\">\n<rect x=\"20\" y=\"130\" width=\"120\" height=\"70\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" stroke-width=\"1.5\" />\n<text x=\"80\" y=\"158\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">Vecteur x</text>\n<text x=\"80\" y=\"180\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">d'un token</text>\n<rect x=\"190\" y=\"70\" width=\"130\" height=\"64\" rx=\"10\" fill=\"#1a1530\" stroke=\"#a78bfa\" stroke-width=\"1.5\" />\n<text x=\"255\" y=\"98\" fill=\"#ede9fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"16\" text-anchor=\"middle\">Q</text>\n<text x=\"255\" y=\"118\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">ce que je cherche</text>\n<line x1=\"142\" y1=\"165\" x2=\"186\" y2=\"102\" stroke=\"#a78bfa\" stroke-width=\"2.5\" marker-end=\"url(#g4-fl)\" />\n<rect x=\"190\" y=\"160\" width=\"130\" height=\"64\" rx=\"10\" fill=\"#0d1f2d\" stroke=\"#34d399\" stroke-width=\"1.5\" />\n<text x=\"255\" y=\"188\" fill=\"#d1fae5\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"16\" text-anchor=\"middle\">K</text>\n<text x=\"255\" y=\"208\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">ce que j'offre</text>\n<line x1=\"142\" y1=\"165\" x2=\"186\" y2=\"192\" stroke=\"#34d399\" stroke-width=\"2.5\" marker-end=\"url(#g4-fl)\" />\n<rect x=\"190\" y=\"250\" width=\"130\" height=\"64\" rx=\"10\" fill=\"#2a1d0a\" stroke=\"#f59e0b\" stroke-width=\"1.5\" />\n<text x=\"255\" y=\"278\" fill=\"#fef3c7\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"16\" text-anchor=\"middle\">V</text>\n<text x=\"255\" y=\"298\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">ce que je transmets</text>\n<line x1=\"142\" y1=\"165\" x2=\"186\" y2=\"282\" stroke=\"#f59e0b\" stroke-width=\"2.5\" marker-end=\"url(#g4-fl)\" />\n<text x=\"255\" y=\"345\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">trois matrices apprises</text>\n</g>\n<text x=\"530.0\" y=\"66\" fill=\"#7dd3fc\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">Scores Q·Kᵀ/√d_k puis masque</text>\n<g id=\"g4-passe\">\n<rect x=\"430\" y=\"90\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#0d1f2d\" stroke=\"#34d399\" />\n<text x=\"448.0\" y=\"114\" fill=\"#d1fae5\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">s</text>\n<rect x=\"430\" y=\"130\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#0d1f2d\" stroke=\"#34d399\" />\n<text x=\"448.0\" y=\"154\" fill=\"#d1fae5\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">s</text>\n<rect x=\"470\" y=\"130\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#0d1f2d\" stroke=\"#34d399\" />\n<text x=\"488.0\" y=\"154\" fill=\"#d1fae5\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">s</text>\n<rect x=\"430\" y=\"170\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#0d1f2d\" stroke=\"#34d399\" />\n<text x=\"448.0\" y=\"194\" fill=\"#d1fae5\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">s</text>\n<rect x=\"470\" y=\"170\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#0d1f2d\" stroke=\"#34d399\" />\n<text x=\"488.0\" y=\"194\" fill=\"#d1fae5\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">s</text>\n<rect x=\"510\" y=\"170\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#0d1f2d\" stroke=\"#34d399\" />\n<text x=\"528.0\" y=\"194\" fill=\"#d1fae5\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">s</text>\n<rect x=\"430\" y=\"210\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#0d1f2d\" stroke=\"#34d399\" />\n<text x=\"448.0\" y=\"234\" fill=\"#d1fae5\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">s</text>\n<rect x=\"470\" y=\"210\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#0d1f2d\" stroke=\"#34d399\" />\n<text x=\"488.0\" y=\"234\" fill=\"#d1fae5\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">s</text>\n<rect x=\"510\" y=\"210\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#0d1f2d\" stroke=\"#34d399\" />\n<text x=\"528.0\" y=\"234\" fill=\"#d1fae5\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">s</text>\n<rect x=\"550\" y=\"210\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#0d1f2d\" stroke=\"#34d399\" />\n<text x=\"568.0\" y=\"234\" fill=\"#d1fae5\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">s</text>\n<rect x=\"430\" y=\"250\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#0d1f2d\" stroke=\"#34d399\" />\n<text x=\"448.0\" y=\"274\" fill=\"#d1fae5\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">s</text>\n<rect x=\"470\" y=\"250\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#0d1f2d\" stroke=\"#34d399\" />\n<text x=\"488.0\" y=\"274\" fill=\"#d1fae5\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">s</text>\n<rect x=\"510\" y=\"250\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#0d1f2d\" stroke=\"#34d399\" />\n<text x=\"528.0\" y=\"274\" fill=\"#d1fae5\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">s</text>\n<rect x=\"550\" y=\"250\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#0d1f2d\" stroke=\"#34d399\" />\n<text x=\"568.0\" y=\"274\" fill=\"#d1fae5\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">s</text>\n<rect x=\"590\" y=\"250\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#0d1f2d\" stroke=\"#34d399\" />\n<text x=\"608.0\" y=\"274\" fill=\"#d1fae5\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">s</text>\n</g>\n<g id=\"g4-futur\">\n<rect x=\"470\" y=\"90\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#2a1215\" stroke=\"#f87171\" />\n<text x=\"488.0\" y=\"114\" fill=\"#fee2e2\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">−∞</text>\n<rect x=\"510\" y=\"90\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#2a1215\" stroke=\"#f87171\" />\n<text x=\"528.0\" y=\"114\" fill=\"#fee2e2\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">−∞</text>\n<rect x=\"550\" y=\"90\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#2a1215\" stroke=\"#f87171\" />\n<text x=\"568.0\" y=\"114\" fill=\"#fee2e2\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">−∞</text>\n<rect x=\"590\" y=\"90\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#2a1215\" stroke=\"#f87171\" />\n<text x=\"608.0\" y=\"114\" fill=\"#fee2e2\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">−∞</text>\n<rect x=\"510\" y=\"130\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#2a1215\" stroke=\"#f87171\" />\n<text x=\"528.0\" y=\"154\" fill=\"#fee2e2\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">−∞</text>\n<rect x=\"550\" y=\"130\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#2a1215\" stroke=\"#f87171\" />\n<text x=\"568.0\" y=\"154\" fill=\"#fee2e2\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">−∞</text>\n<rect x=\"590\" y=\"130\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#2a1215\" stroke=\"#f87171\" />\n<text x=\"608.0\" y=\"154\" fill=\"#fee2e2\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">−∞</text>\n<rect x=\"550\" y=\"170\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#2a1215\" stroke=\"#f87171\" />\n<text x=\"568.0\" y=\"194\" fill=\"#fee2e2\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">−∞</text>\n<rect x=\"590\" y=\"170\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#2a1215\" stroke=\"#f87171\" />\n<text x=\"608.0\" y=\"194\" fill=\"#fee2e2\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">−∞</text>\n<rect x=\"590\" y=\"210\" width=\"36\" height=\"36\" rx=\"5\" fill=\"#2a1215\" stroke=\"#f87171\" />\n<text x=\"608.0\" y=\"234\" fill=\"#fee2e2\" font-family=\"monospace\" font-size=\"13\" text-anchor=\"middle\">−∞</text>\n</g>\n<text x=\"530.0\" y=\"308\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">colonne : token regardé</text>\n<text x=\"416\" y=\"190.0\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\" transform=\"rotate(-90 416 190.0)\">ligne : token qui regarde</text>\n<line x1=\"322\" y1=\"165\" x2=\"396\" y2=\"165\" stroke=\"#a78bfa\" stroke-width=\"2.5\" marker-end=\"url(#g4-fl)\" />\n<text x=\"530.0\" y=\"330\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">en vert : passé et présent ; en rouge : futur interdit</text>\n<g id=\"g4-sortie\">\n<rect x=\"680\" y=\"100\" width=\"180\" height=\"150\" rx=\"10\" fill=\"#2a1d0a\" stroke=\"#f59e0b\" stroke-width=\"1.5\" />\n<text x=\"770\" y=\"126\" fill=\"#fef3c7\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Softmax par ligne</text>\n<text x=\"770\" y=\"148\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">poids ≥ 0, de somme 1</text>\n<text x=\"770\" y=\"170\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">(e^(−∞) = 0 : futur à 0)</text>\n<text x=\"770\" y=\"200\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">sortie d'une ligne =</text>\n<text x=\"770\" y=\"220\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">somme des V pondérée</text>\n<text x=\"770\" y=\"240\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">par ces poids</text>\n</g>\n<line x1=\"634\" y1=\"165\" x2=\"676\" y2=\"165\" stroke=\"#f59e0b\" stroke-width=\"2.5\" marker-end=\"url(#g4-fl)\" />\n</svg>",
+        "steps": [
+          {
+            "title": "Trois projections",
+            "explanation": "Le vecteur de chaque token est multiplié par trois matrices apprises pour donner une requête Q, une clé K et une valeur V.",
+            "highlight": [
+              "g4-qkv"
+            ]
+          },
+          {
+            "title": "Les scores",
+            "explanation": "Pour chaque paire (token qui regarde, token regardé), on calcule le produit scalaire de la requête et de la clé, divisé par √d_k. Seules les cases vertes (passé et présent) sont gardées.",
+            "highlight": [
+              "g4-passe"
+            ]
+          },
+          {
+            "title": "Le masque causal",
+            "explanation": "Les cases au-dessus de la diagonale reçoivent −∞ avant le softmax : un token ne peut pas regarder ceux qui le suivent.",
+            "highlight": [
+              "g4-futur"
+            ]
+          },
+          {
+            "title": "Softmax puis somme pondérée",
+            "explanation": "Chaque ligne est normalisée par un softmax, ce qui donne des poids positifs de somme 1. La sortie du token est la somme des valeurs V, pondérée par ces poids.",
+            "highlight": [
+              "g4-sortie"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "code": "# L'attention de la tête 0 du premier bloc de GPT-2, recalculée à la main puis comparée à celle du modèle\nimport math\nimport torch\nfrom transformers import AutoTokenizer, AutoModelForCausalLM\n\ntok = AutoTokenizer.from_pretrained(\"gpt2\")\nmodele = AutoModelForCausalLM.from_pretrained(\"gpt2\", attn_implementation=\"eager\").eval()\n\nids = tok(\"The cat sleeps on the bed\", return_tensors=\"pt\").input_ids\nn = ids.shape[1]\nwith torch.no_grad():\n    sortie = modele(ids, output_hidden_states=True, output_attentions=True)\n\nbloc = modele.transformer.h[0]\nx = bloc.ln_1(sortie.hidden_states[0])             # entrée du bloc, après normalisation (pre-LN)\nqkv = x @ bloc.attn.c_attn.weight + bloc.attn.c_attn.bias   # une seule projection donne Q, K et V (768 + 768 + 768)\nq, k, v = qkv.split(768, dim=-1)\nd_k = 64                                            # 768 / 12 têtes\nq0, k0 = q[0, :, :d_k], k[0, :, :d_k]               # tête 0 : les 64 premières colonnes\n\nscores = q0 @ k0.T / math.sqrt(d_k)\nmasque = torch.triu(torch.ones(n, n, dtype=torch.bool), diagonal=1)   # True au-dessus de la diagonale = futur\nscores = scores.masked_fill(masque, float(\"-inf\"))\npoids = torch.softmax(scores, dim=-1)\n\nreference = sortie.attentions[0][0, 0]              # poids rendus par le modèle : couche 0, tête 0\nprint(\"écart maximal avec le modèle :\", f\"{(poids - reference).abs().max().item():.1e}\")\nmots = [tok.decode(i) for i in ids[0]]\nprint(\"lignes = token qui regarde, colonnes =\", mots)\nfor mot, ligne in zip(mots, poids):\n    print(f\"{mot:>7}\", \" \".join(f\"{p:.2f}\" for p in ligne.tolist()))\n\n# Pourquoi diviser par √d_k ? Pour des composantes indépendantes de moyenne 0 et de variance 1,\n# la variance du produit scalaire vaut d_k (Vaswani et al., 2017, note 4). Vérification numérique :\ntorch.manual_seed(0)\na, b = torch.randn(100_000, d_k), torch.randn(100_000, d_k)\nproduit = (a * b).sum(dim=1)\nprint(f\"variance du produit scalaire (d_k = {d_k}) : {produit.var().item():.1f}\")\nprint(f\"variance après division par √d_k : {(produit / math.sqrt(d_k)).var().item():.2f}\")",
+        "explanation": "Le code recalcule à la main l'attention de la tête 0 du premier bloc de GPT-2 : projections Q, K, V à partir de l'unique matrice c_attn, division par √d_k, masque, softmax. Il compare le résultat aux poids que le modèle renvoie lui-même (écart négligeable, de l'ordre de l'erreur d'arrondi), puis vérifie la variance du produit scalaire avant et après la division. Dans la matrice affichée, le premier token (« The ») donne un poids de 1,00 à lui-même : c'est l'effet du masque. Cette tête n'illustre pas un rôle linguistique précis, et il ne faut pas en tirer de conclusion sur le sens.",
+        "output": "écart maximal avec le modèle : 6.0e-08\nlignes = token qui regarde, colonnes = ['The', ' cat', ' sleeps', ' on', ' the', ' bed']\n    The 1.00 0.00 0.00 0.00 0.00 0.00\n    cat 0.70 0.30 0.00 0.00 0.00 0.00\n sleeps 0.38 0.40 0.22 0.00 0.00 0.00\n     on 0.46 0.19 0.32 0.04 0.00 0.00\n    the 0.42 0.16 0.35 0.03 0.04 0.00\n    bed 0.23 0.26 0.25 0.05 0.07 0.14\nvariance du produit scalaire (d_k = 64) : 63.9\nvariance après division par √d_k : 1.00",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Dans l'attention, à quoi sert la requête (Query) d'un token ?",
+          "options": [
+            "À être comparée aux clés des autres tokens pour décider auxquels il prête attention",
+            "À mémoriser le token sur le disque",
+            "À indiquer sa position dans la phrase",
+            "À masquer le token suivant"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le score entre deux tokens est le produit scalaire de la requête de l'un et de la clé de l'autre ; les poids qui en résultent servent à moyenner les valeurs. La position est fournie ailleurs (module 3), et le masquage du futur est le rôle du masque causal, pas de la requête."
+        },
+        {
+          "question": "Pourquoi met-on −∞ plutôt que 0 sur les scores des tokens futurs, avant le softmax ?",
+          "options": [
+            "Parce que e^(−∞) = 0 donne un poids exactement nul, alors que e^0 = 1 donnerait un poids non nul au futur",
+            "Parce que 0 n'est pas un nombre représentable par un processeur",
+            "Pour que le calcul s'arrête plus tôt et aille plus vite",
+            "Parce que le softmax exige des nombres négatifs"
+          ],
+          "correctIndex": 0,
+          "explanation": "Un score de 0 donnerait à chaque token futur un poids de l'ordre de celui des autres tokens, car e^0 = 1 : le modèle verrait la réponse. Avec −∞, le poids est exactement 0. Le calcul n'est pas raccourci par ce choix, et le softmax accepte n'importe quels scores réels."
+        },
+        {
+          "question": "Pourquoi divise-t-on les scores par √d_k ?",
+          "options": [
+            "Parce que la variance d'un produit scalaire croît avec d_k : sans division, le softmax saturerait et le gradient deviendrait minuscule",
+            "Pour que la somme des poids d'attention soit égale à 1",
+            "Pour accélérer le calcul de la multiplication de matrices",
+            "Pour que les tokens éloignés reçoivent moins d'attention que les tokens proches"
+          ],
+          "correctIndex": 0,
+          "explanation": "La somme des poids vaut 1 grâce au softmax, pas grâce à la division. La division ne rend pas le calcul plus rapide et ne dépend pas de la distance entre tokens : elle ramène la variance des scores à environ 1, ce qui évite un softmax quasi « tout ou rien »."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Requête, clé, valeur (Q, K, V)",
+          "definition": "Trois vecteurs calculés pour chaque token par trois matrices apprises. Le produit scalaire requête-clé donne le score, et la sortie est une moyenne pondérée des valeurs."
+        },
+        {
+          "term": "Produit scalaire",
+          "definition": "Somme des produits des composantes de deux vecteurs ; il est grand quand les deux vecteurs pointent dans des directions proches."
+        },
+        {
+          "term": "Softmax",
+          "definition": "Fonction qui transforme une liste de scores en probabilités positives de somme 1, en passant par l'exponentielle."
+        },
+        {
+          "term": "Masque causal",
+          "definition": "Matrice qui met −∞ sur les scores des tokens futurs, de sorte que chaque position ne regarde que le passé et elle-même."
+        },
+        {
+          "term": "Tête d'attention",
+          "definition": "Une des attentions calculées en parallèle dans un bloc, chacune sur un sous-espace du vecteur (64 dimensions dans GPT-2)."
+        },
+        {
+          "term": "Tête d'induction",
+          "definition": "Tête qui repère un motif [A][B] … [A] et prédit [B] ; hypothèse de mécanisme de l'apprentissage en contexte (Olsson et al., 2022)."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Remplacer −∞ par 0",
+          "prompt": "Dans le masque causal, que se passerait-il si l’on mettait 0 à la place de −∞ pour les tokens futurs ? Pourquoi le modèle deviendrait-il inutilisable à la génération ?",
+          "solution": "Avec 0, le softmax donnerait à chaque token futur un poids non nul, puisque son exponentielle vaut 1 : le modèle pourrait lire la réponse pendant l’entraînement. La tâche « prédire le token suivant » deviendrait triviale, par simple copie du token voisin, et les poids appris ne vaudraient rien. À la génération, le futur n’existe pas : les positions à droite sont absentes, et le modèle n’aurait jamais appris à travailler sans elles. Le masque met donc −∞, ce qui donne un poids exactement nul."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Vaswani et al., « Attention Is All You Need » (2017)",
+          "href": "https://arxiv.org/abs/1706.03762"
+        },
+        {
+          "label": "Olsson et al., « In-context Learning and Induction Heads » (2022)",
+          "href": "https://arxiv.org/abs/2209.11895"
+        },
+        {
+          "label": "Jain et Wallace, « Attention is not Explanation » (NAACL 2019)",
+          "href": "https://arxiv.org/abs/1902.10186"
+        }
+      ]
+    },
+    {
+      "id": "bloc-transformer",
+      "title": "Le bloc Transformer : MLP, connexions résiduelles, empilement",
+      "keyTakeaways": [
+        "Un bloc enchaîne deux sous-blocs : l'attention, qui fait circuler l'information entre les positions, puis un MLP (perceptron multicouche), qui transforme chaque position séparément.",
+        "Chaque sous-bloc s'additionne au vecteur qui circule au lieu de le remplacer : c'est la connexion résiduelle. GPT-2 place la normalisation à l'entrée de chaque sous-bloc (pre-LN).",
+        "Le MLP de GPT-2 agrandit le vecteur de 768 à 3 072 nombres, applique une non-linéarité (GELU), puis le ramène à 768. Dans un bloc de GPT-2, il porte environ deux tiers des paramètres.",
+        "La taille des vecteurs ne change pas d'un bloc à l'autre, ce qui permet de les empiler : 12 blocs dans GPT-2 version 124 M, 126 dans Llama 3 405B.",
+        "L'idée que les MLP fonctionnent comme des mémoires clé-valeur (Geva et al., 2021) est une interprétation étayée par des expériences, pas un fait établi sur tout ce qu'ils font."
+      ],
+      "theory": "### Deux sous-blocs, répétés\n\nUn modèle de type GPT est une pile de **blocs** identiques dans leur forme, mais dont les paramètres diffèrent d'un bloc à l'autre. Chaque bloc fait deux choses.\n\n1. **L'attention** (module 4) : chaque position consulte les positions précédentes et s'enrichit de leur contenu. C'est la seule opération qui fait circuler de l'information **entre** les positions.\n2. **Le MLP** (*multi-layer perceptron*, aussi appelé réseau feed-forward) : une petite fonction appliquée à chaque position **séparément**, avec les mêmes paramètres pour toutes les positions. Elle transforme le vecteur de la position sans regarder les autres.\n\n### Le MLP\n\nDans GPT-2, le MLP est composé de deux multiplications matricielles séparées par une fonction d'activation non linéaire :\n\n$$\\text{MLP}(x) = \\text{GELU}(x W_1 + b_1)\\, W_2 + b_2$$\n\n$W_1$ fait passer le vecteur de 768 à 3 072 nombres (quatre fois plus), $W_2$ le ramène à 768. La fonction GELU (*Gaussian error linear unit*) laisse passer les valeurs positives et atténue les négatives de façon douce ; dans l'implémentation de GPT-2 de Hugging Face, c'est une formule approchée de GELU. Sans non-linéarité, deux multiplications matricielles à la suite équivaudraient à une seule, et le réseau ne pourrait représenter que des fonctions linéaires.\n\nDans les modèles plus récents, cette partie varie : LLaMA remplace l'activation par SwiGLU, et le rapport entre la dimension interne et celle du modèle n'est plus 4 (pour Llama 3 8B, 14 336 pour une dimension de 4 096, soit 3,5, d'après le tableau 3 de l'article).\n\n**Que font les MLP ?** Une interprétation proposée par Geva et al. (2021) les voit comme des **mémoires clé-valeur** : chaque « clé » correspond à un motif de texte dans les données d'entraînement, et la « valeur » associée déplace la distribution de sortie vers les tokens qui suivent ces motifs, surtout dans les couches hautes. Les auteurs soutiennent cette lecture par des expériences. Elle éclaire une partie de ce que font les MLP, sans prétendre que leur rôle s'y réduit : on pense que des connaissances y sont stockées, mais les détails restent un sujet de recherche.\n\n### La connexion résiduelle\n\nChaque sous-bloc ne remplace pas le vecteur : il **s'additionne** à lui. Avec $x$ le vecteur à l'entrée du bloc :\n\n$$x' = x + \\text{Attention}(\\text{LN}(x)), \\qquad x'' = x' + \\text{MLP}(\\text{LN}(x'))$$\n\nLN désigne une normalisation par couche (*layer normalization*), qui recentre et remet à l'échelle les nombres du vecteur. Le vecteur qui traverse tous les blocs est appelé **flux résiduel** (*residual stream*) dans la littérature d'interprétabilité (Elhage et al., 2021) : on peut se le représenter comme un canal commun sur lequel chaque sous-bloc lit une information et écrit une correction. L'exemple de code vérifie cette égalité sur le premier bloc de GPT-2.\n\nL'intérêt est double. Le signal d'origine passe d'un bout à l'autre de la pile sans devoir traverser tous les calculs, et les gradients peuvent circuler plus directement pendant l'entraînement. Radford et al. rattachent ce montage aux réseaux résiduels de He et al. (2016). Il est aujourd'hui la norme, ce qui n'est pas la même chose que d'avoir démontré toutes les raisons de son efficacité.\n\n### Où placer la normalisation\n\nDans le Transformer d'origine (2017), la normalisation vient **après** l'addition (post-LN). GPT-2 déplace la normalisation **à l'entrée** de chaque sous-bloc et en ajoute une dernière après le dernier bloc (Radford et al., 2019) : c'est ce qu'on appelle le pre-LN. Xiong et al. (2020) montrent que, dans la variante pre-LN, les gradients restent bien conduits dès l'initialisation, ce qui permet de se passer de la phase de « chauffe » du taux d'apprentissage (*warm-up*) que le post-LN exige. LLaMA conserve une normalisation à l'entrée de chaque sous-bloc et utilise la variante RMSNorm (Touvron et al., 2023).\n\n### Où sont les paramètres\n\nLe code de ce module compte les paramètres de GPT-2 :\n\n| Élément | Paramètres |\n|---|---|\n| Attention d'un bloc | 2 362 368 |\n| MLP d'un bloc | 4 722 432 |\n| Normalisations d'un bloc | 3 072 |\n| Tables d'embeddings (tokens et positions) | 39 383 808 |\n| **Total du modèle** | **124 439 808** |\n\nDans un bloc, le MLP porte environ deux tiers des paramètres (Geva et al. font la même remarque pour les Transformers en général). Les tables d'embeddings représentent à elles seules près d'un tiers du total pour ce petit modèle. L'article de GPT-2 annonce 117 millions de paramètres pour cette taille, la fiche actuelle du modèle 124 millions, et le décompte ci-dessus 124 439 808 : je n'ai pas trouvé d'explication officielle de l'écart avec l'article.\n\n### Empiler les blocs\n\nLa sortie d'un bloc a la même forme que son entrée (une ligne de 768 nombres par position), donc la sortie de l'un devient l'entrée du suivant. GPT-2 existe en quatre tailles de 12 à 48 blocs (Radford et al., 2019, tableau 2) ; Llama 3 compte 32 blocs pour 8 milliards de paramètres, 80 pour 70 milliards et 126 pour 405 milliards (Grattafiori et al., 2024, tableau 3). Les couches profondes ne sont pas des copies : chacune a ses propres paramètres, appris.\n\nÀ la fin de la pile, pour générer le token suivant, on utilisera le vecteur de la **dernière position** : c'est l'objet du module 6.",
+      "analogy": {
+        "title": "Un document partagé annoté par une chaîne de relecteurs",
+        "text": "Imaginez un document que se passent douze relecteurs. Chacun lit le document dans son état actuel et **ajoute des annotations en marge**, sans réécrire le texte. Le suivant lit le document avec les annotations déjà présentes. À la fin, le document final contient le texte d'origine plus la somme des annotations. Dans chaque bloc, deux relecteurs interviennent : le premier compare les passages entre eux (l'attention), le second retravaille chaque passage isolément (le MLP).\n\n**Limite de l'analogie** : les annotations sont des vecteurs de 768 nombres, lisibles seulement en les projetant vers le vocabulaire, et rien n'empêche une couche d'annuler en pratique ce qu'une autre a écrit."
+      },
+      "example": {
+        "title": "Comment les dimensions circulent dans GPT-2",
+        "text": "Pour une phrase de 6 tokens, le tableau d'entrée a 6 lignes et 768 colonnes. Dans un bloc :\n\n- la normalisation puis l'attention renvoient un tableau de même forme (6 × 768) ;\n- l'addition résiduelle donne encore 6 × 768 ;\n- dans le MLP, le tableau devient 6 × 3 072 au milieu, puis revient à 6 × 768 ;\n- la seconde addition résiduelle donne un tableau 6 × 768, qui entre dans le bloc suivant.\n\nLa forme est la même à l'entrée et à la sortie de chaque bloc : c'est ce qui permet de les empiler sans adaptation. Seules les valeurs changent."
+      },
+      "diagram": {
+        "title": "Un bloc Transformer",
+        "description": "Normalisation, attention, addition, normalisation, MLP, addition, avec les deux connexions résiduelles qui conservent le vecteur d'origine.",
+        "svg": "<svg viewBox=\"0 0 880 360\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Un bloc Transformer : normalisation, attention, addition, normalisation, MLP, addition, avec deux connexions résiduelles\">\n<defs><marker id=\"g5-fl\" markerWidth=\"10\" markerHeight=\"8\" refX=\"8\" refY=\"4\" orient=\"auto\"><path d=\"M0,0 L10,4 L0,8 z\" fill=\"#38bdf8\" /></marker></defs>\n<rect width=\"880\" height=\"360\" rx=\"16\" fill=\"#0f172a\" />\n<g id=\"g5-entree\"><rect x=\"20\" y=\"145\" width=\"90\" height=\"60\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" stroke-width=\"1.5\" /><text x=\"65\" y=\"171\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"15\" text-anchor=\"middle\">x</text><text x=\"65\" y=\"191\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"10\" text-anchor=\"middle\">768 nombres</text></g>\n<g id=\"g5-ln1\"><rect x=\"130\" y=\"145\" width=\"70\" height=\"60\" rx=\"10\" fill=\"#1e293b\" stroke=\"#64748b\" stroke-width=\"1.5\" /><text x=\"165\" y=\"180\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">LN</text></g>\n<g id=\"g5-attention\"><rect x=\"220\" y=\"145\" width=\"120\" height=\"60\" rx=\"10\" fill=\"#1a1530\" stroke=\"#a78bfa\" stroke-width=\"1.5\" /><text x=\"280\" y=\"171\" fill=\"#ede9fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Attention</text><text x=\"280\" y=\"191\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"10\" text-anchor=\"middle\">12 têtes en parallèle</text></g>\n<g id=\"g5-add1\"><circle cx=\"385\" cy=\"175\" r=\"17\" fill=\"#0d1f2d\" stroke=\"#34d399\" stroke-width=\"1.5\" /><text x=\"385\" y=\"181\" fill=\"#d1fae5\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"20\" text-anchor=\"middle\">+</text></g>\n<g id=\"g5-ln2\"><rect x=\"420\" y=\"145\" width=\"70\" height=\"60\" rx=\"10\" fill=\"#1e293b\" stroke=\"#64748b\" stroke-width=\"1.5\" /><text x=\"455\" y=\"180\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">LN</text></g>\n<g id=\"g5-mlp\"><rect x=\"510\" y=\"145\" width=\"140\" height=\"60\" rx=\"10\" fill=\"#2a1d0a\" stroke=\"#f59e0b\" stroke-width=\"1.5\" /><text x=\"580\" y=\"171\" fill=\"#fef3c7\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">MLP</text><text x=\"580\" y=\"191\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"10\" text-anchor=\"middle\">768 → 3 072 → 768</text></g>\n<g id=\"g5-add2\"><circle cx=\"690\" cy=\"175\" r=\"17\" fill=\"#0d1f2d\" stroke=\"#34d399\" stroke-width=\"1.5\" /><text x=\"690\" y=\"181\" fill=\"#d1fae5\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"20\" text-anchor=\"middle\">+</text></g>\n<g id=\"g5-sortie\"><rect x=\"740\" y=\"145\" width=\"120\" height=\"60\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" stroke-width=\"1.5\" /><text x=\"800\" y=\"171\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"15\" text-anchor=\"middle\">x'</text><text x=\"800\" y=\"191\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"10\" text-anchor=\"middle\">768 nombres</text></g>\n<line x1=\"112\" y1=\"175\" x2=\"126\" y2=\"175\" stroke=\"#38bdf8\" stroke-width=\"2.5\" marker-end=\"url(#g5-fl)\" />\n<line x1=\"202\" y1=\"175\" x2=\"216\" y2=\"175\" stroke=\"#38bdf8\" stroke-width=\"2.5\" marker-end=\"url(#g5-fl)\" />\n<line x1=\"342\" y1=\"175\" x2=\"366\" y2=\"175\" stroke=\"#38bdf8\" stroke-width=\"2.5\" marker-end=\"url(#g5-fl)\" />\n<line x1=\"404\" y1=\"175\" x2=\"416\" y2=\"175\" stroke=\"#38bdf8\" stroke-width=\"2.5\" marker-end=\"url(#g5-fl)\" />\n<line x1=\"492\" y1=\"175\" x2=\"506\" y2=\"175\" stroke=\"#38bdf8\" stroke-width=\"2.5\" marker-end=\"url(#g5-fl)\" />\n<line x1=\"652\" y1=\"175\" x2=\"671\" y2=\"175\" stroke=\"#38bdf8\" stroke-width=\"2.5\" marker-end=\"url(#g5-fl)\" />\n<line x1=\"708\" y1=\"175\" x2=\"736\" y2=\"175\" stroke=\"#38bdf8\" stroke-width=\"2.5\" marker-end=\"url(#g5-fl)\" />\n<g id=\"g5-res1\">\n<path d=\"M 116,175 L 116,105 L 385,105 L 385,155\" fill=\"none\" stroke=\"#34d399\" stroke-width=\"2.5\" stroke-dasharray=\"6 5\" marker-end=\"url(#g5-fl)\" />\n<text x=\"250\" y=\"96\" fill=\"#6ee7b7\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">connexion résiduelle : x est conservé tel quel</text>\n</g>\n<g id=\"g5-res2\">\n<path d=\"M 403,175 L 403,245 L 690,245 L 690,195\" fill=\"none\" stroke=\"#34d399\" stroke-width=\"2.5\" stroke-dasharray=\"6 5\" marker-end=\"url(#g5-fl)\" />\n<text x=\"546\" y=\"266\" fill=\"#6ee7b7\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">seconde connexion résiduelle</text>\n</g>\n<g id=\"g5-repete\">\n<text x=\"440\" y=\"310\" fill=\"#fcd34d\" font-family=\"sans-serif\" font-size=\"13\" text-anchor=\"middle\">Ce bloc est répété 12 fois dans GPT-2 (version de 124 millions de paramètres), 126 fois dans Llama 3 405B.</text>\n<text x=\"440\" y=\"332\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">LN : normalisation par couche, placée à l'entrée de chaque sous-bloc dans GPT-2.</text>\n</g>\n</svg>",
+        "steps": [
+          {
+            "title": "Normaliser puis mélanger les positions",
+            "explanation": "Après une normalisation (LN), l'attention fait circuler de l'information entre les positions : chaque token s'enrichit de ceux qui le précèdent.",
+            "highlight": [
+              "g5-entree",
+              "g5-ln1",
+              "g5-attention"
+            ]
+          },
+          {
+            "title": "Ajouter sans effacer",
+            "explanation": "Le résultat de l'attention est additionné au vecteur d'origine x. Le vecteur est donc corrigé, pas remplacé : c'est la connexion résiduelle.",
+            "highlight": [
+              "g5-add1",
+              "g5-res1"
+            ]
+          },
+          {
+            "title": "Transformer chaque position séparément",
+            "explanation": "Après une seconde normalisation, le MLP agrandit le vecteur (768 à 3 072 nombres dans GPT-2), applique une non-linéarité, puis le ramène à 768. Il agit sur chaque position indépendamment des autres.",
+            "highlight": [
+              "g5-ln2",
+              "g5-mlp"
+            ]
+          },
+          {
+            "title": "Ajouter de nouveau",
+            "explanation": "La sortie du MLP s'ajoute elle aussi au vecteur qui circule. Le bloc rend un vecteur de même taille que celui qu'il a reçu.",
+            "highlight": [
+              "g5-add2",
+              "g5-res2",
+              "g5-sortie"
+            ]
+          },
+          {
+            "title": "Empiler les blocs",
+            "explanation": "Comme l'entrée et la sortie ont la même forme, on empile les blocs : 12 dans GPT-2 version 124 M, 126 dans Llama 3 405B.",
+            "highlight": [
+              "g5-repete",
+              "g5-entree",
+              "g5-sortie"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "code": "# Anatomie d'un bloc de GPT-2 : paramètres, forme du MLP et connexions résiduelles\nimport torch\nfrom transformers import AutoTokenizer, AutoModelForCausalLM\n\ntok = AutoTokenizer.from_pretrained(\"gpt2\")\nmodele = AutoModelForCausalLM.from_pretrained(\"gpt2\").eval()\ncfg = modele.config\nprint(f\"{cfg.n_layer} blocs, d_model = {cfg.n_embd}, {cfg.n_head} têtes, MLP : {cfg.n_embd} -> {4 * cfg.n_embd} -> {cfg.n_embd}\")\n\n# Paramètres : on compte chaque tenseur une seule fois (la matrice de sortie est liée à wte)\ntotal = sum(p.numel() for p in modele.parameters())\nbloc = modele.transformer.h[0]\nattention = sum(p.numel() for p in bloc.attn.parameters())\nmlp = sum(p.numel() for p in bloc.mlp.parameters())\nnormes = sum(p.numel() for n, p in bloc.named_parameters() if n.startswith(\"ln_\"))\nentrees = modele.transformer.wte.weight.numel() + modele.transformer.wpe.weight.numel()\nprint(f\"un bloc : attention {attention:,} + MLP {mlp:,} + normalisations {normes:,}\")\nprint(f\"embeddings (tokens + positions) : {entrees:,}\")\nprint(f\"total : {total:,} (dont {modele.transformer.ln_f.weight.numel() * 2:,} pour la normalisation finale ln_f)\")\n\n# Connexions résiduelles : le bloc 0 recalculé à la main\nids = tok(\"The cat sleeps on the bed\", return_tensors=\"pt\").input_ids\nwith torch.no_grad():\n    h = modele(ids, output_hidden_states=True).hidden_states\n    x = h[0]\n    apres_attention = x + bloc.attn(bloc.ln_1(x))[0]          # on ajoute la sortie de l'attention à x\n    apres_mlp = apres_attention + bloc.mlp(bloc.ln_2(apres_attention))   # puis celle du MLP\nprint(\"sortie du bloc 0 = x + attention + MLP ?\", torch.allclose(apres_mlp, h[1], atol=1e-4))",
+        "explanation": "Le code affiche la configuration de GPT-2, compte ses paramètres par élément (chaque tenseur est compté une fois : la matrice de sortie est liée à celle d'entrée) et recalcule le premier bloc à la main : x + attention(LN(x)), puis + MLP(LN(...)). Le résultat est comparé à la sortie du bloc renvoyée par le modèle.",
+        "output": "12 blocs, d_model = 768, 12 têtes, MLP : 768 -> 3072 -> 768\nun bloc : attention 2,362,368 + MLP 4,722,432 + normalisations 3,072\nembeddings (tokens + positions) : 39,383,808\ntotal : 124,439,808 (dont 1,536 pour la normalisation finale ln_f)\nsortie du bloc 0 = x + attention + MLP ? True",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Quelle est la différence de rôle entre l'attention et le MLP dans un bloc ?",
+          "options": [
+            "L'attention fait circuler l'information entre les positions ; le MLP transforme chaque position séparément",
+            "L'attention transforme chaque position séparément ; le MLP mélange les positions entre elles",
+            "L'attention sert à l'entraînement et le MLP à la génération",
+            "Les deux font la même chose, avec des tailles de vecteurs différentes"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le MLP applique les mêmes paramètres à chaque position sans regarder les autres, alors que l'attention est la seule opération qui relie les positions entre elles. Les deux servent à l'entraînement comme à la génération."
+        },
+        {
+          "question": "Que signifie une connexion résiduelle dans un bloc ?",
+          "options": [
+            "La sortie du sous-bloc est ajoutée au vecteur d'entrée, qui est donc corrigé plutôt que remplacé",
+            "Le sous-bloc est sauté lorsque le vecteur est trop grand",
+            "Le vecteur est copié sur le disque entre deux blocs",
+            "Le sous-bloc répète son calcul tant que le résultat change"
+          ],
+          "correctIndex": 0,
+          "explanation": "La sortie du sous-bloc s'additionne à son entrée (x + f(x)). Le bloc n'est jamais sauté et rien n'est copié sur disque. Le calcul n'est pas répété : chaque sous-bloc s'applique une seule fois par bloc."
+        },
+        {
+          "question": "Dans un bloc de GPT-2, où se trouve la plus grande part des paramètres ?",
+          "options": [
+            "Dans le MLP, environ deux tiers des paramètres du bloc",
+            "Dans l'attention, car elle est l'opération centrale du Transformer",
+            "Dans les normalisations, car elles s'appliquent plusieurs fois",
+            "Les paramètres sont répartis à parts égales entre attention et MLP"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le décompte de GPT-2 donne 4 722 432 paramètres pour le MLP contre 2 362 368 pour l'attention, soit deux tiers contre un tiers. L'attention est centrale dans l'architecture, mais pas dans le nombre de paramètres. Les normalisations en ont très peu (3 072 par bloc)."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Bloc Transformer",
+          "definition": "Unité répétée de la pile du modèle : attention puis MLP, chacun avec sa normalisation et sa connexion résiduelle."
+        },
+        {
+          "term": "MLP (perceptron multicouche)",
+          "definition": "Dans un bloc, petite fonction à deux couches (agrandir puis réduire) appliquée à chaque position séparément."
+        },
+        {
+          "term": "GELU",
+          "definition": "Fonction d'activation douce qui laisse passer les valeurs positives et atténue les négatives."
+        },
+        {
+          "term": "Connexion résiduelle",
+          "definition": "Addition de l'entrée d'un sous-bloc à sa sortie : le vecteur est corrigé, pas remplacé."
+        },
+        {
+          "term": "Flux résiduel (residual stream)",
+          "definition": "Vecteur qui traverse toute la pile de blocs et auquel chaque sous-bloc ajoute sa contribution."
+        },
+        {
+          "term": "LayerNorm (normalisation par couche)",
+          "definition": "Opération qui recentre et remet à l'échelle les nombres d'un vecteur. Pre-LN : placée avant chaque sous-bloc."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "La forme qui se conserve",
+          "prompt": "Pourquoi la sortie d’un bloc Transformer peut-elle entrer dans le bloc suivant sans adaptation ? Dans un bloc de GPT-2, quelle part des paramètres porte le MLP, et pourquoi la non-linéarité est-elle nécessaire ?",
+          "solution": "Chaque sous-bloc additionne sa correction au vecteur au lieu de le remplacer : la sortie d’un bloc a la même forme que son entrée, une ligne de 768 nombres par position, donc on peut empiler les blocs. Dans un bloc de GPT-2, l’attention compte environ 2,36 millions de paramètres et le MLP 4,72 millions, soit près des deux tiers. Le MLP agrandit le vecteur à 3 072 puis le ramène à 768 ; sans non-linéarité, les deux multiplications se réduiraient à une seule et le réseau ne représenterait que des fonctions linéaires."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Vaswani et al., « Attention Is All You Need » (2017)",
+          "href": "https://arxiv.org/abs/1706.03762"
+        },
+        {
+          "label": "Xiong et al., « On Layer Normalization in the Transformer Architecture » (ICML 2020)",
+          "href": "https://arxiv.org/abs/2002.04745"
+        },
+        {
+          "label": "Geva et al., « Transformer Feed-Forward Layers Are Key-Value Memories » (EMNLP 2021)",
+          "href": "https://arxiv.org/abs/2012.14913"
+        }
+      ]
+    },
+    {
+      "id": "logits-echantillonnage",
+      "title": "Des logits au token choisi : softmax, température, top-k, top-p",
+      "keyTakeaways": [
+        "La sortie du dernier bloc, pour la dernière position, est multipliée par une matrice (768 × 50 257 dans GPT-2) qui donne un score brut, le logit, pour chaque token du vocabulaire. GPT-2 réutilise pour cela la table d'embeddings d'entrée (weight tying).",
+        "Le softmax transforme les logits en probabilités positives de somme 1. La température T divise les logits avant le softmax : T < 1 concentre la distribution, T > 1 l'aplatit, sans changer l'ordre des tokens.",
+        "Choisir toujours le token le plus probable (choix glouton) donne un texte souvent répétitif (Holtzman et al., 2020) ; tirer au sort dans toute la distribution laisse une longue queue de tokens improbables.",
+        "Top-k garde les k meilleurs tokens, top-p garde le plus petit groupe dont la probabilité cumulée atteint p, min-p garde ceux dont la probabilité dépasse une fraction de celle du meilleur. Ces règles coupent la queue de distribution.",
+        "Une probabilité élevée n'est pas une garantie d'exactitude. Et même à température 0, un service en ligne ne répond pas forcément de façon identique à chaque appel."
+      ],
+      "theory": "### De la dernière position au vocabulaire\n\nAprès le dernier bloc et une dernière normalisation, chaque position possède un vecteur de 768 nombres (dans GPT-2). Pour prédire le token suivant, on ne garde que le vecteur de la **dernière** position, puisque c'est lui qui a pu lire tout le contexte. On le multiplie par une matrice de 768 lignes et 50 257 colonnes (parfois appelée *unembedding*), ce qui donne 50 257 nombres : un score brut par token du vocabulaire, appelé **logit**. L'exemple de code affiche ce nombre.\n\nDans GPT-2, cette matrice est la **transposée de la table d'embeddings d'entrée** : on parle de partage de poids (*weight tying*, étudié par Press et Wolf, 2017). Le code le vérifie : les deux matrices occupent la même zone mémoire. Ce choix économise 38 millions de paramètres, et il n'est pas universel : d'autres modèles ont une matrice de sortie distincte.\n\n### Du logit à la probabilité : le softmax\n\nLes logits peuvent être positifs ou négatifs et ne somment pas à 1. Le **softmax** les transforme en probabilités :\n\n$$p_i = \\frac{e^{z_i}}{\\sum_j e^{z_j}}$$\n\navec $z_i$ le logit du token $i$. Ses propriétés utiles : toutes les probabilités sont positives, leur somme vaut 1, l'ordre des tokens est conservé (le meilleur logit donne la meilleure probabilité), et ajouter la même constante à tous les logits ne change rien.\n\nCes nombres sont les probabilités que le modèle attribue, pas des fréquences mesurées dans le monde. Qu'un token soit très probable signifie que le modèle le juge cohérent avec le contexte, pas que l'affirmation qu'il porte soit vraie.\n\n### La température\n\nOn divise les logits par un nombre $T > 0$ avant le softmax :\n\n$$p_i(T) = \\frac{e^{z_i / T}}{\\sum_j e^{z_j / T}}$$\n\n- $T = 1$ laisse la distribution du modèle telle quelle.\n- $T < 1$ accentue les écarts : la distribution se concentre sur les tokens les mieux classés. Quand $T$ tend vers 0, elle tend vers un choix unique, le meilleur token (choix glouton). Divisé par 0, le calcul n'existe pas : les bibliothèques traitent « température 0 » comme un cas particulier équivalent au choix glouton.\n- $T > 1$ réduit les écarts : la distribution s'aplatit, et des tokens moins probables sont tirés plus souvent. Quand $T$ tend vers l'infini, elle tend vers l'uniforme.\n\nLa température ne change jamais l'**ordre** des tokens, seulement l'écart entre leurs probabilités. L'exemple de code le mesure sur de vrais logits de GPT-2 : pour un même prompt, la probabilité du meilleur token passe de 81,8 % (T = 0,5) à 24,7 % (T = 1) puis 6,4 % (T = 1,5), et l'entropie de la distribution (une mesure de son étalement, en bits) de 1,4 à 6,0 puis 9,4.\n\n### Choisir : glouton ou tirage\n\nDeux stratégies simples. Le **choix glouton** prend toujours le meilleur token : le texte est déterministe en théorie, mais il tend à devenir banal et répétitif. Holtzman et al. (2020) constatent que les modèles entraînés à maximiser la vraisemblance produisent, quand on cherche à la maximiser aussi à la génération, des textes ternes et répétitifs. Le **tirage** choisit un token au hasard selon la distribution : le texte est plus varié, mais une queue de milliers de tokens improbables garde, tous ensemble, une masse non négligeable. Dans l'exemple de code, les 10 meilleurs tokens ne portent que 52,0 % de la probabilité : le reste est une longue queue, et tirer dedans produit parfois des incohérences.\n\n### Couper la queue : top-k, top-p, min-p\n\n- **Top-k** (Fan, Lewis et Dauphin, 2018, avec $k = 10$ pour leur génération d'histoires) : on ne garde que les $k$ tokens les plus probables, puis on renormalise. Le défaut est que $k$ est fixe : quand le modèle est très sûr de lui, $k = 50$ garde 49 tokens inutiles ; quand il hésite beaucoup, $k = 10$ en coupe trop.\n- **Top-p**, ou échantillonnage par noyau (Holtzman et al., 2020) : on garde le plus petit ensemble de tokens dont la probabilité cumulée atteint $p$ (par exemple 0,9). Le nombre de tokens gardés s'adapte à la situation. Dans l'exemple de code, $p = 0{,}9$ garde 134 tokens.\n- **Min-p** (Nguyen et al., ICLR 2025) : on garde les tokens dont la probabilité est au moins une fraction du meilleur (par exemple 0,1 fois la probabilité du meilleur token). Le seuil s'adapte aussi à la confiance du modèle. Dans l'exemple de code, $0{,}1$ garde 5 tokens. Cette méthode est plus récente ; ses auteurs indiquent qu'elle est disponible dans plusieurs bibliothèques ouvertes, mais tous les services ne la proposent pas.\n\nL'ordre exact dans lequel on applique la température et les troncatures peut varier d'une bibliothèque à l'autre : vérifiez la documentation de celle que vous utilisez. D'autres réglages existent (pénalité de répétition, biais sur certains logits, interdiction de certains tokens pour forcer un format) : ils modifient les logits avant le softmax, selon le même principe.\n\n### Dans la pratique\n\n- **Selon les services, certains réglages sont limités, imposés ou absents.** Les interfaces grand public n'exposent en général pas ces paramètres (voir [Les paramètres des LLM](/cours/parametres-llm) pour les plages de valeurs courantes et les bonnes pratiques d'usage).\n- **Température 0 n'est pas une garantie de reproductibilité.** Même avec un choix glouton, des réponses peuvent varier d'un appel à l'autre sur un service en ligne : He (Thinking Machines, 2025) attribue l'essentiel de cette variation au fait que le résultat des calculs dépend de la taille du lot de requêtes traitées ensemble, qui varie avec la charge du serveur. Il existe des moyens de la supprimer, mais ils ne sont pas la norme.\n- **Une seule différence de tirage change tout ce qui suit**, puisque chaque token choisi entre dans le contexte du suivant : deux réponses à la même question peuvent diverger dès le deuxième mot.",
+      "analogy": {
+        "title": "Un menu de restaurant et un dé truqué",
+        "text": "Les logits sont des notes données à chaque plat d'un menu de 50 000 plats. Le softmax en fait des probabilités de choisir chaque plat. Choisir à coup sûr le mieux noté est le choix glouton. Lancer un dé truqué, plus souvent tombé sur les mieux notés, est le tirage. La **température** règle le truquage : basse, le dé retombe presque toujours sur le même plat ; haute, il se rapproche d'un dé honnête. Top-k, top-p et min-p retirent du menu les plats les plus mal notés avant de lancer.\n\n**Limite de l'analogie** : un modèle ne « goûte » rien, et les notes dépendent du contexte, donc elles changent à chaque token."
+      },
+      "example": {
+        "title": "Un calcul avec trois logits",
+        "text": "Les logits sont des **valeurs d'illustration** : $z = (2, 1, 0)$ pour trois tokens A, B et C.\n\n| Température | p(A) | p(B) | p(C) |\n|---|---|---|---|\n| T = 0,5 | 0,867 | 0,117 | 0,016 |\n| T = 1 | 0,665 | 0,245 | 0,090 |\n| T = 2 | 0,506 | 0,307 | 0,186 |\n\nPour $T = 1$, les exponentielles valent $e^{2} \\approx 7{,}39$, $e^{1} \\approx 2{,}72$ et $e^{0} = 1$, de somme 11,11 ; d'où 0,665, 0,245 et 0,090. Pour $T = 0{,}5$, on calcule avec $(4, 2, 0)$ : A passe à 0,867. Pour $T = 2$, avec $(1; 0{,}5; 0)$ : A tombe à 0,506. L'ordre A, B, C ne change jamais."
+      },
+      "diagram": {
+        "title": "Des logits au token choisi",
+        "description": "Cinq tokens d'illustration : scores bruts, effet de la température, troncatures top-k, top-p et min-p, puis tirage.",
+        "svg": "<svg viewBox=\"0 0 880 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"De la liste de scores au token choisi : température, troncature et tirage, avec cinq tokens d'illustration\">\n<defs><marker id=\"g6-fl\" markerWidth=\"10\" markerHeight=\"8\" refX=\"8\" refY=\"4\" orient=\"auto\"><path d=\"M0,0 L10,4 L0,8 z\" fill=\"#38bdf8\" /></marker></defs>\n<rect width=\"880\" height=\"440\" rx=\"16\" fill=\"#0f172a\" />\n<g id=\"g6-logits\">\n<rect x=\"20\" y=\"40\" width=\"200\" height=\"250\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" stroke-width=\"1.5\" />\n<text x=\"120\" y=\"66\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Logits z</text>\n<text x=\"120\" y=\"84\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">(valeurs d'illustration)</text>\n<text x=\"40\" y=\"122\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"start\">token A</text>\n<text x=\"200\" y=\"122\" fill=\"#e0f2fe\" font-family=\"monospace\" font-weight=\"700\" font-size=\"13\" text-anchor=\"end\">+3,0</text>\n<text x=\"40\" y=\"156\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"start\">token B</text>\n<text x=\"200\" y=\"156\" fill=\"#e0f2fe\" font-family=\"monospace\" font-weight=\"700\" font-size=\"13\" text-anchor=\"end\">+2,0</text>\n<text x=\"40\" y=\"190\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"start\">token C</text>\n<text x=\"200\" y=\"190\" fill=\"#e0f2fe\" font-family=\"monospace\" font-weight=\"700\" font-size=\"13\" text-anchor=\"end\">+1,0</text>\n<text x=\"40\" y=\"224\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"start\">token D</text>\n<text x=\"200\" y=\"224\" fill=\"#e0f2fe\" font-family=\"monospace\" font-weight=\"700\" font-size=\"13\" text-anchor=\"end\">+0,0</text>\n<text x=\"40\" y=\"258\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"start\">token E</text>\n<text x=\"200\" y=\"258\" fill=\"#e0f2fe\" font-family=\"monospace\" font-weight=\"700\" font-size=\"13\" text-anchor=\"end\">-1,0</text>\n</g>\n<g id=\"g6-temperature\">\n<rect x=\"270\" y=\"40\" width=\"330\" height=\"250\" rx=\"10\" fill=\"#1a1530\" stroke=\"#a78bfa\" stroke-width=\"1.5\" />\n<text x=\"435\" y=\"66\" fill=\"#ede9fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">softmax(z / T)</text>\n<text x=\"335\" y=\"92\" fill=\"#c4b5fd\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"12\" text-anchor=\"middle\">T = 0,5</text>\n<rect x=\"290\" y=\"108\" width=\"77.8\" height=\"14\" rx=\"3\" fill=\"#a78bfa\" />\n<text x=\"290\" y=\"136\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"10\" text-anchor=\"start\">A 86,5 %</text>\n<rect x=\"290\" y=\"142\" width=\"10.5\" height=\"14\" rx=\"3\" fill=\"#a78bfa\" />\n<text x=\"290\" y=\"170\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"10\" text-anchor=\"start\">B 11,7 %</text>\n<rect x=\"290\" y=\"176\" width=\"1.5\" height=\"14\" rx=\"3\" fill=\"#a78bfa\" />\n<text x=\"290\" y=\"204\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"10\" text-anchor=\"start\">C 1,6 %</text>\n<rect x=\"290\" y=\"210\" width=\"1.5\" height=\"14\" rx=\"3\" fill=\"#a78bfa\" />\n<text x=\"290\" y=\"238\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"10\" text-anchor=\"start\">D 0,2 %</text>\n<rect x=\"290\" y=\"244\" width=\"1.5\" height=\"14\" rx=\"3\" fill=\"#a78bfa\" />\n<text x=\"290\" y=\"272\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"10\" text-anchor=\"start\">E 0,0 %</text>\n<text x=\"440\" y=\"92\" fill=\"#c4b5fd\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"12\" text-anchor=\"middle\">T = 1,0</text>\n<rect x=\"395\" y=\"108\" width=\"57.3\" height=\"14\" rx=\"3\" fill=\"#a78bfa\" />\n<text x=\"395\" y=\"136\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"10\" text-anchor=\"start\">A 63,6 %</text>\n<rect x=\"395\" y=\"142\" width=\"21.1\" height=\"14\" rx=\"3\" fill=\"#a78bfa\" />\n<text x=\"395\" y=\"170\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"10\" text-anchor=\"start\">B 23,4 %</text>\n<rect x=\"395\" y=\"176\" width=\"7.8\" height=\"14\" rx=\"3\" fill=\"#a78bfa\" />\n<text x=\"395\" y=\"204\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"10\" text-anchor=\"start\">C 8,6 %</text>\n<rect x=\"395\" y=\"210\" width=\"2.9\" height=\"14\" rx=\"3\" fill=\"#a78bfa\" />\n<text x=\"395\" y=\"238\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"10\" text-anchor=\"start\">D 3,2 %</text>\n<rect x=\"395\" y=\"244\" width=\"1.5\" height=\"14\" rx=\"3\" fill=\"#a78bfa\" />\n<text x=\"395\" y=\"272\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"10\" text-anchor=\"start\">E 1,2 %</text>\n<text x=\"545\" y=\"92\" fill=\"#c4b5fd\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"12\" text-anchor=\"middle\">T = 2,0</text>\n<rect x=\"500\" y=\"108\" width=\"38.6\" height=\"14\" rx=\"3\" fill=\"#a78bfa\" />\n<text x=\"500\" y=\"136\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"10\" text-anchor=\"start\">A 42,9 %</text>\n<rect x=\"500\" y=\"142\" width=\"23.4\" height=\"14\" rx=\"3\" fill=\"#a78bfa\" />\n<text x=\"500\" y=\"170\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"10\" text-anchor=\"start\">B 26,0 %</text>\n<rect x=\"500\" y=\"176\" width=\"14.2\" height=\"14\" rx=\"3\" fill=\"#a78bfa\" />\n<text x=\"500\" y=\"204\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"10\" text-anchor=\"start\">C 15,8 %</text>\n<rect x=\"500\" y=\"210\" width=\"8.6\" height=\"14\" rx=\"3\" fill=\"#a78bfa\" />\n<text x=\"500\" y=\"238\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"10\" text-anchor=\"start\">D 9,6 %</text>\n<rect x=\"500\" y=\"244\" width=\"5.2\" height=\"14\" rx=\"3\" fill=\"#a78bfa\" />\n<text x=\"500\" y=\"272\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"10\" text-anchor=\"start\">E 5,8 %</text>\n</g>\n<g id=\"g6-troncature\">\n<rect x=\"650\" y=\"40\" width=\"210\" height=\"250\" rx=\"10\" fill=\"#2a1d0a\" stroke=\"#f59e0b\" stroke-width=\"1.5\" />\n<text x=\"755\" y=\"66\" fill=\"#fef3c7\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Troncature (T = 1)</text>\n<text x=\"755\" y=\"98\" fill=\"#fcd34d\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"12\" text-anchor=\"middle\">top-k, k = 2</text>\n<text x=\"755\" y=\"116\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">garde A, B</text>\n<text x=\"755\" y=\"148\" fill=\"#fcd34d\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"12\" text-anchor=\"middle\">top-p, p = 0,9</text>\n<text x=\"755\" y=\"166\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">garde A, B, C</text>\n<text x=\"755\" y=\"184\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">(masse cumulée 95,7 %)</text>\n<text x=\"755\" y=\"216\" fill=\"#fcd34d\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"12\" text-anchor=\"middle\">min-p = 0,1</text>\n<text x=\"755\" y=\"234\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">seuil 0,1 × 63,6 % = 6,4 %</text>\n<text x=\"755\" y=\"252\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">garde A, B, C</text>\n</g>\n<g id=\"g6-tirage\">\n<rect x=\"20\" y=\"330\" width=\"840\" height=\"80\" rx=\"10\" fill=\"#0d1f2d\" stroke=\"#34d399\" stroke-width=\"1.5\" />\n<text x=\"440\" y=\"358\" fill=\"#d1fae5\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Tirage</text>\n<text x=\"440\" y=\"380\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">On renormalise les probabilités des tokens gardés, puis on tire au sort le token suivant</text>\n<text x=\"440\" y=\"398\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">(ou on prend le plus probable, si T tend vers 0 : choix glouton).</text>\n</g>\n<line x1=\"222\" y1=\"165\" x2=\"266\" y2=\"165\" stroke=\"#38bdf8\" stroke-width=\"2.5\" marker-end=\"url(#g6-fl)\" />\n<line x1=\"602\" y1=\"165\" x2=\"646\" y2=\"165\" stroke=\"#38bdf8\" stroke-width=\"2.5\" marker-end=\"url(#g6-fl)\" />\n<line x1=\"755\" y1=\"292\" x2=\"755\" y2=\"326\" stroke=\"#f59e0b\" stroke-width=\"2.5\" marker-end=\"url(#g6-fl)\" />\n</svg>",
+        "steps": [
+          {
+            "title": "Des scores bruts",
+            "explanation": "La dernière couche donne un score (logit) par token du vocabulaire. Ici, cinq tokens et des valeurs d'illustration. L'ordre des scores ne changera plus.",
+            "highlight": [
+              "g6-logits"
+            ]
+          },
+          {
+            "title": "La température",
+            "explanation": "On divise les logits par T avant le softmax. T petit : la distribution se concentre sur le meilleur token. T grand : elle s'aplatit. Les pourcentages sont calculés à partir des logits ci-contre.",
+            "highlight": [
+              "g6-temperature"
+            ]
+          },
+          {
+            "title": "Couper la queue de distribution",
+            "explanation": "Top-k garde un nombre fixe de tokens, top-p garde le plus petit groupe dont la masse cumulée atteint p, min-p garde ceux dont la probabilité dépasse une fraction de celle du meilleur.",
+            "highlight": [
+              "g6-troncature"
+            ]
+          },
+          {
+            "title": "Tirer le token",
+            "explanation": "Les tokens gardés sont renormalisés puis un seul est tiré au sort. Le token choisi est ajouté au texte et la boucle continue.",
+            "highlight": [
+              "g6-tirage"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "code": "# De vrais logits de GPT-2 : effet de la température, de top-k, de top-p et de min-p sur le choix du token suivant\nimport torch\nfrom transformers import AutoTokenizer, AutoModelForCausalLM\n\ntok = AutoTokenizer.from_pretrained(\"gpt2\")\nmodele = AutoModelForCausalLM.from_pretrained(\"gpt2\").eval()\n\nids = tok(\"The best way to learn a new language is to\", return_tensors=\"pt\").input_ids\nwith torch.no_grad():\n    logits = modele(ids).logits[0, -1]        # 50 257 scores bruts pour le token suivant\nprint(\"nombre de logits :\", logits.numel())\n\ndef distribution(logits, T):\n    return torch.softmax(logits / T, dim=-1)  # la température divise les logits avant le softmax\n\ndef entropie(p):\n    return -(p * torch.log2(p.clamp_min(1e-12))).sum().item()   # en bits\n\nfor T in (0.5, 1.0, 1.5):\n    p = distribution(logits, T)\n    haut = torch.topk(p, 4)\n    liste = \", \".join(f\"{tok.decode(i)!r} {v:.1%}\" for v, i in zip(haut.values, haut.indices))\n    print(f\"T = {T}: entropie {entropie(p):4.1f} bits | {liste}\")\n\n# Troncatures sur la distribution à T = 1\np = distribution(logits, 1.0)\ntri, ordre = torch.sort(p, descending=True)\nk = 10\nn_top_p = int((tri.cumsum(0) < 0.9).sum()) + 1                 # plus petit ensemble de masse cumulée >= 0,9\nn_min_p = int((p >= 0.1 * tri[0]).sum())                       # seuil proportionnel au meilleur token\nprint(f\"top-k (k = {k})  : {k} tokens gardés, masse conservée {tri[:k].sum():.1%}\")\nprint(f\"top-p (p = 0,9) : {n_top_p} tokens gardés, masse conservée {tri[:n_top_p].sum():.1%}\")\nprint(f\"min-p (0,1)     : {n_min_p} tokens gardés, masse conservée {tri[:n_min_p].sum():.1%}\")\n\n# Tirage au sort : même distribution, graine fixée, 8 tirages indépendants\ntorch.manual_seed(0)\nfor T in (0.5, 1.5):\n    tirages = torch.multinomial(distribution(logits, T), 8, replacement=True)\n    print(f\"T = {T}: \", [tok.decode(i) for i in tirages])",
+        "explanation": "Les logits sont de vrais logits de GPT-2 pour le prompt « The best way to learn a new language is to ». Le code montre les probabilités des meilleurs tokens à trois températures, leur entropie, le nombre de tokens gardés par top-k, top-p et min-p avec la masse de probabilité conservée, puis huit tirages avec une graine fixée. Les tirages dépendent de la graine et de la version de PyTorch : ils servent d'illustration, pas de référence.",
+        "output": "nombre de logits : 50257\nT = 0.5: entropie  1.4 bits | ' learn' 81.8%, ' study' 6.9%, ' practice' 1.4%, ' use' 1.1%\nT = 1.0: entropie  6.0 bits | ' learn' 24.7%, ' study' 7.2%, ' practice' 3.2%, ' use' 2.9%\nT = 1.5: entropie  9.4 bits | ' learn' 6.4%, ' study' 2.8%, ' practice' 1.7%, ' use' 1.5%\ntop-k (k = 10)  : 10 tokens gardés, masse conservée 52.0%\ntop-p (p = 0,9) : 134 tokens gardés, masse conservée 90.1%\nmin-p (0,1)     : 5 tokens gardés, masse conservée 40.9%\nT = 0.5:  [' speak', ' learn', ' learn', ' learn', ' learn', ' learn', ' learn', ' learn']\nT = 1.5:  [' practice', ' already', ' learn', ' start', ' try', ' region', ' stop', ' learn']",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Que fait la température lorsqu'on la baisse de 1 à 0,5 ?",
+          "options": [
+            "Elle accentue les écarts entre probabilités sans changer l'ordre des tokens",
+            "Elle supprime les tokens les moins probables",
+            "Elle rend le modèle plus précis sur les faits",
+            "Elle réduit le nombre de tokens générés"
+          ],
+          "correctIndex": 0,
+          "explanation": "Diviser les logits par T < 1 écarte les valeurs, donc concentre la distribution sur les mieux classés, sans changer leur classement. Elle ne supprime aucun token (c'est le rôle de top-k, top-p ou min-p), n'améliore pas l'exactitude des faits, et ne touche pas à la longueur de la réponse."
+        },
+        {
+          "question": "En quoi top-p diffère-t-il de top-k ?",
+          "options": [
+            "Top-p garde un nombre variable de tokens selon la confiance du modèle ; top-k en garde toujours le même nombre",
+            "Top-p garde toujours plus de tokens que top-k",
+            "Top-p s'applique avant le softmax, top-k après",
+            "Top-p choisit toujours le token le plus probable"
+          ],
+          "correctIndex": 0,
+          "explanation": "Top-k garde k tokens quoi qu'il arrive ; top-p garde le plus petit ensemble dont la masse cumulée atteint p, donc peu de tokens quand le modèle est sûr de lui et beaucoup quand il hésite (134 tokens dans l'exemple pour p = 0,9). Les deux se calculent à partir des probabilités, et aucun n'impose le meilleur token."
+        },
+        {
+          "question": "On règle la température à 0 sur un service en ligne. Que peut-on affirmer ?",
+          "options": [
+            "Le choix est glouton en théorie, mais les réponses peuvent quand même varier d'un appel à l'autre",
+            "La réponse est toujours identique d'un appel à l'autre",
+            "Le modèle est alors à l'arrêt, faute de division possible",
+            "Le modèle ne se trompe plus puisqu'il n'y a plus de hasard"
+          ],
+          "correctIndex": 0,
+          "explanation": "À T = 0, on choisit toujours le meilleur token, mais le résultat des calculs numériques peut dépendre de la charge du serveur (He, 2025), donc rien ne garantit des réponses identiques. Le modèle ne s'arrête pas (les bibliothèques traitent ce cas à part) et supprimer le hasard ne supprime pas les erreurs : le token le plus probable peut être faux."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Logit",
+          "definition": "Score brut associé à un token par la dernière couche du modèle, avant le softmax. Il peut être négatif."
+        },
+        {
+          "term": "Softmax",
+          "definition": "Fonction qui transforme des scores en probabilités positives de somme 1, en conservant l'ordre."
+        },
+        {
+          "term": "Température",
+          "definition": "Nombre par lequel on divise les logits avant le softmax. Bas : distribution concentrée. Haut : distribution aplatie."
+        },
+        {
+          "term": "Choix glouton (greedy)",
+          "definition": "Choix systématique du token le plus probable à chaque étape."
+        },
+        {
+          "term": "Top-k",
+          "definition": "Troncature qui ne garde que les k tokens les plus probables avant le tirage."
+        },
+        {
+          "term": "Top-p (échantillonnage par noyau)",
+          "definition": "Troncature qui garde le plus petit ensemble de tokens dont la probabilité cumulée atteint p."
+        },
+        {
+          "term": "Min-p",
+          "definition": "Troncature qui garde les tokens dont la probabilité dépasse une fraction de celle du meilleur token."
+        },
+        {
+          "term": "Entropie",
+          "definition": "Mesure de l'étalement d'une distribution : nulle quand un seul token est certain, élevée quand beaucoup de tokens sont possibles."
+        },
+        {
+          "term": "Weight tying (partage de poids)",
+          "definition": "Réutilisation de la table d'embeddings d'entrée, transposée, comme matrice de sortie."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Refaire le calcul de température",
+          "prompt": "Avec les logits (2, 1, 0) et une température de 0,5, retrouvez la probabilité du premier token. Pourquoi la température ne change-t-elle jamais l’ordre des tokens ?",
+          "solution": "Diviser par T = 0,5 revient à multiplier les logits par 2 : ils deviennent (4, 2, 0). Les exponentielles valent environ 54,60, 7,39 et 1, de total 62,99, d’où 0,867 pour le premier token, 0,117 et 0,016. Diviser par un même nombre positif conserve l’ordre des logits, donc celui des probabilités : seule la taille des écarts change. T plus petit que 1 concentre la distribution, T plus grand l’aplatit, et T tendant vers 0 donne le choix glouton."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Fan, Lewis, Dauphin, « Hierarchical Neural Story Generation » (2018) : échantillonnage top-k",
+          "href": "https://arxiv.org/abs/1805.04833"
+        },
+        {
+          "label": "Holtzman et al., « The Curious Case of Neural Text Degeneration » (ICLR 2020) : échantillonnage top-p",
+          "href": "https://arxiv.org/abs/1904.09751"
+        },
+        {
+          "label": "Nguyen et al., « Turning Up the Heat: Min-p Sampling for Creative and Coherent LLM Outputs » (ICLR 2025)",
+          "href": "https://arxiv.org/abs/2407.01082"
+        }
+      ]
+    },
+    {
+      "id": "generation-cache-kv",
+      "title": "Générer token par token : préremplissage, décodage et cache KV",
+      "keyTakeaways": [
+        "La génération s'arrête sur un token de fin, une longueur maximale ou une séquence d'arrêt. Chaque token produit est ajouté au contexte avant le calcul du suivant.",
+        "Le préremplissage (prefill) traite tout le prompt en un passage ; le décodage produit ensuite un token à la fois. Le temps avant le premier token croît avec la longueur du prompt.",
+        "Le cache KV conserve les clés et les valeurs de toutes les positions passées, dans chaque couche. Comme le masque causal les rend indépendantes des tokens suivants, on peut les réutiliser telles quelles : le résultat est le même, avec bien moins de calcul.",
+        "Le cache a un prix : sa taille croît avec la longueur du contexte, le nombre de couches et le nombre de têtes de clés et de valeurs. Pour Llama 3 8B, le calcul donne 128 Kio par token en 16 bits.",
+        "L'attention à requêtes groupées (GQA), utilisée par Llama 3, réduit le nombre de têtes de clés et de valeurs, donc la taille du cache."
+      ],
+      "theory": "### La boucle complète\n\nLa boucle du module 1 s'arrête quand l'une de ces conditions est remplie :\n\n- le modèle produit un **token de fin** (`<|endoftext|>` pour GPT-2, d'identifiant 50 256) ;\n- le nombre maximal de nouveaux tokens fixé par l'utilisateur est atteint ;\n- une **séquence d'arrêt** demandée est produite ;\n- la limite de contexte du modèle est atteinte.\n\nÀ chaque tour, le token choisi est ajouté au texte. Rien d'autre n'est conservé entre deux tours, sinon le contexte lui-même.\n\n### Le coût d'une boucle naïve\n\nDans la version écrite au module 1, chaque tour repasse **toute** la séquence dans le modèle. Pour un prompt de $p$ tokens et $n$ tokens générés, le nombre total de tokens traités est $n \\cdot p + n(n-1)/2$ : la quantité de calcul croît environ comme le carré de la longueur produite. Or une grande partie de ce travail est inutile : à chaque tour, les $p + k$ premiers tokens sont les mêmes qu'au tour précédent.\n\n### L'observation qui permet le cache\n\nDans une couche d'attention, la clé et la valeur d'une position ne dépendent que du vecteur de cette position à l'entrée de la couche. Et grâce au masque causal, ce vecteur ne dépend que des tokens qui précèdent (module 4) : ajouter un token à la fin ne modifie donc **ni les clés, ni les valeurs, ni les sorties** des positions précédentes. Il est inutile de les recalculer.\n\nLe **cache KV** (*key-value cache*) range, pour chaque couche, les clés et les valeurs de toutes les positions déjà traitées. À chaque nouveau token, le modèle :\n\n1. calcule la requête, la clé et la valeur de ce seul token, dans chaque couche ;\n2. ajoute sa clé et sa valeur au cache ;\n3. fait consulter à sa requête **toutes** les clés du cache (donc tout le passé) et moyenne les valeurs correspondantes ;\n4. passe le résultat dans le MLP et les couches suivantes, toujours pour ce seul token.\n\nLe MLP, les projections et les normalisations ne traitent plus qu'**un** token par tour. Seule l'attention continue de regarder tout le passé : son coût par token reste proportionnel à la longueur du contexte, mais on évite le recalcul de tout le reste. Dans l'exemple de code, pour un prompt de 10 tokens et 20 tokens produits, le modèle traite 390 tokens sans cache et 29 avec, et les deux versions produisent **les mêmes tokens**. (Les petites différences de calcul en virgule flottante entre les deux manières de procéder peuvent, dans de rares cas, faire basculer un choix proche entre deux tokens, mais elles ne se produisent pas ici.)\n\n### Préremplissage et décodage\n\nOn distingue donc deux phases.\n\n- **Le préremplissage** (*prefill*) traite tout le prompt d'un seul passage, toutes les positions en parallèle, et remplit le cache. Les calculs se font sur de grandes matrices, que les GPU exécutent efficacement. Le temps avant le premier token croît avec la longueur du prompt : un prompt très long n'est pas traité « instantanément ».\n- **Le décodage** (*decode*) produit ensuite un token à la fois. À chaque tour, il faut lire en mémoire tous les poids du modèle et tout le cache pour ne faire le calcul que d'un seul token. En général, cette phase est donc limitée par la bande passante de la mémoire plutôt que par la puissance de calcul. C'est une explication courante dans les travaux sur l'inférence (Pope et al., 2022 analysent ces compromis entre latence et débit), pas une mesure faite dans ce cours.\n\n### Ce que coûte le cache en mémoire\n\nPour chaque token du contexte, le cache stocke deux vecteurs (une clé et une valeur) par couche et par tête de clés/valeurs :\n\n$$\\text{octets par token} = 2 \\times n_{\\text{couches}} \\times n_{\\text{têtes KV}} \\times d_{\\text{tête}} \\times \\text{octets par nombre}$$\n\n- **GPT-2** (124 M) : $2 \\times 12 \\times 12 \\times 64 \\times 2 = 36\\,864$ octets par token en 16 bits, soit environ 36 Mio pour un contexte de 1 024 tokens. Le code le calcule et le mesure (en 32 bits, deux fois plus).\n- **Llama 3 8B**, d'après les hyperparamètres publiés (32 couches, 4 096 de dimension et 32 têtes d'attention, donc 128 par tête, et 8 têtes de clés et de valeurs) : $2 \\times 32 \\times 8 \\times 128 \\times 2 = 131\\,072$ octets, soit 128 Kio par token en 16 bits. Pour 128 000 tokens, cela fait environ 15,6 Gio **par séquence**, en plus des poids du modèle. C'est un calcul à partir de l'architecture publiée, en supposant 2 octets par nombre ; les systèmes réels peuvent stocker le cache dans un autre format.\n\nSans l'attention à requêtes groupées, avec 32 têtes de clés et de valeurs au lieu de 8, ce chiffre serait multiplié par 4. C'est la raison d'être de la GQA (Ainslie et al., 2023), adoptée par Llama 3 pour améliorer la vitesse d'inférence et réduire la taille des caches clé-valeur pendant le décodage (Grattafiori et al., 2024). Pope et al. (2022) montrent de même que l'attention à requête unique, plus économe en mémoire, permet de multiplier jusqu'à 32 fois la longueur du contexte dans leur configuration.\n\nConséquence pratique : un serveur qui traite beaucoup de requêtes en même temps doit loger beaucoup de caches en mémoire, d'une taille qui change au fil des générations. La gestion de cette mémoire a donné lieu à des systèmes dédiés (par exemple PagedAttention, Kwon et al., 2023). Le contexte long n'est donc pas seulement une affaire de modèle, mais aussi de mémoire de serveur.\n\n### Réutiliser le cache d'une requête à l'autre\n\nSi deux requêtes commencent par le même texte (une longue consigne, des documents), le cache calculé pour ce début peut en principe être conservé et réutilisé. Certains services proposent une facturation réduite pour des parties de prompt déjà vues : voir le [cours sur le coût des tokens](/cours/cout-des-tokens) pour les conditions, qui varient selon le service et changent souvent.",
+      "analogy": {
+        "title": "Les fiches d'un procès-verbal",
+        "text": "Un secrétaire doit, à chaque nouvelle phrase d'une réunion, retrouver quelles interventions précédentes sont pertinentes. S'il relisait tout le procès-verbal depuis le début à chaque phrase, il perdrait un temps fou. À la place, il établit une **fiche** par intervention au moment où elle a lieu, et pour une nouvelle phrase il ne fait que consulter les fiches existantes. Il n'a un vrai travail d'analyse à faire que pour la phrase du moment.\n\n**Limite de l'analogie** : les fiches prennent de la place. Plus la réunion dure, plus il en faut, et c'est cela, la mémoire du cache. De plus, le secrétaire a besoin de toutes les fiches pour chaque phrase : le cache évite de les recalculer, pas de les relire."
+      },
+      "example": {
+        "title": "Estimer la mémoire d'un cache",
+        "text": "Un contexte de 8 000 tokens avec Llama 3 8B (architecture publiée, 2 octets par nombre) :\n\n$$8\\,000 \\times 131\\,072 \\approx 1{,}05 \\times 10^{9} \\text{ octets}$$\n\nsoit environ 1 Gio pour **une** séquence. Si un serveur traite 20 séquences de cette longueur en parallèle, le cache seul occupe de l'ordre de 20 Gio, en plus des poids. Ces chiffres sont des **ordres de grandeur calculés** à partir de l'architecture, pas des mesures sur un système particulier. Pour un autre modèle, remplacez le nombre de couches, de têtes de clés et valeurs et la dimension par tête."
+      },
+      "diagram": {
+        "title": "Remplir puis agrandir le cache",
+        "description": "Le prompt remplit le cache en un passage, puis chaque token généré y ajoute une position.",
+        "svg": "<svg viewBox=\"0 0 880 420\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Préremplissage du cache KV avec le prompt, puis ajout d'une position à chaque token généré\">\n<defs><marker id=\"g7-fl\" markerWidth=\"10\" markerHeight=\"8\" refX=\"8\" refY=\"4\" orient=\"auto\"><path d=\"M0,0 L10,4 L0,8 z\" fill=\"#38bdf8\" /></marker></defs>\n<rect width=\"880\" height=\"420\" rx=\"16\" fill=\"#0f172a\" />\n<g id=\"g7-prefill\">\n<text x=\"20\" y=\"52\" fill=\"#7dd3fc\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"start\">Préremplissage</text>\n<text x=\"20\" y=\"70\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"start\">un passage sur le prompt</text>\n<rect x=\"190\" y=\"84\" width=\"56\" height=\"44\" rx=\"7\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" stroke-width=\"1.5\" />\n<text x=\"218.0\" y=\"111\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"12\" text-anchor=\"middle\">t1</text>\n<rect x=\"252\" y=\"84\" width=\"56\" height=\"44\" rx=\"7\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" stroke-width=\"1.5\" />\n<text x=\"280.0\" y=\"111\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"12\" text-anchor=\"middle\">t2</text>\n<rect x=\"314\" y=\"84\" width=\"56\" height=\"44\" rx=\"7\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" stroke-width=\"1.5\" />\n<text x=\"342.0\" y=\"111\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"12\" text-anchor=\"middle\">t3</text>\n<rect x=\"376\" y=\"84\" width=\"56\" height=\"44\" rx=\"7\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" stroke-width=\"1.5\" />\n<text x=\"404.0\" y=\"111\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"12\" text-anchor=\"middle\">t4</text>\n<rect x=\"438\" y=\"84\" width=\"56\" height=\"44\" rx=\"7\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" stroke-width=\"1.5\" />\n<text x=\"466.0\" y=\"111\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"12\" text-anchor=\"middle\">t5</text>\n<text x=\"510\" y=\"112\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"start\">K et V des 5 positions sont rangés dans le cache</text>\n</g>\n<g id=\"g7-tour1\">\n<text x=\"20\" y=\"172\" fill=\"#fcd34d\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"start\">Décodage, tour 1</text>\n<text x=\"20\" y=\"190\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"start\">un seul token calculé</text>\n<rect x=\"190\" y=\"176\" width=\"56\" height=\"44\" rx=\"7\" fill=\"#1e293b\" stroke=\"#64748b\" stroke-width=\"1.5\" />\n<text x=\"218.0\" y=\"203\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"12\" text-anchor=\"middle\">t1</text>\n<rect x=\"252\" y=\"176\" width=\"56\" height=\"44\" rx=\"7\" fill=\"#1e293b\" stroke=\"#64748b\" stroke-width=\"1.5\" />\n<text x=\"280.0\" y=\"203\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"12\" text-anchor=\"middle\">t2</text>\n<rect x=\"314\" y=\"176\" width=\"56\" height=\"44\" rx=\"7\" fill=\"#1e293b\" stroke=\"#64748b\" stroke-width=\"1.5\" />\n<text x=\"342.0\" y=\"203\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"12\" text-anchor=\"middle\">t3</text>\n<rect x=\"376\" y=\"176\" width=\"56\" height=\"44\" rx=\"7\" fill=\"#1e293b\" stroke=\"#64748b\" stroke-width=\"1.5\" />\n<text x=\"404.0\" y=\"203\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"12\" text-anchor=\"middle\">t4</text>\n<rect x=\"438\" y=\"176\" width=\"56\" height=\"44\" rx=\"7\" fill=\"#1e293b\" stroke=\"#64748b\" stroke-width=\"1.5\" />\n<text x=\"466.0\" y=\"203\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"12\" text-anchor=\"middle\">t5</text>\n<rect x=\"500\" y=\"176\" width=\"56\" height=\"44\" rx=\"7\" fill=\"#2a1d0a\" stroke=\"#f59e0b\" stroke-width=\"1.5\" />\n<text x=\"528.0\" y=\"203\" fill=\"#fef3c7\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"12\" text-anchor=\"middle\">t6</text>\n<text x=\"572\" y=\"204\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"start\">t6 : K, V calculés puis ajoutés ; sa requête</text>\n<text x=\"572\" y=\"220\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"start\">consulte les clés de t1 à t6</text>\n</g>\n<g id=\"g7-tour2\">\n<text x=\"20\" y=\"264\" fill=\"#fcd34d\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"start\">Décodage, tour 2</text>\n<text x=\"20\" y=\"282\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"start\">un seul token calculé</text>\n<rect x=\"190\" y=\"268\" width=\"56\" height=\"44\" rx=\"7\" fill=\"#1e293b\" stroke=\"#64748b\" stroke-width=\"1.5\" />\n<text x=\"218.0\" y=\"295\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"12\" text-anchor=\"middle\">t1</text>\n<rect x=\"252\" y=\"268\" width=\"56\" height=\"44\" rx=\"7\" fill=\"#1e293b\" stroke=\"#64748b\" stroke-width=\"1.5\" />\n<text x=\"280.0\" y=\"295\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"12\" text-anchor=\"middle\">t2</text>\n<rect x=\"314\" y=\"268\" width=\"56\" height=\"44\" rx=\"7\" fill=\"#1e293b\" stroke=\"#64748b\" stroke-width=\"1.5\" />\n<text x=\"342.0\" y=\"295\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"12\" text-anchor=\"middle\">t3</text>\n<rect x=\"376\" y=\"268\" width=\"56\" height=\"44\" rx=\"7\" fill=\"#1e293b\" stroke=\"#64748b\" stroke-width=\"1.5\" />\n<text x=\"404.0\" y=\"295\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"12\" text-anchor=\"middle\">t4</text>\n<rect x=\"438\" y=\"268\" width=\"56\" height=\"44\" rx=\"7\" fill=\"#1e293b\" stroke=\"#64748b\" stroke-width=\"1.5\" />\n<text x=\"466.0\" y=\"295\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"12\" text-anchor=\"middle\">t5</text>\n<rect x=\"500\" y=\"268\" width=\"56\" height=\"44\" rx=\"7\" fill=\"#1e293b\" stroke=\"#64748b\" stroke-width=\"1.5\" />\n<text x=\"528.0\" y=\"295\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"12\" text-anchor=\"middle\">t6</text>\n<rect x=\"562\" y=\"268\" width=\"56\" height=\"44\" rx=\"7\" fill=\"#2a1d0a\" stroke=\"#f59e0b\" stroke-width=\"1.5\" />\n<text x=\"590.0\" y=\"295\" fill=\"#fef3c7\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"12\" text-anchor=\"middle\">t7</text>\n<text x=\"634\" y=\"296\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"start\">t7 : même principe</text>\n</g>\n<g id=\"g7-memoire\">\n<rect x=\"20\" y=\"340\" width=\"840\" height=\"60\" rx=\"10\" fill=\"#2a1215\" stroke=\"#f87171\" stroke-width=\"1.5\" />\n<text x=\"440\" y=\"366\" fill=\"#fee2e2\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">Le cache grandit d'une position par token, dans chacune des couches.</text>\n<text x=\"440\" y=\"386\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Sa taille est donc proportionnelle à la longueur du contexte : c'est une charge pour la mémoire du serveur.</text>\n</g>\n</svg>",
+        "steps": [
+          {
+            "title": "Le préremplissage",
+            "explanation": "Le prompt entier est traité en un seul passage, toutes les positions en parallèle. Les clés et les valeurs de chaque couche sont conservées dans le cache.",
+            "highlight": [
+              "g7-prefill"
+            ]
+          },
+          {
+            "title": "Un token à la fois",
+            "explanation": "Pour chaque token généré, on ne calcule que sa propre requête, sa clé et sa valeur. La clé et la valeur sont ajoutées au cache, et la requête consulte tout le cache.",
+            "highlight": [
+              "g7-tour1"
+            ]
+          },
+          {
+            "title": "Et ainsi de suite",
+            "explanation": "Les clés et les valeurs des positions passées ne changent pas, puisque le masque causal les empêche de dépendre des suivantes : on peut les réutiliser telles quelles.",
+            "highlight": [
+              "g7-tour2"
+            ]
+          },
+          {
+            "title": "Le prix : de la mémoire",
+            "explanation": "Le cache évite de recalculer le passé, mais il occupe de la mémoire qui augmente avec la longueur du contexte.",
+            "highlight": [
+              "g7-memoire",
+              "g7-tour2"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "code": "# Génération gloutonne avec et sans cache KV : mêmes tokens, beaucoup moins de calcul\nimport torch\nfrom transformers import AutoTokenizer, AutoModelForCausalLM\n\ntok = AutoTokenizer.from_pretrained(\"gpt2\")\nmodele = AutoModelForCausalLM.from_pretrained(\"gpt2\").eval()\nprompt = tok(\"The best way to learn a new language is to\", return_tensors=\"pt\").input_ids\nN_NOUVEAUX = 20\n\ndef generer(avec_cache):\n    ids, passes, cache = prompt.clone(), 0, None\n    for _ in range(N_NOUVEAUX):\n        # avec cache : on ne donne au modèle que le dernier token (le prompt entier au premier tour)\n        entree = ids if (cache is None or not avec_cache) else ids[:, -1:]\n        with torch.no_grad():\n            sortie = modele(entree, past_key_values=cache, use_cache=avec_cache)\n        passes += entree.shape[1]                       # nombre de tokens traités par le modèle à ce tour\n        cache = sortie.past_key_values if avec_cache else None\n        suivant = sortie.logits[0, -1].argmax().view(1, 1)\n        ids = torch.cat([ids, suivant], dim=1)\n    return ids, passes, cache\n\nsans, passes_sans, _ = generer(False)\navec, passes_avec, cache = generer(True)\nprint(\"Mêmes tokens avec et sans cache :\", torch.equal(sans, avec))\nprint(\"Texte :\", tok.decode(avec[0]))\nprint(f\"Tokens traités par le modèle : {passes_sans} sans cache, {passes_avec} avec cache\")\n\n# Taille du cache après la génération\nK, V = cache.layers[0].keys, cache.layers[0].values       # couche 0 : (lot, têtes, longueur, dim par tête)\nlongueur = K.shape[2]\ntotal = sum(l.keys.numel() + l.values.numel() for l in cache.layers) * K.element_size()\nprint(f\"Forme des clés (couche 0) : {tuple(K.shape)}\")\nprint(f\"Cache complet : {total:,} octets pour {longueur} tokens, soit {total // longueur:,} octets par token (float32)\")\n\n# Formule : 2 (K et V) x couches x têtes x dim par tête x octets par nombre\nc = modele.config\npar_token = 2 * c.n_layer * c.n_head * (c.n_embd // c.n_head) * 2      # 2 octets en float16\nprint(f\"Formule en float16 : {par_token:,} octets par token, soit {par_token * 1024 / 2**20:.0f} Mio pour 1024 tokens\")",
+        "explanation": "Le code génère 20 tokens avec GPT-2 de deux façons, avec et sans cache KV (choix glouton). Il compte combien de tokens le modèle traite à chaque fois (390 contre 29), vérifie que les deux textes sont identiques, mesure la taille réelle du cache après génération (29 tokens, 12 têtes, 64 dimensions, en float32) et la compare à la formule. L'exemple ne mesure pas de temps : les durées dépendent de la machine.",
+        "output": "Mêmes tokens avec et sans cache : True\nTexte : The best way to learn a new language is to learn it from a native speaker.\n\nThe best way to learn a new language is to learn\nTokens traités par le modèle : 390 sans cache, 29 avec cache\nForme des clés (couche 0) : (1, 12, 29, 64)\nCache complet : 2,138,112 octets pour 29 tokens, soit 73,728 octets par token (float32)\nFormule en float16 : 36,864 octets par token, soit 36 Mio pour 1024 tokens",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Pourquoi peut-on réutiliser les clés et les valeurs des tokens passés sans les recalculer ?",
+          "options": [
+            "Parce que, grâce au masque causal, elles ne dépendent pas des tokens qui suivent",
+            "Parce que le modèle les approxime d'un tour à l'autre",
+            "Parce qu'elles sont identiques pour tous les tokens",
+            "Parce que le modèle oublie les tokens anciens et ne garde que les derniers"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le masque causal rend le vecteur de chaque position indépendant des tokens suivants, donc ses clés et valeurs sont exactement les mêmes d'un tour à l'autre. Il ne s'agit pas d'une approximation (les textes obtenus avec et sans cache sont identiques dans l'exemple), les clés diffèrent d'un token à l'autre, et le cache ne fait rien oublier."
+        },
+        {
+          "question": "Que gagne-t-on avec le cache KV, et que perd-on ?",
+          "options": [
+            "On gagne beaucoup de calcul ; on perd de la mémoire, qui augmente avec la longueur du contexte",
+            "On gagne de la mémoire ; on perd en précision des réponses",
+            "On gagne en précision ; on perd en vitesse",
+            "On ne perd rien : le cache est gratuit"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le cache évite de recalculer le passé, au prix d'une mémoire proportionnelle à la longueur du contexte (128 Kio par token pour Llama 3 8B en 16 bits, d'après le calcul). Il ne change pas les réponses (même sortie avec et sans cache), donc la précision n'est pas en jeu."
+        },
+        {
+          "question": "La phase de préremplissage (prefill) est...",
+          "options": [
+            "Le traitement du prompt en un passage, en parallèle, qui remplit le cache",
+            "La génération du premier token seulement",
+            "Le chargement des poids du modèle en mémoire",
+            "Un temps constant, quelle que soit la longueur du prompt"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le préremplissage traite toutes les positions du prompt à la fois, ce qui remplit le cache. Son temps croît avec la longueur du prompt : le délai avant le premier token n'est donc pas constant. Le chargement des poids est une étape séparée, et le premier token est produit à la fin du préremplissage, pas pendant."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Préremplissage (prefill)",
+          "definition": "Phase où le prompt entier est traité en un passage et où le cache KV est rempli."
+        },
+        {
+          "term": "Décodage (decode)",
+          "definition": "Phase où l'on génère un token à la fois en réutilisant le cache."
+        },
+        {
+          "term": "Cache KV (key-value cache)",
+          "definition": "Mémoire des clés et des valeurs de toutes les positions déjà traitées, dans chaque couche."
+        },
+        {
+          "term": "Séquence d'arrêt",
+          "definition": "Suite de caractères qui, une fois produite, interrompt la génération."
+        },
+        {
+          "term": "GQA (grouped-query attention)",
+          "definition": "Attention où plusieurs têtes de requêtes partagent une même tête de clés et de valeurs, ce qui réduit la taille du cache (Ainslie et al., 2023)."
+        },
+        {
+          "term": "Temps avant le premier token",
+          "definition": "Délai entre l'envoi du prompt et l'apparition du premier token : il correspond surtout au préremplissage."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Prefill et décodage",
+          "prompt": "Pourquoi le premier token est-il plus lent à venir sur un long prompt, alors que le cache KV accélère ensuite la génération ?",
+          "solution": "Le prefill traite tout le prompt en un passage, donc le temps avant le premier token croît avec sa longueur. Le décodage produit un token à la fois et réutilise les clés et valeurs passées ; le cache accélère les tokens suivants mais occupe de la mémoire."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Ainslie et al., « GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints » (EMNLP 2023)",
+          "href": "https://arxiv.org/abs/2305.13245"
+        },
+        {
+          "label": "Pope et al., « Efficiently Scaling Transformer Inference » (2022)",
+          "href": "https://arxiv.org/abs/2211.05102"
+        },
+        {
+          "label": "Kwon et al., « Efficient Memory Management for Large Language Model Serving with PagedAttention » (SOSP 2023)",
+          "href": "https://arxiv.org/abs/2309.06180"
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "label": "Vaswani et al., « Attention Is All You Need » (2017)",
+      "href": "https://arxiv.org/abs/1706.03762"
+    },
+    {
+      "label": "Sennrich, Haddow, Birch, « Neural Machine Translation of Rare Words with Subword Units » (ACL 2016)",
+      "href": "https://arxiv.org/abs/1508.07909"
+    },
+    {
+      "label": "Radford et al., « Language Models are Unsupervised Multitask Learners » (GPT-2, OpenAI, 2019)",
+      "href": "https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf"
+    },
+    {
+      "label": "Fiche du modèle GPT-2 sur Hugging Face (124 M de paramètres, BPE au niveau des octets, 50 257 tokens, 1 024 tokens de contexte)",
+      "href": "https://huggingface.co/openai-community/gpt2"
+    },
+    {
+      "label": "OpenAI, « GPT-4 Technical Report » (2023), section 2 : portée et limites du rapport",
+      "href": "https://arxiv.org/abs/2303.08774"
+    },
+    {
+      "label": "Touvron et al., « LLaMA: Open and Efficient Foundation Language Models » (2023)",
+      "href": "https://arxiv.org/abs/2302.13971"
+    },
+    {
+      "label": "Grattafiori et al., « The Llama 3 Herd of Models » (2024)",
+      "href": "https://arxiv.org/abs/2407.21783"
+    },
+    {
+      "label": "Su et al., « RoFormer: Enhanced Transformer with Rotary Position Embedding » (2021)",
+      "href": "https://arxiv.org/abs/2104.09864"
+    },
+    {
+      "label": "Xiong et al., « On Layer Normalization in the Transformer Architecture » (ICML 2020)",
+      "href": "https://arxiv.org/abs/2002.04745"
+    },
+    {
+      "label": "Press et Wolf, « Using the Output Embedding to Improve Language Models » (2017)",
+      "href": "https://arxiv.org/abs/1608.05859"
+    },
+    {
+      "label": "Geva et al., « Transformer Feed-Forward Layers Are Key-Value Memories » (EMNLP 2021)",
+      "href": "https://arxiv.org/abs/2012.14913"
+    },
+    {
+      "label": "Elhage et al., « A Mathematical Framework for Transformer Circuits » (Anthropic, 2021)",
+      "href": "https://transformer-circuits.pub/2021/framework/index.html"
+    },
+    {
+      "label": "Olsson et al., « In-context Learning and Induction Heads » (2022)",
+      "href": "https://arxiv.org/abs/2209.11895"
+    },
+    {
+      "label": "Jain et Wallace, « Attention is not Explanation » (NAACL 2019)",
+      "href": "https://arxiv.org/abs/1902.10186"
+    },
+    {
+      "label": "Xiao et al., « Efficient Streaming Language Models with Attention Sinks » (ICLR 2024)",
+      "href": "https://arxiv.org/abs/2309.17453"
+    },
+    {
+      "label": "Pascanu, Mikolov, Bengio, « On the difficulty of training Recurrent Neural Networks » (2013)",
+      "href": "https://arxiv.org/abs/1211.5063"
+    },
+    {
+      "label": "Fan, Lewis, Dauphin, « Hierarchical Neural Story Generation » (2018) : échantillonnage top-k",
+      "href": "https://arxiv.org/abs/1805.04833"
+    },
+    {
+      "label": "Holtzman et al., « The Curious Case of Neural Text Degeneration » (ICLR 2020) : échantillonnage top-p",
+      "href": "https://arxiv.org/abs/1904.09751"
+    },
+    {
+      "label": "Nguyen et al., « Turning Up the Heat: Min-p Sampling for Creative and Coherent LLM Outputs » (ICLR 2025)",
+      "href": "https://arxiv.org/abs/2407.01082"
+    },
+    {
+      "label": "Ainslie et al., « GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints » (EMNLP 2023)",
+      "href": "https://arxiv.org/abs/2305.13245"
+    },
+    {
+      "label": "Pope et al., « Efficiently Scaling Transformer Inference » (2022)",
+      "href": "https://arxiv.org/abs/2211.05102"
+    },
+    {
+      "label": "Kwon et al., « Efficient Memory Management for Large Language Model Serving with PagedAttention » (SOSP 2023)",
+      "href": "https://arxiv.org/abs/2309.06180"
+    },
+    {
+      "label": "He (Thinking Machines), « Defeating Nondeterminism in LLM Inference » (10 septembre 2025)",
+      "href": "https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/"
+    }
+  ],
+  "related": [
+    {
+      "to": "/cours/parametres-llm",
+      "title": "Les paramètres des LLM",
+      "description": "Les réglages (température, top-p, top-k, longueur) du point de vue de l'utilisateur : ce cours en explique le mécanisme."
+    },
+    {
+      "to": "/cours/nlp-comprehension",
+      "title": "Traitement du langage naturel : comprendre",
+      "description": "Vue d'ensemble de la tokenisation, des embeddings et des Transformers, avant d'entrer dans le détail."
+    },
+    {
+      "to": "/cours/nlp-concepts",
+      "title": "Traitement du langage naturel : pratiquer",
+      "description": "Du code Python sur le prétraitement, les embeddings et l'attention en NumPy."
+    },
+    {
+      "to": "/types-ia/llm",
+      "title": "Les grands modèles de langage",
+      "description": "Architecture générale des LLM et étapes d'alignement (RLHF), que ce cours ne traite pas."
+    }
+  ]
+}

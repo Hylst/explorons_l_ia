@@ -1,0 +1,982 @@
+{
+  "slug": "solutions-ia-b2b",
+  "title": "Solutions IA B2B : catégories, packaging et déploiement",
+  "subtitle": "Choisir une catégorie d'offre, construire un prix et démontrer la valeur sans promesse invérifiable",
+  "level": "Intermédiaire",
+  "tags": [
+    "B2B",
+    "Produit",
+    "Packaging",
+    "Déploiement",
+    "Conformité",
+    "ROI"
+  ],
+  "summary": "Une solution IA B2B se construit autour d'une catégorie d'offre, d'un packaging, d'un prix et d'une preuve de valeur. Ce cours traite les assistants, automatisations, agents et plateformes, les unités de facturation, le calcul du prix et du ROI, la conformité et le déploiement, avec des hypothèses explicites et des limites affichées.",
+  "introduction": "### Pourquoi ce cours\n\nBeaucoup de projets d'IA en entreprise échouent moins sur le modèle que sur l'offre : un périmètre flou, une unité de prix mal choisie, un ROI annoncé sans base de comparaison ou un déploiement sans supervision. Ce cours propose une méthode sobre pour construire une solution B2B, de la catégorie d'offre jusqu'au passage à l'échelle.\n\n### D'où vient le sujet\n\nLes guides de vendeur, comme ceux d'OpenAI et d'Anthropic, décrivent des architectures d'assistants et d'agents. Les enquêtes, comme celle de Deloitte, recueillent des déclarations d'entreprises. Les cadres de risque, comme le NIST AI Risk Management Framework, et les règlements, comme l'AI Act, ajoutent des obligations ou des références. Ces sources ne disent pas quel prix pratiquer ni quel ROI obtenir. Elles aident à poser les bonnes questions.\n\n### Ce qu'il faut savoir avant\n\nIl faut connaître les bases d'un modèle de langage et avoir une notion de gestion de projet. Aucune expérience commerciale n'est requise : les calculs de prix et de ROI sont expliqués pas à pas, avec leurs hypothèses. Les exemples chiffrés sont fictifs et servent à illustrer une méthode, pas à fournir un tarif.\n\n### Ce que le lecteur saura expliquer\n\nÀ la fin, le lecteur saura distinguer un assistant, une automatisation, un agent et une plateforme. Il saura choisir une unité de facturation, construire un prix entre coût et valeur, calculer un ROI avec une base de comparaison et une analyse de sensibilité. Il saura aussi rattacher un cas d'usage aux principales questions de conformité et préparer un déploiement par étapes, avec supervision et plan de repli.\n\n### Les limites\n\nAucune formule ne remplace une mesure sur votre marché. Les prix, les coûts et les gains varient selon le secteur, le volume, les contrats et les données. Les références juridiques sont présentées de façon générale : elles ne constituent pas un avis juridique. Les sources de vendeur sont identifiées comme telles, et les chiffres de marché ou d'adoption ne sont pas inventés.",
+  "prerequisites": [
+    "Notions de gestion de projet",
+    "Savoir ce qu'est un LLM",
+    "Aucune expérience commerciale requise"
+  ],
+  "checkedOn": "2026-10-26",
+  "cover": {
+    "src": "pics/cours/solutions-ia-b2b.webp",
+    "alt": "Plateforme d'entreprise modulaire reliée à des modules d'IA et à des flux lumineux mesurés, avec une pile de documents, sur fond bleu nuit."
+  },
+  "modules": [
+    {
+      "id": "categories",
+      "title": "Les catégories d'offres",
+      "keyTakeaways": [
+        "Une catégorie d'offre décrit le service vendu, le niveau d'autonomie et les responsabilités au contrat, pas la technologie du modèle.",
+        "L'assistant laisse la décision à l'utilisateur, l'automatisation suit un chemin prédéfini et l'agent choisit lui-même la prochaine action dans une boucle.",
+        "La plateforme vend des briques réutilisables à d'autres constructeurs ; son revenu dépend de l'usage et du support, pas d'un résultat métier direct.",
+        "Les guides d'OpenAI et d'Anthropic sont des documents de vendeur : ils aident à nommer des architectures, pas à prouver une adoption ou une rentabilité.",
+        "Choisir la catégorie la moins autonome et le périmètre le plus petit qui résout le problème réduit les coûts de support, de conformité et de responsabilité."
+      ],
+      "theory": "### Quatre catégories, pas quatre technologies\n\nUne offre B2B d'IA est souvent présentée comme un « assistant intelligent » ou une « solution agentique ». Ces étiquettes mélangent trois questions différentes : ce que le client achète, qui garde le contrôle et ce qui est garanti au contrat. Pour construire une offre lisible, il vaut mieux partir de quatre catégories de service : l'assistant, l'automatisation, l'agent et la plateforme. Elles peuvent reposer sur le même modèle de langage ; ce qui change est la répartition des décisions, des responsabilités et des coûts.\n\nLes guides publiés par OpenAI et Anthropic proposent des taxonomies voisines. Ce sont des documents de vendeur : ils décrivent des architectures que leurs auteurs connaissent et recommandent, pas des enquêtes indépendantes sur l'adoption ou la rentabilité. Les citer est utile pour nommer des patterns, pas pour justifier un prix ou une prévision de marché.\n\n### L'assistant\n\nL'assistant est une interface conversationnelle ou un copilote. L'utilisateur pose une question, le système répond, cite éventuellement des documents et propose une action. La décision reste humaine : l'assistant ne modifie pas le dossier sans validation. Dans une offre B2B, cette catégorie se vend souvent au siège, avec un périmètre de données et un nombre de requêtes inclus.\n\nSon intérêt est la faible barrière d'entrée. Le client voit immédiatement ce que fait le produit, et l'équipe peut corriger les réponses par le prompt ou la base documentaire. Sa limite est l'absence de garantie de résultat : deux utilisateurs peuvent obtenir des réponses différentes à la même question, et l'assistant peut ignorer une instruction. Le contrat doit donc préciser ce qui est promis : disponibilité, temps de réponse, périmètre des sources, mais pas l'exactitude d'une réponse singulière.\n\n### L'automatisation\n\nL'automatisation exécute un chemin prédéfini. Le modèle intervient à une ou plusieurs étapes, par exemple pour extraire des champs d'un document, classer une demande ou rédiger un brouillon. Les enchaînements sont écrits dans le code ou dans un orchestrateur : si telle condition, alors telle étape. L'utilisateur ne choisit pas la prochaine action du système ; il valide éventuellement le résultat final.\n\nCette catégorie se prête mieux à une promesse de volume et de régularité. Elle peut traiter des factures, des tickets ou des formulaires selon des règles stables. En contrepartie, elle dépend fortement de la qualité des intégrations et de la gestion des cas limites. Une erreur silencieuse dans un flux automatique coûte plus cher qu'une réponse imparfaite dans un assistant, parce qu'elle peut se répéter à grande échelle. La supervision, les journaux et les contrôles par échantillonnage font partie du produit.\n\n### L'agent\n\nL'agent est un système qui reçoit un objectif et choisit lui-même les actions et les outils pour l'atteindre, dans une boucle. Il peut chercher une information, appeler une API, lire un document, puis décider de continuer ou de s'arrêter. Anthropic distingue les workflows, où le chemin est codé, et les agents, où le modèle dirige les étapes. Cette distinction est utile : elle rappelle que l'autonomie n'est pas un supplément gratuit.\n\nL'agent ouvre des cas d'usage que l'automatisation stricte gère mal, notamment les tâches multi-étapes dont l'ordre varie. Il introduit aussi de nouveaux risques : erreurs cumulées, appels d'outils excessifs, permissions trop larges, coûts variables et comportements difficiles à reproduire. Le guide d'OpenAI présente des architectures à un ou plusieurs agents, avec un orchestrateur et des garde-fous. Ce sont des recommandations de vendeur, à adapter à votre contexte.\n\n### La plateforme\n\nLa plateforme ne vend pas un résultat métier direct. Elle fournit des briques : passerelle de modèles, service de récupération documentaire, évaluation, observabilité, gestion des prompts ou des adaptateurs. Ses clients sont d'autres équipes qui construisent leurs propres produits. La valeur vient de la réutilisation et de la gouvernance ; le revenu dépend de l'usage, du nombre de projets ou d'un abonnement.\n\nUne plateforme est plus difficile à vendre qu'un assistant, parce que le client doit investir pour obtenir un résultat. Elle expose aussi à la concurrence des fournisseurs de modèles et des offres cloud, qui intègrent des fonctions voisines. Le contrat doit clarifier le support, les limites de responsabilité et la dépendance aux fournisseurs sous-jacents.\n\n### Choisir sans se raconter d'histoire\n\nLe point de départ n'est pas la catégorie, mais le travail à accomplir. Un même besoin peut être servi par un assistant, une automatisation ou un agent. La bonne question est : quelle décision le système prend-il seul, et que se passe-t-il s'il se trompe ? Si la réponse engage peu de choses, un assistant suffit. Si le chemin est stable, une automatisation est plus simple à tester. Si le chemin varie et que les erreurs sont réversibles, un agent peut se justifier. Si le client veut construire plusieurs produits, une plateforme peut avoir du sens.\n\nLa catégorie choisie détermine aussi l'unité de prix et le niveau de preuve attendu. Un assistant se vend souvent par siège ; une automatisation par document ou par dossier ; un agent par tâche ou par exécution ; une plateforme par usage ou par abonnement. Ces choix sont repris dans les modules suivants.\n\n### Ce que les sources ne disent pas\n\nLes documents de vendeur ne permettent pas de conclure qu'une catégorie est plus rentable qu'une autre. L'enquête de Deloitte, cabinet de conseil, est déclarative : elle recueille des réponses d'entreprises, pas des comptes audités. Le rapport AI Index de Stanford HAI compile des indicateurs publics et des travaux de recherche ; il ne fournit pas le prix ni le retour sur investissement d'un produit donné. Ces sources aident à situer le débat, pas à remplacer une mesure sur votre marché.\n",
+      "diagram": {
+        "title": "Quatre catégories, de l'assistant à la plateforme",
+        "description": "Schéma illustratif : les quatre catégories sont placées selon le niveau d'autonomie et le périmètre vendu. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Quatre catégories d'offres IA B2B : assistant, automatisation, agent et plateforme\">\n  <defs>\n    <marker id=\"b2b-cat-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"440\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Quatre catégories d'offres</text>\n  <text x=\"410\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n  <line x1=\"70\" y1=\"390\" x2=\"750\" y2=\"390\" stroke=\"#334155\" stroke-width=\"2\" marker-end=\"url(#b2b-cat-arrow)\"/>\n  <text x=\"750\" y=\"414\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"end\">autonomie croissante</text>\n  <g id=\"assistant\">\n    <rect x=\"60\" y=\"100\" width=\"150\" height=\"120\" rx=\"12\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"135\" y=\"132\" fill=\"#e0f2fe\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Assistant</text>\n    <text x=\"135\" y=\"156\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">répond et propose</text>\n    <text x=\"135\" y=\"176\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">l'humain décide</text>\n    <text x=\"135\" y=\"200\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">souvent par siège</text>\n  </g>\n  <g id=\"automatisation\">\n    <rect x=\"240\" y=\"100\" width=\"150\" height=\"120\" rx=\"12\" fill=\"#0f172a\" stroke=\"#818cf8\" stroke-width=\"2\"/>\n    <text x=\"315\" y=\"132\" fill=\"#e0e7ff\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Automatisation</text>\n    <text x=\"315\" y=\"156\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">chemin prédéfini</text>\n    <text x=\"315\" y=\"176\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">étapes contrôlées</text>\n    <text x=\"315\" y=\"200\" fill=\"#a5b4fc\" font-size=\"11\" text-anchor=\"middle\">souvent par dossier</text>\n  </g>\n  <g id=\"agent\">\n    <rect x=\"420\" y=\"100\" width=\"150\" height=\"120\" rx=\"12\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <text x=\"495\" y=\"132\" fill=\"#fef3c7\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Agent</text>\n    <text x=\"495\" y=\"156\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">choisit ses actions</text>\n    <text x=\"495\" y=\"176\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">boucle et outils</text>\n    <text x=\"495\" y=\"200\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">souvent par tâche</text>\n  </g>\n  <g id=\"plateforme\">\n    <rect x=\"600\" y=\"100\" width=\"160\" height=\"120\" rx=\"12\" fill=\"#0f172a\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"680\" y=\"132\" fill=\"#fce7f3\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Plateforme</text>\n    <text x=\"680\" y=\"156\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">briques réutilisables</text>\n    <text x=\"680\" y=\"176\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">pour d'autres équipes</text>\n    <text x=\"680\" y=\"200\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">souvent à l'usage</text>\n  </g>\n  <g fill=\"#64748b\" font-size=\"11\" text-anchor=\"middle\">\n    <text x=\"135\" y=\"270\">contrôle humain</text>\n    <text x=\"315\" y=\"270\">règles explicites</text>\n    <text x=\"495\" y=\"270\">décision du modèle</text>\n    <text x=\"680\" y=\"270\">outils pour constructeurs</text>\n  </g>\n  <g stroke=\"#475569\" stroke-width=\"1.5\" stroke-dasharray=\"5 4\">\n    <line x1=\"135\" y1=\"286\" x2=\"135\" y2=\"360\"/>\n    <line x1=\"315\" y1=\"286\" x2=\"315\" y2=\"360\"/>\n    <line x1=\"495\" y1=\"286\" x2=\"495\" y2=\"360\"/>\n    <line x1=\"680\" y1=\"286\" x2=\"680\" y2=\"360\"/>\n  </g>\n  <text x=\"410\" y=\"382\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">La même technologie peut servir plusieurs catégories : le contrat et le niveau de preuve changent.</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. L'assistant",
+            "explanation": "Le client obtient une réponse ou un brouillon. L'utilisateur garde la décision et le fournisseur promet surtout la disponibilité et le périmètre des sources.",
+            "highlight": [
+              "assistant"
+            ]
+          },
+          {
+            "title": "2. L'automatisation",
+            "explanation": "Le chemin est écrit à l'avance. Le modèle traite une étape, mais l'ordre des opérations ne dépend pas de sa décision.",
+            "highlight": [
+              "automatisation"
+            ]
+          },
+          {
+            "title": "3. L'agent",
+            "explanation": "Le modèle choisit la prochaine action et les outils. L'autonomie augmente, ainsi que les besoins de permissions, de journaux et de garde-fous.",
+            "highlight": [
+              "agent"
+            ]
+          },
+          {
+            "title": "4. La plateforme",
+            "explanation": "Le client achète des briques pour construire ses propres produits. La valeur dépend de la réutilisation et de la gouvernance, pas d'un résultat métier direct.",
+            "highlight": [
+              "plateforme"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Quelle catégorie laisse le modèle choisir lui-même la prochaine action ?",
+          "options": [
+            "L'agent",
+            "L'automatisation",
+            "L'assistant",
+            "La plateforme"
+          ],
+          "correctIndex": 0,
+          "explanation": "L'agent reçoit un objectif et décide des actions et des outils dans une boucle. L'assistant répond, l'automatisation suit un chemin prédéfini et la plateforme fournit des briques."
+        },
+        {
+          "question": "Quelle est la différence principale entre une automatisation et un agent ?",
+          "options": [
+            "L'automatisation utilise toujours un modèle plus petit",
+            "L'automatisation suit un chemin prédéfini, l'agent choisit ses étapes",
+            "L'agent ne peut pas appeler d'outil",
+            "L'automatisation interdit toute validation humaine"
+          ],
+          "correctIndex": 1,
+          "explanation": "Dans une automatisation, l'enchaînement est codé. Dans un agent, le modèle décide de la suite, ce qui apporte de la souplesse mais rend le comportement moins prévisible."
+        },
+        {
+          "question": "Pourquoi la catégorie choisie influence-t-elle le contrat ?",
+          "options": [
+            "Parce qu'elle interdit les évaluations",
+            "Parce qu'elle impose un modèle de langage précis",
+            "Parce qu'elle détermine le niveau d'autonomie, les responsabilités et l'unité de prix",
+            "Parce qu'elle remplace la conformité"
+          ],
+          "correctIndex": 2,
+          "explanation": "La catégorie décrit ce que le système décide seul, ce que le fournisseur garantit et ce que le client paie. Ces éléments se retrouvent dans les conditions du contrat."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Assistant",
+          "definition": "Interface qui répond ou propose une action à la demande d'un utilisateur, la décision finale restant humaine."
+        },
+        {
+          "term": "Automatisation",
+          "definition": "Enchaînement d'étapes prédéfini dans lequel un modèle intervient sur une ou plusieurs opérations."
+        },
+        {
+          "term": "Agent",
+          "definition": "Système qui reçoit un objectif et choisit des actions et des outils dans une boucle, avec des garde-fous."
+        },
+        {
+          "term": "Plateforme",
+          "definition": "Offre de briques réutilisables destinée à d'autres équipes qui construisent leurs propres produits."
+        }
+      ],
+      "example": {
+        "title": "Router une demande vers une catégorie",
+        "text": "**Scénario illustratif.** Une entreprise reçoit trois demandes : un client veut un chatbot de support, un autre veut automatiser la lecture de factures, un troisième veut une recherche documentaire interne. Les trois ne relèvent pas de la même catégorie ni du même mode de preuve. Le chatbot se juge sur la qualité des réponses et les escalades ; la lecture de factures sur l'extraction et les exceptions ; la recherche sur les sources retrouvées. Une offre unique pour les trois serait floue."
+      },
+      "exercises": [
+        {
+          "title": "Classer trois demandes",
+          "prompt": "Une entreprise reçoit trois demandes : un chatbot de support, l’extraction de champs sur des factures et une recherche documentaire interne. Classez chacune dans une catégorie d’offre, indiquez ce que le contrat doit promettre, puis ce qu’il ne doit pas promettre.",
+          "solution": "Le chatbot est un assistant : l’utilisateur garde la décision, et le contrat porte sur la disponibilité, le temps de réponse et le périmètre des sources, pas sur l’exactitude d’une réponse singulière. L’extraction de factures est une automatisation : le chemin est prédéfini, la promesse porte sur le volume et la régularité, avec supervision et contrôle par échantillonnage des exceptions. La recherche documentaire relève aussi de l’assistant, jugé sur les sources retrouvées et les escalades. Aucune des trois ne justifie un agent, car aucune ne demande de choisir seule la prochaine action."
+        }
+      ],
+      "sources": [
+        {
+          "label": "OpenAI, A Practical Guide to Building Agents, guide de vendeur, consulté le 21 octobre 2026.",
+          "href": "https://cdn.openai.com/business-guides-and-resources/a-practical-guide-to-building-agents.pdf"
+        },
+        {
+          "label": "Anthropic, Building Effective Agents, article de vendeur, consulté le 21 octobre 2026.",
+          "href": "https://www.anthropic.com/research/building-effective-agents"
+        }
+      ]
+    },
+    {
+      "id": "packaging",
+      "title": "Packaging, prix et unités de valeur",
+      "keyTakeaways": [
+        "Le packaging définit l'objet vendu, l'unité de facturation, les limites d'usage, le support et les conditions de renouvellement.",
+        "L'unité de facturation, l'unité de valeur et l'unité de coût sont trois notions distinctes ; les confondre produit des prix difficiles à défendre.",
+        "Le prix par siège est prévisible mais peut s'éloigner de l'usage réel ; le prix à l'usage suit le coût mais transfère la variabilité au client.",
+        "Le prix au résultat exige un résultat mesurable, une règle d'attribution et une base de comparaison ; sans cela, il devient un pari.",
+        "Une marge brute élevée sur le coût variable ne prouve pas qu'un contrat est rentable : les coûts fixes, le support et la vente doivent entrer dans le calcul."
+      ],
+      "theory": "### Ce que vend réellement un packaging\n\nLe packaging n'est pas la liste des fonctionnalités. C'est l'ensemble des choix qui rendent une offre achetable : ce que le client obtient, pour combien d'utilisateurs, avec quelles limites, pendant combien de temps, avec quel support et quelles conditions de sortie. Deux produits identiques peuvent avoir des packagings très différents, et donc des économies très différentes.\n\nUn packaging lisible répond à cinq questions. Qui utilise le produit ? Qu'est-ce qui est compté ? Que se passe-t-il au-delà de la limite ? Qui supporte le coût d'un usage imprévu ? Comment le client peut-il partir ? Ces questions paraissent commerciales, mais elles déterminent aussi l'architecture : une offre à l'usage exige des compteurs fiables ; une offre au résultat exige une source de vérité sur le résultat.\n\n### Trois unités à ne pas confondre\n\nLa première unité est celle de la facturation : le siège, la requête, le document, le mois ou le résultat. La deuxième est celle de la valeur : ce que le client cherche à obtenir, par exemple un ticket résolu, une facture traitée ou une heure libérée. La troisième est celle du coût : ce que vous payez au fournisseur de modèle, à l'infrastructure, au support et à la conformité.\n\nCes trois unités ne coïncident pas toujours. Un prix par siège facture l'accès, alors que la valeur dépend du nombre de dossiers traités. Un prix à la requête suit le coût du modèle, alors que la valeur dépend de la qualité de la réponse. Un prix au résultat aligne facturation et valeur, mais il faut définir ce qu'est un résultat, qui le constate et comment les cas contestés sont traités.\n\nLe rapport AI Index de Stanford HAI compile des indicateurs sur les modèles, les coûts et les usages. Il ne dit pas quelle unité choisir pour votre produit. L'enquête de Deloitte, cabinet de conseil, est déclarative : elle décrit ce que des entreprises déclarent, pas ce qu'elles paient réellement. Ces sources éclairent le contexte, pas la décision de packaging.\n\n### Abonnement, siège, usage, résultat\n\nL'abonnement forfaitaire est simple à vendre et à prévoir. Il convient aux produits dont l'usage est relativement stable et dont le coût marginal reste faible. Son risque est l'inadéquation : les petits utilisateurs paient trop, les gros utilisateurs consomment plus que prévu, et le fournisseur doit arbitrer par des limites ou des hausses.\n\nLe prix par siège est courant dans les logiciels d'entreprise. Il est prévisible pour l'acheteur et facile à comparer. Mais il peut créer une illusion : le revenu est fixe alors que le coût d'usage varie. Si seuls quelques sièges sont réellement actifs, le prix effectif par utilisateur actif est supérieur au prix affiché. Il dépend du nombre d'utilisateurs actifs retenu. Il faut suivre le nombre de sièges facturés et le nombre d'utilisateurs actifs.\n\nLe prix à l'usage, par requête, par token ou par document, suit mieux le coût variable. Il est facile à expliquer lorsque le client comprend l'unité, mais il rend la facture imprévisible. Il exige des compteurs, des alertes, des plafonds et une politique claire en cas de dépassement. Sans cela, un incident peut produire une facture que le client contestera.\n\nLe prix au résultat, par ticket résolu ou par facture traitée, aligne la facturation sur la valeur perçue. Il transfère au fournisseur une partie du risque d'échec. En contrepartie, il demande une définition vérifiable du résultat, un historique commun et une procédure de contestation. Il est plus adapté aux processus matures, où la mesure existe déjà, qu'aux pilotes exploratoires.\n\n### Les formes hybrides\n\nBeaucoup d'offres combinent plusieurs unités : un abonnement de base, un volume inclus, puis un prix à l'usage au-delà. Cette structure peut être saine si elle est expliquée simplement. Elle permet de couvrir les coûts fixes, de donner de la prévisibilité au client et de facturer la croissance. Elle devient opaque si les paliers, les remises et les dépassements se multiplient sans simulateur.\n\nLe contrat doit préciser ce qui est inclus : nombre de sièges, volume de requêtes, stockage, support, délai de réponse, fréquence des mises à jour. Il doit aussi prévoir les cas de dépassement : plafond dur, facturation à l'usage, ou blocage. Un plafond dur protège le client mais peut interrompre son activité ; une facturation libre protège le fournisseur mais expose le client. Le choix est un arbitrage, pas un détail.\n\n### Ce que le packaging change dans la marge\n\nUne marge calculée sur le seul coût variable peut être trompeuse. Le coût variable comprend les appels au modèle, l'infrastructure à l'usage et éventuellement les frais de paiement. Il ne comprend pas l'ingénierie, le support, la vente, la conformité, la sécurité, ni l'amortissement des développements. Un contrat peut afficher une marge brute élevée sur le coût variable et perdre de l'argent après le support et la vente.\n\nLe calcul ci-dessous illustre ce point avec des hypothèses fictives. Il ne prétend pas décrire un tarif réel. Il montre aussi l'effet du nombre d'utilisateurs actifs sur le prix effectif : le revenu par siège ne change pas, mais le nombre de personnes qui consomment change.\n\nLe code affiche, pour 10, 20 et 30 utilisateurs actifs, le revenu mensuel, le coût d'usage, la marge brute sur coût variable et le prix effectif par utilisateur actif. Les hypothèses sont : 40 sièges à 25 euros par mois, 250 requêtes par utilisateur actif et par mois, et 0,004 euro de coût variable par requête. Aucun coût fixe n'est inclus. Le résultat ne doit donc pas être lu comme une marge nette.\n\n### Les limites à afficher\n\nUn packaging défendable indique ses limites : ce qui n'est pas inclus, ce qui déclenche un surcoût, ce qui n'est pas garanti et ce qui se passe en cas de résiliation. Il indique aussi la date des prix et la procédure de révision. Un prix sans date ni périmètre n'est pas une offre, c'est une intention.\n\nEnfin, le packaging doit être testé sur des scénarios réels : un petit client, un gros client, un mois calme, un mois de pointe, un incident. Si le modèle économique ne tient pas dans ces cas, il ne tiendra pas parce que la page de vente est claire.\n",
+      "diagram": {
+        "title": "Quatre unités de facturation et leurs effets",
+        "description": "Schéma illustratif : abonnement, siège, usage et résultat sont comparés selon la prévisibilité, l'alignement sur la valeur et le risque supporté par le client. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Quatre unités de facturation : abonnement, siège, usage et résultat\">\n  <rect width=\"820\" height=\"440\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">L'unité de facturation change le risque</text>\n  <text x=\"410\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n  <g id=\"abonnement\">\n    <rect x=\"50\" y=\"92\" width=\"170\" height=\"120\" rx=\"12\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"135\" y=\"124\" fill=\"#e0f2fe\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Abonnement</text>\n    <text x=\"135\" y=\"150\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">montant fixe</text>\n    <text x=\"135\" y=\"170\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">prévisible</text>\n    <text x=\"135\" y=\"194\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">risque d'inadéquation</text>\n  </g>\n  <g id=\"siege\">\n    <rect x=\"240\" y=\"92\" width=\"170\" height=\"120\" rx=\"12\" fill=\"#0f172a\" stroke=\"#818cf8\" stroke-width=\"2\"/>\n    <text x=\"325\" y=\"124\" fill=\"#e0e7ff\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Siège</text>\n    <text x=\"325\" y=\"150\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">par utilisateur</text>\n    <text x=\"325\" y=\"170\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">simple à comparer</text>\n    <text x=\"325\" y=\"194\" fill=\"#a5b4fc\" font-size=\"11\" text-anchor=\"middle\">écart avec l'usage</text>\n  </g>\n  <g id=\"usage\">\n    <rect x=\"430\" y=\"92\" width=\"170\" height=\"120\" rx=\"12\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <text x=\"515\" y=\"124\" fill=\"#fef3c7\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Usage</text>\n    <text x=\"515\" y=\"150\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">par requête ou document</text>\n    <text x=\"515\" y=\"170\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">suit le coût</text>\n    <text x=\"515\" y=\"194\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">facture variable</text>\n  </g>\n  <g id=\"resultat\">\n    <rect x=\"620\" y=\"92\" width=\"150\" height=\"120\" rx=\"12\" fill=\"#0f172a\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"695\" y=\"124\" fill=\"#fce7f3\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Résultat</text>\n    <text x=\"695\" y=\"150\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">par ticket résolu</text>\n    <text x=\"695\" y=\"170\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">aligne la valeur</text>\n    <text x=\"695\" y=\"194\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">mesure à définir</text>\n  </g>\n  <g stroke=\"#475569\" stroke-width=\"1.4\" stroke-dasharray=\"5 4\">\n    <line x1=\"135\" y1=\"212\" x2=\"135\" y2=\"300\"/>\n    <line x1=\"325\" y1=\"212\" x2=\"325\" y2=\"300\"/>\n    <line x1=\"515\" y1=\"212\" x2=\"515\" y2=\"300\"/>\n    <line x1=\"695\" y1=\"212\" x2=\"695\" y2=\"300\"/>\n  </g>\n  <g fill=\"#cbd5e1\" font-size=\"11\" text-anchor=\"middle\">\n    <text x=\"135\" y=\"322\">prévisibilité forte</text>\n    <text x=\"325\" y=\"322\">prévisibilité moyenne</text>\n    <text x=\"515\" y=\"322\">prévisibilité faible</text>\n    <text x=\"695\" y=\"322\">dépend du résultat</text>\n    <text x=\"135\" y=\"346\" fill=\"#94a3b8\">alignement faible</text>\n    <text x=\"325\" y=\"346\" fill=\"#94a3b8\">alignement partiel</text>\n    <text x=\"515\" y=\"346\" fill=\"#94a3b8\">alignement sur le coût</text>\n    <text x=\"695\" y=\"346\" fill=\"#94a3b8\">alignement sur la valeur</text>\n  </g>\n  <text x=\"410\" y=\"398\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">Un packaging hybride combine ces unités, mais chaque limite doit rester explicite.</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. L'abonnement",
+            "explanation": "Le montant est fixe sur une période. La prévisibilité est forte, mais le prix peut s'éloigner de l'usage et de la valeur.",
+            "highlight": [
+              "abonnement"
+            ]
+          },
+          {
+            "title": "2. Le siège",
+            "explanation": "Le prix suit le nombre d'utilisateurs déclarés. Il est simple à comparer, mais il ne dit rien du volume réel ni du coût variable.",
+            "highlight": [
+              "siege"
+            ]
+          },
+          {
+            "title": "3. L'usage",
+            "explanation": "La facture suit les requêtes ou les documents. Elle reflète mieux le coût, au prix d'une prévisibilité plus faible pour le client.",
+            "highlight": [
+              "usage"
+            ]
+          },
+          {
+            "title": "4. Le résultat",
+            "explanation": "La facture dépend d'un résultat constaté. L'alignement sur la valeur est plus fort, mais la définition, la mesure et les contestations doivent être prévues.",
+            "highlight": [
+              "resultat"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Calcul de revenu, de coût d'usage et de prix effectif par utilisateur actif. Les valeurs sont fictives et les coûts fixes sont exclus ; le résultat n'est pas une marge nette.",
+        "code": "seats = 40\nprix_siege = 25.0\nrequetes_par_utilisateur = 250\ncout_par_requete = 0.004\nrevenu = seats * prix_siege\n\nfor actifs in (10, 20, 30):\n    cout = actifs * requetes_par_utilisateur * cout_par_requete\n    marge = revenu - cout\n    print(f\"{actifs} utilisateurs actifs : revenu {revenu:.2f} EUR, coût d'usage {cout:.2f} EUR, marge brute {marge:.2f} EUR ({marge / revenu:.0%}), prix effectif {revenu / actifs:.2f} EUR\")",
+        "output": "10 utilisateurs actifs : revenu 1000.00 EUR, coût d'usage 10.00 EUR, marge brute 990.00 EUR (99%), prix effectif 100.00 EUR\n20 utilisateurs actifs : revenu 1000.00 EUR, coût d'usage 20.00 EUR, marge brute 980.00 EUR (98%), prix effectif 50.00 EUR\n30 utilisateurs actifs : revenu 1000.00 EUR, coût d'usage 30.00 EUR, marge brute 970.00 EUR (97%), prix effectif 33.33 EUR",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Qu'est-ce qu'une unité de valeur ?",
+          "options": [
+            "Le nombre de tokens facturés",
+            "Le nombre de lignes de code du produit",
+            "Le coût du serveur qui héberge le modèle",
+            "Ce que le client cherche à obtenir, par exemple un ticket résolu"
+          ],
+          "correctIndex": 3,
+          "explanation": "L'unité de valeur décrit le bénéfice recherché par le client. Elle peut différer de l'unité de facturation et de l'unité de coût."
+        },
+        {
+          "question": "Pourquoi un prix par siège peut-il masquer un problème de marge ?",
+          "options": [
+            "Parce que le revenu est fixe alors que l'usage et le support varient",
+            "Parce qu'il interdit toute facturation à l'usage",
+            "Parce qu'il supprime les coûts fixes",
+            "Parce qu'il empêche de mesurer le nombre d'utilisateurs"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le revenu par siège ne dépend pas du volume réel. Si peu de sièges sont actifs ou si le support augmente, le prix effectif et la rentabilité changent sans que le tarif affiché bouge."
+        },
+        {
+          "question": "Que faut-il définir avant de vendre au résultat ?",
+          "options": [
+            "Un modèle de langage unique",
+            "Un résultat mesurable, une règle d'attribution et une procédure de contestation",
+            "Une remise fixe de 50 %",
+            "Un serveur local obligatoire"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le prix au résultat suppose que le résultat soit constatable et attribuable. Sans règle partagée, le client et le fournisseur peuvent interpréter différemment la même facture."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Unité de valeur",
+          "definition": "Grandeur qui représente le bénéfice recherché par le client, par exemple un dossier traité ou une heure libérée."
+        },
+        {
+          "term": "Prix par siège",
+          "definition": "Facturation fondée sur le nombre d'utilisateurs déclarés, indépendamment du volume réel d'usage."
+        },
+        {
+          "term": "Prix à l'usage",
+          "definition": "Facturation fondée sur une consommation mesurée, comme les requêtes, les tokens ou les documents traités."
+        },
+        {
+          "term": "Marge brute",
+          "definition": "Différence entre le revenu et certains coûts directs, avant les coûts fixes et les charges de structure. Sa définition doit être précisée."
+        }
+      ],
+      "example": {
+        "title": "Facturer au siège ou à l'usage",
+        "text": "**Scénario illustratif.** Une plateforme de support peut être facturée par siège, par ticket traité ou par palier de volume. Le prix par siège est prévisible pour le client, mais ne suit pas l'usage. Le prix par ticket aligne la facture sur la valeur, mais rend le budget variable. Un forfait mixte peut convenir, à condition de définir ce qui est inclus et ce qui déclenche un supplément. Aucun modèle n'est bon sans connaître les coûts et la capacité de support."
+      },
+      "exercises": [
+        {
+          "title": "Revenir au prix effectif",
+          "prompt": "Reprenez les hypothèses du module : 40 sièges à 25 euros par mois, 250 requêtes par utilisateur actif et 0,004 euro par requête. Calculez le revenu, le coût d’usage et le prix effectif par utilisateur actif pour 10 puis 30 actifs. Que montre l’écart, et quelle limite ce calcul ne franchit-il pas ?",
+          "solution": "Le revenu reste 40 × 25 = 1 000 euros. Pour 10 actifs, le coût d’usage est 10 × 250 × 0,004 = 10 euros, la marge brute 990 euros et le prix effectif 100 euros par actif. Pour 30 actifs, le coût est 30 euros, la marge 970 euros et le prix effectif 33,33 euros. Le tarif affiché ne change pas, mais le coût par utilisateur actif varie d’un facteur trois : le prix par siège ne suit pas l’usage. Ce calcul exclut les coûts fixes, le support, la vente et la conformité ; il ne mesure donc pas une marge nette."
+        }
+      ],
+      "sources": [
+        {
+          "label": "OpenAI, A Practical Guide to Building Agents, guide de vendeur, consulté le 21 octobre 2026.",
+          "href": "https://cdn.openai.com/business-guides-and-resources/a-practical-guide-to-building-agents.pdf"
+        },
+        {
+          "label": "Anthropic, Building Effective Agents, article de vendeur, consulté le 21 octobre 2026.",
+          "href": "https://www.anthropic.com/research/building-effective-agents"
+        },
+        {
+          "label": "Deloitte, State of AI in the Enterprise, 3rd Edition, 2020, enquête de vendeur, consultée le 21 octobre 2026.",
+          "href": "https://www.deloitte.com/content/dam/insights/articles/2024/6462_state-of-ai-in-the-enterprise/DI_State-of-AI.pdf"
+        }
+      ]
+    },
+    {
+      "id": "pricing",
+      "title": "Construire un pricing défendable",
+      "keyTakeaways": [
+        "Un prix défendable se situe entre un plancher de coût complet et un plafond de valeur estimé, à l'intérieur d'un marché où le client compare aussi l'inaction et la construction interne.",
+        "Le plancher doit inclure les coûts fixes répartis, le coût variable, le support, la conformité et la vente, pas seulement le prix des tokens.",
+        "Le plafond de valeur est une estimation avec une base de comparaison, des unités et une part capturable ; ce n'est ni une prévision ni une garantie.",
+        "Les remises, les plafonds, les dépassements et l'indexation font partie du pricing : un tarif affiché sans ces règles est incomplet.",
+        "Si le plafond de valeur est inférieur au plancher de coût, il n'y a pas de prix défendable à ces hypothèses : il faut changer le périmètre, le volume ou le coût, ou refuser l'affaire."
+      ],
+      "theory": "### Trois ancrages, pas une formule magique\n\nUn pricing défendable ne sort pas d'une formule unique. Il se construit entre trois ancrages : le coût complet, la valeur estimée pour le client et la référence concurrentielle. Le prix final est un choix commercial dans cet intervalle, pas une vérité arithmétique. Les trois ancrages doivent être documentés avec leurs hypothèses, sinon le prix devient une préférence déguisée en calcul.\n\nLe coût complet donne un plancher. La valeur estimée donne un plafond. La concurrence, au sens large, donne un point de comparaison. Le client ne compare pas seulement votre offre à celle d'un autre fournisseur d'IA : il compare aussi le fait de ne rien changer, de construire en interne ou d'utiliser un logiciel existant. Ces alternatives fixent sa disposition à payer.\n\n### Le plancher de coût\n\nLe plancher de coût commence par le coût variable : appels au modèle, infrastructure à l'usage, stockage, éventuellement frais de paiement. Il faut y ajouter les coûts fixes répartis sur le volume prévu : ingénierie, support, sécurité, conformité, vente, marketing, administration. La répartition est une convention, mais elle doit être explicite.\n\nUn prix égal au coût variable ne couvre pas les coûts fixes. Un prix égal au coût complet sans marge ne laisse aucune ressource pour le risque, l'innovation ou l'imprévu. La marge cible n'est pas une loi : c'est un choix qui dépend du capital, du risque et du marché. Elle doit être nommée et appliquée de façon cohérente.\n\nLa formule utilisée dans le code est simple : le prix plancher est le coût total divisé par un moins la marge cible. Si le coût total mensuel est de 7 500 euros et la marge cible de 60 %, le prix plancher est de 18 750 euros. Cette marge est une marge sur le prix, pas un pourcentage ajouté au coût. La distinction compte : une marge de 60 % sur le prix correspond à un coefficient de 2,5 sur le coût, pas à 60 % de plus.\n\n### Le plafond de valeur\n\nLe plafond de valeur estime ce que le client gagne en utilisant le produit. Il faut une base de comparaison : temps passé avant, coût par dossier, taux d'erreur, délai de traitement. Sans base, la valeur n'est qu'une intuition. Il faut aussi une unité et une période : euros par mois, heures par semaine, jours de délai en moins.\n\nLa valeur brute n'est pas toute capturable. Le client garde une partie du gain, sinon il n'a pas intérêt à acheter. La part capturable dépend des alternatives, du risque perçu et du pouvoir de négociation. Il n'existe pas de pourcentage universel. Dans le code, la part est une hypothèse explicite, pas une recommandation.\n\nLe plafond de valeur n'est pas une garantie de résultat. C'est une estimation conditionnelle : si le client obtient le gain prévu, et si ce gain est attribuable au produit, alors il pourrait payer jusqu'à ce montant. La formulation est longue parce qu'elle est honnête. Un ROI ou un gain présenté comme certain n'est pas un argument commercial recevable.\n\n### La concurrence et l'alternative\n\nLa référence concurrentielle ne se limite pas aux autres offres d'IA. Le client peut décider de ne rien faire, de recruter, d'automatiser avec des règles simples ou de construire en interne. Le prix doit être comparé au coût total de ces alternatives, pas seulement au tarif d'un concurrent.\n\nL'inaction a un coût, mais elle est souvent perçue comme moins risquée. La construction interne a un coût d'ingénierie et de maintenance souvent sous-estimé. Un logiciel existant peut être moins performant mais déjà intégré, déjà accepté par les équipes et déjà amorti. Ces facteurs pèsent dans la décision autant que la qualité du modèle.\n\n### Les règles du contrat\n\nUn prix affiché sans règles de contrat est incomplet. Il faut préciser la durée, le volume inclus, le prix des dépassements, les plafonds, les remises conditionnelles, les modalités de paiement, les taxes et l'indexation. Les remises doivent avoir des critères : volume, engagement, paiement anticipé, cas de référence. Une remise accordée sans contrepartie est une baisse de prix déguisée.\n\nLe risque de surconsommation se traite par des alertes, des plafonds ou un accord préalable. Le risque de sous-utilisation se traite par un engagement minimum, une revue d'usage ou une offre modulaire. Les deux risques ne se résolvent pas par la même clause. Un contrat qui ne prévoit que le dépassement peut laisser le fournisseur porter seul le coût d'un client inactif.\n\n### Ce que les sources ne disent pas\n\nLe rapport AI Index de Stanford HAI compile des indicateurs sur les coûts et les usages ; il ne fournit pas de prix pour votre produit. Le guide d'OpenAI sur les agents est un document de vendeur : il décrit des architectures et des pratiques, pas des niveaux de prix. Ces sources aident à situer les coûts et les patterns, pas à fixer un tarif.\n\n### Un exemple chiffré, avec ses limites\n\nLe code compare deux scénarios fictifs. Les coûts sont mensuels et exprimés en euros, le volume est un nombre de requêtes par mois, les heures sont des heures gagnées par mois et la marge cible est une fraction du prix. Le plafond de valeur suppose 1 000 heures gagnées par mois, valorisées à 30 euros par heure, dont 20 pour cent de la valeur est capturable dans le premier scénario et 50 pour cent dans le second. La marge cible passe de 60 à 50 pour cent. Dans le premier scénario, les coûts fixes sont élevés, le volume est faible et la marge cible est de 60 %. Le plancher dépasse le plafond de valeur : à ces hypothèses, le produit ne peut pas être vendu à un prix qui couvre ses coûts et reste attractif. Dans le second, les coûts fixes sont plus bas, le volume plus élevé et la part de valeur capturable plus grande ; une plage existe.\n\nCes scénarios ne décrivent pas un marché. Ils montrent seulement que le pricing dépend du volume, de la structure de coûts et de la valeur. Les chiffres sont des hypothèses, pas des tarifs. Les coûts exclus (commission commerciale, impayés, fiscalité, garanties) changeraient le résultat.\n\n### Ce qu'il faut retenir\n\nUn prix défendable s'explique : voici le coût, voici la valeur estimée, voici la concurrence, voici les règles. Il s'assume : si le plafond est sous le plancher, il faut changer le projet ou renoncer. Il se révise : les coûts, les volumes et les alternatives changent. Un pricing n'est pas un document figé, c'est une hypothèse à mesurer.\n",
+      "diagram": {
+        "title": "Le prix entre plancher de coût et plafond de valeur",
+        "description": "Schéma illustratif : le prix se situe entre le coût complet et la valeur estimée, sous la contrainte de la concurrence et des règles du contrat. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Prix entre plancher de coût et plafond de valeur, avec la concurrence et le contrat\">\n  <defs>\n    <marker id=\"b2b-price-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"440\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Le prix est un intervalle, pas un chiffre unique</text>\n  <text x=\"410\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n  <g id=\"cout\">\n    <rect x=\"60\" y=\"100\" width=\"180\" height=\"110\" rx=\"12\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"150\" y=\"130\" fill=\"#e0f2fe\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Coût complet</text>\n    <text x=\"150\" y=\"154\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">fixes répartis</text>\n    <text x=\"150\" y=\"174\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">variables et support</text>\n    <text x=\"150\" y=\"194\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">plancher</text>\n  </g>\n  <g id=\"valeur\">\n    <rect x=\"580\" y=\"100\" width=\"180\" height=\"110\" rx=\"12\" fill=\"#0f172a\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"670\" y=\"130\" fill=\"#fce7f3\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Valeur estimée</text>\n    <text x=\"670\" y=\"154\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">base de comparaison</text>\n    <text x=\"670\" y=\"174\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">part capturable</text>\n    <text x=\"670\" y=\"194\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">plafond</text>\n  </g>\n  <g id=\"concurrence\">\n    <rect x=\"300\" y=\"90\" width=\"220\" height=\"70\" rx=\"10\" fill=\"#111827\" stroke=\"#818cf8\" stroke-width=\"1.8\"/>\n    <text x=\"410\" y=\"118\" fill=\"#e0e7ff\" font-size=\"12\" text-anchor=\"middle\">concurrence et alternatives</text>\n    <text x=\"410\" y=\"138\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">autre offre, interne, inaction</text>\n  </g>\n  <g stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#b2b-price-arrow)\">\n    <line x1=\"240\" y1=\"155\" x2=\"300\" y2=\"130\"/>\n    <line x1=\"520\" y1=\"130\" x2=\"580\" y2=\"155\"/>\n  </g>\n  <line x1=\"80\" y1=\"270\" x2=\"740\" y2=\"270\" stroke=\"#334155\" stroke-width=\"3\"/>\n  <rect x=\"250\" y=\"256\" width=\"320\" height=\"28\" rx=\"8\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"1.8\"/>\n  <text x=\"410\" y=\"275\" fill=\"#fef3c7\" font-size=\"12\" text-anchor=\"middle\">zone de prix négociable</text>\n  <g id=\"contrat\">\n    <rect x=\"250\" y=\"320\" width=\"320\" height=\"70\" rx=\"10\" fill=\"#111827\" stroke=\"#fbbf24\" stroke-width=\"1.8\"/>\n    <text x=\"410\" y=\"346\" fill=\"#fef3c7\" font-size=\"12\" text-anchor=\"middle\">règles du contrat</text>\n    <text x=\"410\" y=\"366\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">volume, plafond, remise, indexation</text>\n  </g>\n  <line x1=\"410\" y1=\"242\" x2=\"410\" y2=\"256\" stroke=\"#fbbf24\" stroke-width=\"2\" marker-end=\"url(#b2b-price-arrow)\"/>\n  <line x1=\"410\" y1=\"284\" x2=\"410\" y2=\"318\" stroke=\"#fbbf24\" stroke-width=\"2\" marker-end=\"url(#b2b-price-arrow)\"/>\n  <text x=\"410\" y=\"414\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">Si le plafond passe sous le plancher, il n'y a pas de prix défendable à ces hypothèses.</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Le coût complet",
+            "explanation": "Le plancher réunit les coûts fixes répartis, les coûts variables, le support, la conformité et la vente. Il dépend du volume prévu.",
+            "highlight": [
+              "cout"
+            ]
+          },
+          {
+            "title": "2. La valeur estimée",
+            "explanation": "Le plafond estime le gain du client à partir d'une base de comparaison et d'une part capturable. C'est une estimation conditionnelle.",
+            "highlight": [
+              "valeur"
+            ]
+          },
+          {
+            "title": "3. La concurrence",
+            "explanation": "Le client compare aussi l'inaction, la construction interne et les logiciels existants. Ces alternatives déplacent sa disposition à payer.",
+            "highlight": [
+              "concurrence"
+            ]
+          },
+          {
+            "title": "4. Les règles du contrat",
+            "explanation": "Volume inclus, dépassement, plafond, remise et indexation déterminent si le prix tient dans la durée. Un tarif sans règles est incomplet.",
+            "highlight": [
+              "contrat"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Comparaison de deux scénarios fictifs : coût total, prix plancher avec marge cible et plafond de valeur avec part capturable. Les clés du dictionnaire portent leurs unités (euros, requêtes par mois, heures par mois) ; les coûts exclus ne sont pas comptés.",
+        "code": "scenarios = [\n    {\"nom\": \"volume faible\", \"cout_fixe_eur_mois\": 5000.0, \"cout_variable_eur_requete\": 0.05, \"volume_requetes_mois\": 50000, \"marge_cible\": 0.60, \"heures_gagnees_par_mois\": 1000, \"cout_horaire_eur\": 30.0, \"part_valeur\": 0.20},\n    {\"nom\": \"volume élevé\", \"cout_fixe_eur_mois\": 2000.0, \"cout_variable_eur_requete\": 0.01, \"volume_requetes_mois\": 100000, \"marge_cible\": 0.50, \"heures_gagnees_par_mois\": 1000, \"cout_horaire_eur\": 30.0, \"part_valeur\": 0.50},\n]\n\nfor s in scenarios:\n    cout_total = s[\"cout_fixe_eur_mois\"] + s[\"cout_variable_eur_requete\"] * s[\"volume_requetes_mois\"]\n    plancher = cout_total / (1 - s[\"marge_cible\"])\n    plafond = s[\"heures_gagnees_par_mois\"] * s[\"cout_horaire_eur\"] * s[\"part_valeur\"]\n    print(f\"{s['nom']} : coût total {cout_total:.2f} EUR, prix plancher {plancher:.2f} EUR, plafond de valeur {plafond:.2f} EUR, écart {plafond - plancher:.2f} EUR\")",
+        "output": "volume faible : coût total 7500.00 EUR, prix plancher 18750.00 EUR, plafond de valeur 6000.00 EUR, écart -12750.00 EUR\nvolume élevé : coût total 3000.00 EUR, prix plancher 6000.00 EUR, plafond de valeur 15000.00 EUR, écart 9000.00 EUR",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Que doit inclure le plancher de coût ?",
+          "options": [
+            "Uniquement le prix des tokens",
+            "Uniquement la marge cible",
+            "Les coûts fixes répartis, les coûts variables, le support et les autres coûts directs",
+            "Le prix du concurrent le moins cher"
+          ],
+          "correctIndex": 2,
+          "explanation": "Le plancher ne se réduit pas au coût du modèle. Il doit couvrir les coûts fixes répartis, les coûts variables et les charges nécessaires pour servir le contrat."
+        },
+        {
+          "question": "Que faire si le plafond de valeur est inférieur au plancher de coût ?",
+          "options": [
+            "Vendre quand même et espérer un gain de volume",
+            "Facturer un prix identique à celui du concurrent",
+            "Supprimer la marge cible du calcul",
+            "Changer le périmètre, le volume ou le coût, ou renoncer à l'affaire"
+          ],
+          "correctIndex": 3,
+          "explanation": "Si le client ne peut pas payer un prix qui couvre les coûts, le contrat n'est pas viable à ces hypothèses. Il faut modifier le projet ou refuser, pas masquer l'écart."
+        },
+        {
+          "question": "Pourquoi l'inaction fait-elle partie de la concurrence ?",
+          "options": [
+            "Parce que le client peut choisir de ne pas acheter, ce qui fixe sa disposition à payer",
+            "Parce qu'elle est toujours gratuite",
+            "Parce qu'elle remplace la conformité",
+            "Parce qu'elle interdit les remises"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le client compare l'achat à la situation actuelle. Si l'inaction lui semble moins risquée ou moins coûteuse, le prix doit être justifié par un gain ou une réduction de risque."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Prix plancher",
+          "definition": "Prix minimal qui couvre le coût complet défini et la marge cible, à un volume et un périmètre donnés."
+        },
+        {
+          "term": "Plafond de valeur",
+          "definition": "Estimation du montant maximal que le client pourrait payer au regard du gain attendu, avec une part capturable explicite."
+        },
+        {
+          "term": "Marge sur coût complet",
+          "definition": "Marge calculée après répartition des coûts fixes et variables, exprimée en pourcentage du prix ou du coût selon la convention retenue."
+        },
+        {
+          "term": "Surconsommation",
+          "definition": "Usage supérieur au volume prévu, qui augmente les coûts variables et peut rendre une offre non rentable si le contrat ne prévoit pas de règle."
+        }
+      ],
+      "example": {
+        "title": "Construire un prix à partir du coût et de la valeur",
+        "text": "**Scénario illustratif.** Une équipe estime le coût d'inférence, le coût de l'ingénierie et le coût de la relecture. Elle ajoute une marge, puis compare le prix obtenu à la valeur pour le client. Si le prix est inférieur au coût complet, le contrat ne tient pas. S'il est très supérieur à la valeur mesurée, le client hésitera. Le pricing doit être présenté avec ses hypothèses et révisé quand les volumes ou les modèles changent."
+      },
+      "exercises": [
+        {
+          "title": "Plancher contre plafond",
+          "prompt": "Dans le premier scénario du module, le coût fixe est de 5 000 euros par mois, le coût variable de 0,05 euro par requête pour 50 000 requêtes, et la marge cible de 60 %. Le client gagne 1 000 heures par mois valorisées à 30 euros, dont 20 % capturables. Calculez le plancher et le plafond. Le prix est-il défendable, et que peut-on changer ?",
+          "solution": "Le coût total est 5 000 + 0,05 × 50 000 = 7 500 euros. Le plancher vaut 7 500 / (1 - 0,60) = 18 750 euros. Le plafond vaut 1 000 × 30 × 0,20 = 6 000 euros. Le plafond est inférieur au plancher de 12 750 euros : à ces hypothèses, aucun prix ne couvre les coûts tout en restant sous la valeur estimée. Il faut réduire le périmètre ou les coûts fixes, augmenter le volume, ou relever la part capturable en changeant d’alternative de comparaison. Si aucune de ces voies ne tient, il faut renoncer à l’affaire plutôt que masquer l’écart."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Stanford HAI, AI Index Report 2026, consulté le 21 octobre 2026.",
+          "href": "https://hai.stanford.edu/ai-index"
+        },
+        {
+          "label": "Deloitte, State of AI in the Enterprise, 3rd Edition, 2020, enquête de vendeur, consultée le 21 octobre 2026.",
+          "href": "https://www.deloitte.com/content/dam/insights/articles/2024/6462_state-of-ai-in-the-enterprise/DI_State-of-AI.pdf"
+        },
+        {
+          "label": "OpenAI, A Practical Guide to Building Agents, guide de vendeur, consulté le 21 octobre 2026.",
+          "href": "https://cdn.openai.com/business-guides-and-resources/a-practical-guide-to-building-agents.pdf"
+        }
+      ]
+    },
+    {
+      "id": "roi",
+      "title": "ROI et preuve de valeur",
+      "keyTakeaways": [
+        "Un ROI se définit par une période, un périmètre, une base de comparaison et des unités ; sans ces éléments, le chiffre ne veut rien dire.",
+        "Une différence avant et après un déploiement ne prouve pas la causalité : il faut documenter les facteurs externes et, si possible, comparer à un groupe témoin.",
+        "Le temps libéré est une capacité, pas une économie de trésorerie, sauf s'il est réaffecté ou s'il évite une embauche.",
+        "Le coût complet inclut l'intégration, la préparation des données, la formation, le support, la conformité, l'évaluation et la sortie.",
+        "Une analyse de sensibilité est obligatoire : un ROI qui change de signe avec une hypothèse légèrement différente doit être présenté comme fragile, jamais comme garanti."
+      ],
+      "theory": "### Un ratio, pas une promesse\n\nLe retour sur investissement, ou ROI, est un ratio : le bénéfice net divisé par le coût, sur une période donnée. La formule est simple, mais elle ne dit rien tant que la période, le périmètre et les unités ne sont pas définis. Un ROI de 12 % sur un an n'a pas la même signification qu'un ROI de 12 % sur trois ans, ni qu'un ROI calculé sur une seule équipe.\n\nLe ROI n'est pas une garantie. C'est une estimation conditionnelle, construite à partir d'hypothèses. La bonne pratique consiste à afficher ces hypothèses à côté du résultat, puis à montrer comment le résultat change lorsqu'elles varient. Un chiffre unique, présenté sans intervalle ni sensibilité, est un argument commercial, pas une preuve.\n\n### La base de comparaison\n\nLa base de comparaison décrit la situation avant le projet : temps passé par dossier, coût par ticket, délai de traitement, taux d'erreur, nombre de personnes mobilisées. Elle doit être mesurée sur une période représentative, pas reconstituée de mémoire après le déploiement. Si elle n'existe pas, il faut la construire avant de commencer.\n\nUne base imparfaite vaut mieux qu'une base inventée. Il faut documenter ce qui est mesuré, sur quelle population, avec quelles définitions. Par exemple, un « ticket résolu » peut inclure ou exclure les tickets rouverts, les transferts et les réponses automatiques. Deux équipes peuvent donc annoncer des taux différents sans mentir.\n\n### La causalité\n\nUn avant et un après ne suffisent pas à attribuer un gain au produit. D'autres facteurs peuvent changer en même temps : saisonnalité, recrutement, nouvelle procédure, baisse de la demande, amélioration d'un autre outil. Si le gain apparaît pendant une période favorable, le produit peut recevoir un crédit qu'il ne mérite pas.\n\nLes méthodes de comparaison dépendent du contexte. Un groupe témoin, lorsqu'il est possible, aide à distinguer l'effet du produit des variations externes. Un déploiement échelonné permet de comparer des équipes avant et après leur mise en service. Une série temporelle interrompue peut montrer une rupture, mais elle reste sensible aux événements simultanés. Dans tous les cas, il faut documenter les limites.\n\n### Les bénéfices\n\nLes bénéfices se rangent en plusieurs catégories. Le temps libéré est le plus facile à estimer, mais le plus difficile à convertir en argent. Une heure libérée n'est pas une heure payée en moins : elle devient une capacité disponible. Elle ne produit une économie que si elle est réaffectée à une activité utile, si elle évite une embauche ou si elle réduit des heures supplémentaires.\n\nLes coûts évités sont plus tangibles : moins de prestataires, moins de licences, moins de retraitements, moins d'incidents. Ils doivent être documentés par des factures ou des volumes, pas par une intuition. La hausse du chiffre d'affaires est encore plus difficile à attribuer : elle dépend du marché, du prix, de la force de vente et du produit.\n\nLa réduction du risque est réelle mais ne se convertit pas automatiquement en euros. Elle peut éviter des amendes, des incidents, des litiges ou des pertes de confiance. Pour l'inclure, il faut expliciter le scénario, sa probabilité estimée et son impact, puis accepter que l'estimation reste subjective.\n\n### Les coûts complets\n\nLe coût complet ne se limite pas à la facture du fournisseur de modèle. Il comprend l'intégration, la préparation et le nettoyage des données, la formation des équipes, la conduite du changement, le support, la supervision, la conformité, l'évaluation et la sortie. Il comprend aussi le temps interne des équipes, souvent invisible dans les devis.\n\nLes coûts sont souvent concentrés au début, tandis que les bénéfices montent avec l'adoption. Un ROI calculé sur le premier mois peut donc être négatif alors que le projet est sain sur douze mois. À l'inverse, un ROI calculé sur trois ans peut embellir un projet dont les coûts récurrents sont sous-estimés. La période doit être choisie avant le calcul, pas après.\n\n### L'analyse de sensibilité\n\nL'analyse de sensibilité fait varier les hypothèses une à une ou par scénarios. Elle répond à la question : de combien le résultat change-t-il si l'adoption est plus faible, si le temps gagné est plus court, si le coût d'intégration augmente ? Elle ne remplace pas la décision, mais elle montre sa fragilité.\n\nDans le code, trois variantes sont calculées. La première reprend les hypothèses de base : 30 employés, 2 heures gagnées par semaine, 70 % d'adoption, 46 semaines, 35 euros de coût horaire chargé. La deuxième réduit le gain à 1,5 heure. La troisième réduit l'adoption à 50 %. Le coût de la première année est de 60 000 euros : 40 000 euros de mise en œuvre, 12 000 euros de fonctionnement et 8 000 euros de formation. Ce périmètre inclut la mise en œuvre, la formation et le fonctionnement de base ; il exclut le support, la conformité, l'évaluation, la sortie, le temps interne non facturé et la montée en charge. Les 70 pour cent sont une moyenne annuelle, pas une adoption progressive. Le bénéfice passe de 67 620 euros à 50 715 puis à 48 300 euros, tandis que le coût reste à 60 000 euros. Le ROI change de signe.\n\nCe résultat n'est pas une prévision. Il montre qu'un projet peut être rentable dans un scénario et perdre de l'argent dans un autre, avec des écarts plausibles. La conclusion n'est pas « le ROI est de 12,7 % », mais « le ROI est positif dans le scénario de base et négatif si l'adoption ou le gain baisse ». C'est cette phrase qui aide à décider.\n\n### Ce que les sources ne prouvent pas\n\nL'enquête de Deloitte, cabinet de conseil, est déclarative : elle recueille des déclarations d'entreprises sur leurs usages et leurs bénéfices perçus. Elle ne vérifie pas les comptes et ne permet pas de transférer un résultat à votre organisation. Le rapport AI Index de Stanford HAI compile des indicateurs et des travaux de recherche ; il ne calcule pas le ROI de votre projet. Les guides d'OpenAI et d'Anthropic décrivent des architectures et des pratiques de vendeur ; ils ne constituent pas des évaluations financières indépendantes.\n\n### Présenter un ROI honnête\n\nUn ROI honnête tient sur une page : période, périmètre, base de comparaison, bénéfices, coûts, hypothèses, sensibilité, limites. Il indique ce qui n'est pas mesuré et ce qui pourrait changer le résultat. Il distingue les économies réelles des capacités libérées. Il ne promet pas un gain futur, il documente une décision présente.\n",
+      "diagram": {
+        "title": "De la base de comparaison à la décision",
+        "description": "Schéma illustratif : une mesure de ROI part d'une base, passe par un pilote et une mesure, puis aboutit à une décision documentée. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Parcours de mesure du ROI : base de comparaison, pilote, mesure et décision\">\n  <defs>\n    <marker id=\"b2b-roi-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"440\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Mesurer avant de promettre</text>\n  <text x=\"410\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n  <g id=\"base\">\n    <rect x=\"40\" y=\"110\" width=\"160\" height=\"110\" rx=\"12\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"120\" y=\"140\" fill=\"#e0f2fe\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Base</text>\n    <text x=\"120\" y=\"164\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">temps, coût, qualité</text>\n    <text x=\"120\" y=\"184\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">période définie</text>\n    <text x=\"120\" y=\"204\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">avant le projet</text>\n  </g>\n  <g id=\"pilote\">\n    <rect x=\"230\" y=\"110\" width=\"160\" height=\"110\" rx=\"12\" fill=\"#0f172a\" stroke=\"#818cf8\" stroke-width=\"2\"/>\n    <text x=\"310\" y=\"140\" fill=\"#e0e7ff\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Pilote</text>\n    <text x=\"310\" y=\"164\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">périmètre limité</text>\n    <text x=\"310\" y=\"184\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">critères et arrêt</text>\n    <text x=\"310\" y=\"204\" fill=\"#a5b4fc\" font-size=\"11\" text-anchor=\"middle\">population représentative</text>\n  </g>\n  <g id=\"mesure\">\n    <rect x=\"420\" y=\"110\" width=\"160\" height=\"110\" rx=\"12\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <text x=\"500\" y=\"140\" fill=\"#fef3c7\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Mesure</text>\n    <text x=\"500\" y=\"164\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">bénéfices et coûts</text>\n    <text x=\"500\" y=\"184\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">causalité documentée</text>\n    <text x=\"500\" y=\"204\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">sensibilité</text>\n  </g>\n  <g id=\"decision\">\n    <rect x=\"610\" y=\"110\" width=\"160\" height=\"110\" rx=\"12\" fill=\"#0f172a\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"690\" y=\"140\" fill=\"#fce7f3\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Décision</text>\n    <text x=\"690\" y=\"164\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">poursuivre, ajuster</text>\n    <text x=\"690\" y=\"184\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">ou arrêter</text>\n    <text x=\"690\" y=\"204\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">hypothèses écrites</text>\n  </g>\n  <g stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#b2b-roi-arrow)\">\n    <line x1=\"200\" y1=\"165\" x2=\"230\" y2=\"165\"/>\n    <line x1=\"390\" y1=\"165\" x2=\"420\" y2=\"165\"/>\n    <line x1=\"580\" y1=\"165\" x2=\"610\" y2=\"165\"/>\n  </g>\n  <g id=\"boucle\">\n    <path d=\"M690 220 C690 300 500 320 500 220\" fill=\"none\" stroke=\"#f472b6\" stroke-width=\"2\" stroke-dasharray=\"6 4\" marker-end=\"url(#b2b-roi-arrow)\"/>\n    <text x=\"595\" y=\"322\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">réviser les hypothèses</text>\n  </g>\n  <text x=\"410\" y=\"398\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">Le ROI est une estimation conditionnelle : il se présente avec sa période, son périmètre et ses limites.</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. La base",
+            "explanation": "La situation actuelle est mesurée avant le projet, sur une période et une population définies. Sans base, aucun gain ne peut être attribué.",
+            "highlight": [
+              "base"
+            ]
+          },
+          {
+            "title": "2. Le pilote",
+            "explanation": "Le pilote limite le périmètre et la population. Il fixe des critères de succès et une règle d'arrêt avant de commencer.",
+            "highlight": [
+              "pilote"
+            ]
+          },
+          {
+            "title": "3. La mesure",
+            "explanation": "Les bénéfices et les coûts sont calculés avec leurs unités. La causalité est documentée et une analyse de sensibilité montre la fragilité du résultat.",
+            "highlight": [
+              "mesure"
+            ]
+          },
+          {
+            "title": "4. La décision",
+            "explanation": "La décision de poursuivre, d'ajuster ou d'arrêter s'appuie sur les hypothèses écrites. Elle peut être révisée lorsque les conditions changent.",
+            "highlight": [
+              "decision",
+              "boucle"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Calcul du bénéfice annuel, du résultat net et du ROI pour trois jeux d'hypothèses fictifs. Le bénéfice est la valeur estimée du temps libéré, pas une économie de trésorerie.",
+        "code": "employes = 30\nsemaines = 46\ncout_horaire = 35.0\ncout_unique = 40000.0\ncout_annuel = 12000.0\nformation = 8000.0\ncout_total = cout_unique + cout_annuel + formation\n\ndef resultat(heures_par_semaine, adoption):\n    benefice = employes * heures_par_semaine * adoption * semaines * cout_horaire\n    net = benefice - cout_total\n    return benefice, net, net / cout_total\n\nfor heures, adoption in ((2.0, 0.70), (1.5, 0.70), (2.0, 0.50)):\n    benefice, net, ratio = resultat(heures, adoption)\n    print(f\"{heures} h par semaine et {adoption:.0%} d'adoption : bénéfice {benefice:.2f} EUR, net {net:.2f} EUR, ROI {ratio:.1%}\")",
+        "output": "2.0 h par semaine et 70% d'adoption : bénéfice 67620.00 EUR, net 7620.00 EUR, ROI 12.7%\n1.5 h par semaine et 70% d'adoption : bénéfice 50715.00 EUR, net -9285.00 EUR, ROI -15.5%\n2.0 h par semaine et 50% d'adoption : bénéfice 48300.00 EUR, net -11700.00 EUR, ROI -19.5%",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Que faut-il définir avant de calculer un ROI ?",
+          "options": [
+            "Le modèle de langage et sa température",
+            "La période, le périmètre, la base de comparaison et les unités",
+            "Le nombre de concurrents sur le marché",
+            "La couleur du tableau de bord"
+          ],
+          "correctIndex": 1,
+          "explanation": "Un ratio sans période, périmètre ni base de comparaison n'est pas interprétable. Ces éléments doivent être fixés avant le calcul."
+        },
+        {
+          "question": "Pourquoi le temps libéré n'est-il pas automatiquement une économie ?",
+          "options": [
+            "Parce qu'il est impossible à mesurer",
+            "Parce que les employés ne travaillent jamais",
+            "Parce qu'il devient une capacité qui ne se transforme en argent que s'il est réaffecté ou s'il évite un coût",
+            "Parce que la loi interdit de le compter"
+          ],
+          "correctIndex": 2,
+          "explanation": "Une heure libérée n'est pas une heure supprimée. Elle peut améliorer le service ou absorber de la charge, mais elle ne réduit la masse salariale que dans certaines conditions."
+        },
+        {
+          "question": "À quoi sert une analyse de sensibilité ?",
+          "options": [
+            "À garantir que le ROI sera positif",
+            "À supprimer les coûts fixes",
+            "À remplacer la base de comparaison",
+            "À montrer comment le résultat change lorsque les hypothèses varient"
+          ],
+          "correctIndex": 3,
+          "explanation": "L'analyse de sensibilité teste la robustesse du résultat. Elle ne garantit rien : elle indique dans quelles conditions le projet reste ou non intéressant."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "ROI",
+          "definition": "Rapport entre le bénéfice net et le coût d'un projet, sur une période et un périmètre définis."
+        },
+        {
+          "term": "Base de comparaison",
+          "definition": "Mesure de la situation avant le projet, utilisée pour estimer l'écart attribuable au changement."
+        },
+        {
+          "term": "Coût total de possession",
+          "definition": "Somme des coûts d'acquisition, d'intégration, d'exploitation, de support et de sortie sur la durée de vie du projet."
+        },
+        {
+          "term": "Analyse de sensibilité",
+          "definition": "Calcul qui fait varier une ou plusieurs hypothèses pour observer l'effet sur le résultat et sa robustesse."
+        }
+      ],
+      "example": {
+        "title": "Séparer les coûts évités des revenus espérés",
+        "text": "**Scénario illustratif.** Un projet de traitement de documents promet de réduire le temps de saisie. Le calcul du retour doit inclure le temps économisé, le coût de vérification, la maintenance et les erreurs résiduelles. Une réduction de temps qui crée une file de relecture n'est pas un gain net. Il faut mesurer sur un pilote et présenter une fourchette, pas un chiffre unique."
+      },
+      "exercises": [
+        {
+          "title": "Un ROI qui change de signe",
+          "prompt": "Avec 30 employés, 46 semaines, 35 euros de coût horaire et un coût de première année de 60 000 euros, calculez le bénéfice annuel pour 2 heures gagnées par semaine à 70 % d’adoption, puis pour 1,5 heure. Comparez au coût et concluez sur ce qu’il est honnête d’écrire dans une offre.",
+          "solution": "Le bénéfice vaut 30 × heures × adoption × 46 × 35. Pour 2 heures à 70 %, il est de 67 620 euros, soit un net de 7 620 euros et un ROI de 12,7 %. Pour 1,5 heure, il tombe à 50 715 euros, soit un net de -9 285 euros et un ROI de -15,5 %. Le projet change donc de signe avec une hypothèse plausible. Il est honnête d’écrire que le retour est positif dans le scénario de base et négatif si le gain ou l’adoption baisse, en précisant la période, le périmètre et les coûts exclus, comme le support, la conformité, l’évaluation et la sortie."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Stanford HAI, AI Index Report 2026, consulté le 21 octobre 2026.",
+          "href": "https://hai.stanford.edu/ai-index"
+        },
+        {
+          "label": "Deloitte, State of AI in the Enterprise, 3rd Edition, 2020, enquête de vendeur, consultée le 21 octobre 2026.",
+          "href": "https://www.deloitte.com/content/dam/insights/articles/2024/6462_state-of-ai-in-the-enterprise/DI_State-of-AI.pdf"
+        }
+      ]
+    },
+    {
+      "id": "conformite",
+      "title": "Conformité et gouvernance",
+      "keyTakeaways": [
+        "Le NIST AI Risk Management Framework est un cadre volontaire organisé autour de quatre fonctions ; il n'est ni une loi ni une certification.",
+        "Le profil NIST AI 600-1 est consacré à l'IA générative et propose des actions de gestion des risques ; il ne crée pas d'obligation réglementaire.",
+        "Le règlement (UE) 2024/1689, dit AI Act, est entré en vigueur le 1er août 2024 et s'applique par étapes, avec des obligations qui dépendent du rôle et du niveau de risque.",
+        "Le RGPD continue de s'appliquer aux données personnelles : base légale, minimisation, durée de conservation, sous-traitance et analyse d'impact restent nécessaires.",
+        "La conformité se démontre par un inventaire, une analyse de risque, une documentation et des contrôles vérifiables, pas par une déclaration de vendeur."
+      ],
+      "theory": "### La conformité n'est pas un certificat unique\n\nUne solution d'IA B2B peut être soumise à plusieurs cadres à la fois : des règles sectorielles, la protection des données, des obligations contractuelles et, dans l'Union européenne, le règlement sur l'intelligence artificielle. Ces cadres ne se remplacent pas. Un fournisseur qui affirme que son produit est « conforme à l'AI Act » sans préciser le rôle, le cas d'usage et la date ne fournit pas une information exploitable.\n\nLa première étape consiste donc à décrire le système et son usage. Qui fournit le système ? Qui l'utilise ? Dans quel pays ? Pour quelles décisions ? Sur quelles données ? Quelles personnes sont affectées ? Ces questions déterminent les obligations applicables, bien avant le choix du modèle.\n\n### Le NIST AI Risk Management Framework\n\nLe NIST AI Risk Management Framework, publié par le National Institute of Standards and Technology dans sa version 1.0 de janvier 2023, est un cadre volontaire de gestion des risques. Il organise le travail autour de quatre fonctions : GOVERN, MAP, MEASURE et MANAGE. GOVERN couvre les responsabilités et la culture ; MAP identifie le contexte et les risques ; MEASURE évalue les risques ; MANAGE les traite et les surveille.\n\nCe cadre n'est pas une loi et ne délivre pas de certification. Il aide à structurer une démarche, à documenter les décisions et à rendre les risques discutables. Une organisation peut s'en inspirer sans prétendre être « certifiée NIST ». Elle peut aussi le combiner avec d'autres référentiels, selon son secteur et ses obligations.\n\nLe profil NIST AI 600-1, publié en juillet 2024, applique ce cadre à l'IA générative. Il identifie des risques propres à ces systèmes et propose des actions de gestion. C'est un document de référence, pas un règlement. Il ne dispense pas de vérifier les obligations légales applicables à votre produit.\n\n### Le règlement (UE) 2024/1689\n\nLe règlement (UE) 2024/1689, souvent appelé AI Act, est un règlement de l'Union européenne entré en vigueur le 1er août 2024. Il s'applique par étapes. Il interdit certaines pratiques, impose des obligations de transparence et fixe des exigences pour les systèmes qualifiés de haut risque. Les obligations varient selon le rôle : fournisseur, déployeur, importateur ou distributeur.\n\nUn système est notamment considéré comme à haut risque lorsqu'il relève des catégories de l'annexe III, ou lorsqu'il est un composant de sécurité d'un produit couvert par la législation d'harmonisation de l'annexe I, ou lorsqu'il est lui-même un tel produit, dès lors que ce produit doit faire l'objet d'une évaluation de conformité par un tiers. La qualification dépend du cas d'usage, pas seulement du modèle. Un même modèle peut servir dans un système à haut risque et dans un système qui ne l'est pas. L'article 6, paragraphe 3, prévoit toutefois une exception pour certains systèmes de l'annexe III qui ne présentent pas de risque significatif ; la qualification doit être documentée.\n\nLe règlement ne remplace pas le RGPD. Il ne signifie pas non plus que toute IA est interdite ou doit être certifiée. Il impose des obligations ciblées, avec des calendriers distincts. Une entreprise qui met un système sur le marché de l'Union européenne ou qui l'utilise dans l'Union doit vérifier son rôle et les échéances applicables, avec un conseil juridique si nécessaire.\n\n### Le RGPD et les données personnelles\n\nLorsqu'un système traite des données personnelles, le RGPD s'applique. Il faut une base légale, une finalité déterminée, une minimisation des données, une durée de conservation et des mesures de sécurité. Les rôles de responsable de traitement et de sous-traitant doivent être documentés, y compris pour les fournisseurs de modèles et d'infrastructure.\n\nUne analyse d'impact relative à la protection des données est nécessaire dans certains cas à risque élevé, notamment lorsque le traitement est systématique et à grande échelle, ou lorsqu'il concerne des données sensibles. Les transferts hors de l'Union européenne doivent être encadrés. Le fait qu'un modèle soit hébergé chez un fournisseur ne supprime pas ces obligations.\n\n### L'inventaire et la due diligence\n\nUn inventaire des systèmes d'IA recense, pour chaque cas d'usage : le propriétaire, la finalité, les données, le fournisseur, la version, les utilisateurs, les décisions assistées et les contrôles humains. Cet inventaire permet de savoir quels systèmes existent, où ils tournent et qui en répond.\n\nLa due diligence du fournisseur porte sur les sous-traitants, la localisation des données, la conservation, la journalisation, la sécurité, la notification des incidents et les conditions de sortie. Les affirmations commerciales doivent être accompagnées de preuves : rapports d'audit, documentation technique, engagements contractuels. Un logo ou une page marketing ne suffit pas.\n\n### L'analyse de risque\n\nL'analyse de risque décrit les personnes affectées, les décisions concernées, la gravité et la probabilité des dommages, la réversibilité et la possibilité de contester. Elle distingue les risques pour les personnes, pour l'organisation et pour le projet. Elle documente les mesures de réduction et le risque résiduel accepté.\n\nLes risques propres à l'IA générative ne se limitent pas aux erreurs factuelles. Ils incluent la divulgation d'informations, l'injection de prompt, la dépendance excessive à la réponse, la reproduction de biais, la perte de traçabilité et l'usage détourné. Le profil NIST AI 600-1 fournit un cadre pour les organiser, mais l'analyse doit être adaptée au cas d'usage.\n\n### La documentation et les contrôles\n\nLa documentation comprend la description du système, les instructions d'utilisation, les limites connues, les résultats d'évaluation, les journaux et les procédures de réponse aux incidents. Elle doit être à jour et accessible aux personnes qui en ont besoin, pas seulement au service juridique.\n\nLes contrôles sont vérifiables : gestion des accès, minimisation des données, validation des sorties, confirmation humaine avant une action sensible, surveillance des dérives, tests de régression, plan de réponse aux incidents. Un contrôle écrit mais jamais testé n'est pas une preuve. Il faut conserver les résultats, les dates et les responsables.\n\n### Une gouvernance proportionnée\n\nLa gouvernance n'a pas besoin d'être lourde pour être utile. Un comité léger, un inventaire, une revue des nouveaux cas d'usage, une fiche de risque et un processus d'escalade suffisent souvent à éviter les angles morts. La proportionnalité dépend de la taille, du secteur et du risque, pas d'un modèle unique.\n\nEnfin, la conformité est un processus continu. Les modèles, les fournisseurs, les usages et les règles changent. Une revue annuelle, ou plus fréquente pour les systèmes sensibles, permet de détecter les écarts. La conformité ne se prouve pas par une attestation figée, mais par une capacité à montrer ce qui a été fait, quand et par qui.\n",
+      "diagram": {
+        "title": "Inventaire, risque, documentation et contrôle",
+        "description": "Schéma illustratif : la gouvernance part d'un inventaire, passe par une analyse de risque et une documentation, puis aboutit à des contrôles vérifiables et à une revue. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Cycle de gouvernance : inventaire, analyse de risque, documentation, contrôle et revue\">\n  <defs>\n    <marker id=\"b2b-conf-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"440\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Une gouvernance qui laisse des traces</text>\n  <text x=\"410\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n  <g id=\"inventaire\">\n    <rect x=\"40\" y=\"100\" width=\"170\" height=\"110\" rx=\"12\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"125\" y=\"130\" fill=\"#e0f2fe\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Inventaire</text>\n    <text x=\"125\" y=\"154\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">système, usage</text>\n    <text x=\"125\" y=\"174\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">données, acteurs</text>\n    <text x=\"125\" y=\"194\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">propriétaire</text>\n  </g>\n  <g id=\"risque\">\n    <rect x=\"240\" y=\"100\" width=\"170\" height=\"110\" rx=\"12\" fill=\"#0f172a\" stroke=\"#818cf8\" stroke-width=\"2\"/>\n    <text x=\"325\" y=\"130\" fill=\"#e0e7ff\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Risque</text>\n    <text x=\"325\" y=\"154\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">personnes affectées</text>\n    <text x=\"325\" y=\"174\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">gravité, réversibilité</text>\n    <text x=\"325\" y=\"194\" fill=\"#a5b4fc\" font-size=\"11\" text-anchor=\"middle\">mesures</text>\n  </g>\n  <g id=\"documentation\">\n    <rect x=\"440\" y=\"100\" width=\"170\" height=\"110\" rx=\"12\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <text x=\"525\" y=\"130\" fill=\"#fef3c7\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Documentation</text>\n    <text x=\"525\" y=\"154\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">limites, évaluations</text>\n    <text x=\"525\" y=\"174\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">instructions</text>\n    <text x=\"525\" y=\"194\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">journaux</text>\n  </g>\n  <g id=\"controle\">\n    <rect x=\"640\" y=\"100\" width=\"140\" height=\"110\" rx=\"12\" fill=\"#0f172a\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"710\" y=\"130\" fill=\"#fce7f3\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Contrôle</text>\n    <text x=\"710\" y=\"154\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">accès, validation</text>\n    <text x=\"710\" y=\"174\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">supervision</text>\n    <text x=\"710\" y=\"194\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">incidents</text>\n  </g>\n  <g stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#b2b-conf-arrow)\">\n    <line x1=\"210\" y1=\"155\" x2=\"240\" y2=\"155\"/>\n    <line x1=\"410\" y1=\"155\" x2=\"440\" y2=\"155\"/>\n    <line x1=\"610\" y1=\"155\" x2=\"640\" y2=\"155\"/>\n  </g>\n  <g id=\"revue\">\n    <path d=\"M710 210 C710 310 125 310 125 210\" fill=\"none\" stroke=\"#f472b6\" stroke-width=\"2\" stroke-dasharray=\"6 4\" marker-end=\"url(#b2b-conf-arrow)\"/>\n    <text x=\"410\" y=\"330\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">revue périodique et mise à jour</text>\n  </g>\n  <g fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">\n    <text x=\"125\" y=\"368\">ce qui existe</text>\n    <text x=\"325\" y=\"368\">ce qui peut arriver</text>\n    <text x=\"525\" y=\"368\">ce qui est prouvé</text>\n    <text x=\"710\" y=\"368\">ce qui est vérifié</text>\n  </g>\n  <text x=\"410\" y=\"404\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">NIST AI RMF est volontaire ; l'AI Act et le RGPD créent des obligations distinctes.</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. L'inventaire",
+            "explanation": "Chaque système est rattaché à un usage, un propriétaire, des données et des utilisateurs. Sans inventaire, les obligations ne peuvent pas être rattachées à un cas concret.",
+            "highlight": [
+              "inventaire"
+            ]
+          },
+          {
+            "title": "2. L'analyse de risque",
+            "explanation": "Les personnes affectées, la gravité, la réversibilité et les mesures de réduction sont documentées. Le risque résiduel est accepté explicitement.",
+            "highlight": [
+              "risque"
+            ]
+          },
+          {
+            "title": "3. La documentation",
+            "explanation": "Les limites, les résultats d'évaluation, les instructions et les journaux constituent la preuve du travail réalisé. Elle doit rester accessible.",
+            "highlight": [
+              "documentation"
+            ]
+          },
+          {
+            "title": "4. Le contrôle et la revue",
+            "explanation": "Les contrôles sont testés et datés. Une revue périodique met à jour l'inventaire, les risques et la documentation lorsque le système ou les règles changent.",
+            "highlight": [
+              "controle",
+              "revue"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Qu'est-ce que le NIST AI Risk Management Framework ?",
+          "options": [
+            "Un cadre volontaire de gestion des risques, organisé autour de quatre fonctions",
+            "Une loi américaine qui interdit certains modèles",
+            "Une certification délivrée aux fournisseurs d'IA",
+            "Un tarif officiel des modèles"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le NIST AI RMF est un cadre volontaire. Il aide à structurer la gouvernance et l'analyse de risque, mais il ne crée pas d'obligation légale et ne certifie pas un produit."
+        },
+        {
+          "question": "Quelle affirmation sur le règlement (UE) 2024/1689 est exacte ?",
+          "options": [
+            "Il interdit toute IA générative dans l'Union européenne",
+            "Il ne concerne que les modèles entraînés dans l'Union européenne",
+            "Il remplace le RGPD pour toutes les données personnelles",
+            "Il s'applique par étapes et distingue notamment les pratiques interdites, les obligations de transparence et les systèmes à haut risque"
+          ],
+          "correctIndex": 3,
+          "explanation": "Le règlement est entré en vigueur le 1er août 2024 et s'applique par étapes. Les obligations dépendent du rôle et du niveau de risque ; il ne remplace pas le RGPD."
+        },
+        {
+          "question": "Que doit faire une organisation qui traite des données personnelles avec un système d'IA ?",
+          "options": [
+            "Rien, dès que le modèle est hébergé chez un fournisseur",
+            "Vérifier la base légale, minimiser les données, limiter la conservation et encadrer les sous-traitants",
+            "Publier le prompt système sur son site",
+            "Supprimer toutes les traces d'utilisation"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le RGPD continue de s'appliquer. L'hébergement chez un fournisseur ne supprime ni la base légale, ni les obligations de minimisation, de conservation et d'encadrement des transferts."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "NIST AI RMF",
+          "definition": "Cadre volontaire de gestion des risques pour les systèmes d'IA, organisé autour des fonctions GOVERN, MAP, MEASURE et MANAGE."
+        },
+        {
+          "term": "Profil IA générative",
+          "definition": "Document NIST AI 600-1 qui adapte le cadre de gestion des risques aux systèmes d'IA générative, sans créer d'obligation réglementaire."
+        },
+        {
+          "term": "Système à haut risque",
+          "definition": "Système d'IA relevant des catégories de l'annexe III, ou composant de sécurité d'un produit couvert par l'annexe I lorsque ce produit doit faire l'objet d'une évaluation de conformité par un tiers, sous réserve de l'exception de l'article 6, paragraphe 3, et soumis à des exigences renforcées."
+        },
+        {
+          "term": "Rôle de fournisseur",
+          "definition": "Rôle de l'acteur qui met un système d'IA sur le marché ou le met en service sous son propre nom, avec les obligations correspondantes."
+        },
+        {
+          "term": "Analyse d'impact",
+          "definition": "Évaluation des risques pour les droits et libertés effectuée avant un traitement de données personnelles susceptible d'engendrer un risque élevé."
+        }
+      ],
+      "example": {
+        "title": "Cartographier les obligations avant le contrat",
+        "text": "**Scénario illustratif.** Une solution de recrutement traite des données personnelles et prend des décisions qui affectent des personnes. Le dossier doit préciser les rôles, la base légale, la durée de conservation, les mesures de sécurité et la supervision humaine. Le règlement européen sur l'IA et le RGPD ne se résument pas à une clause. Une revue juridique reste nécessaire."
+      },
+      "exercises": [
+        {
+          "title": "Une clause ne suffit pas",
+          "prompt": "Un fournisseur écrit dans sa proposition : « notre solution est conforme à l’AI Act ». Le système sert au tri de candidatures et traite des données personnelles. Quelles questions faut-il poser avant de signer, et quelles preuves demander ?",
+          "solution": "Il faut d’abord qualifier le cas : qui est fournisseur et qui est déployeur, dans quel pays, pour quelles décisions et quelles personnes affectées. Le tri de candidatures relève des usages à haut risque de l’annexe III, sous réserve de l’exception de l’article 6, paragraphe 3, qui doit être documentée. Le RGPD s’ajoute : base légale, minimisation, durée de conservation, rôles de responsable et de sous-traitant, analyse d’impact probable. Les preuves à demander sont l’inventaire du système, l’analyse de risque, la documentation technique, les résultats d’évaluation, les journaux et les contrôles testés. Une clause ou un logo ne suffit pas, et une revue juridique reste nécessaire."
+        }
+      ],
+      "sources": [
+        {
+          "label": "NIST, AI Risk Management Framework, consulté le 21 octobre 2026.",
+          "href": "https://www.nist.gov/itl/ai-risk-management-framework"
+        },
+        {
+          "label": "NIST, Generative AI Profile, NIST AI 600-1, 2024.",
+          "href": "https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf"
+        },
+        {
+          "label": "Règlement (UE) 2024/1689, AI Act.",
+          "href": "https://eur-lex.europa.eu/eli/reg/2024/1689/oj"
+        }
+      ]
+    },
+    {
+      "id": "deploiement",
+      "title": "Déploiement et conduite du changement",
+      "keyTakeaways": [
+        "Un pilote utile a un périmètre représentatif, une base de comparaison, des critères de succès et une règle d'arrêt définis avant le lancement.",
+        "L'intégration (identité, permissions, données, latence, erreurs, secours) pèse souvent plus lourd que le choix du modèle.",
+        "L'adoption se mesure par l'usage réel et les résultats, pas par la présence à une formation.",
+        "La supervision humaine doit préciser qui décide, quand, avec quelles informations et avec quelle autorité.",
+        "Le plan de repli, la sortie et le contrôle des coûts se préparent avant le passage à l'échelle, pas après le premier incident."
+      ],
+      "theory": "### Déployer n'est pas brancher un modèle\n\nUn déploiement réussi ne se mesure pas au nombre de démonstrations réalisées. Il se mesure à l'usage réel, à la qualité des résultats et à la capacité de l'organisation à traiter les exceptions. Le modèle n'est qu'un composant. Autour de lui, il faut des identités, des permissions, des données, des interfaces, des journaux, un support et des procédures.\n\nLa séquence recommandée est simple : cadrer, piloter, intégrer, former, superviser, étendre. Elle n'est pas linéaire. Un pilote peut révéler un problème d'intégration qui oblige à revoir le cadrage. Une formation peut montrer que l'interface ne correspond pas au travail réel. Le déploiement est une boucle d'apprentissage, pas un projet informatique isolé.\n\n### Le cadrage\n\nLe cadrage définit le problème, la population, le processus actuel, la mesure de succès et les contraintes. Il précise ce que le système ne fera pas. Cette dernière liste est souvent plus utile que la liste des fonctionnalités : elle évite les attentes floues et les extensions non prévues.\n\nLe cadrage doit aussi nommer le propriétaire du produit et le propriétaire du processus. Sans responsable, personne ne décide quand le pilote est concluant, quand il faut arrêter et qui paie les coûts de fonctionnement. La gouvernance n'est pas un comité de plus ; c'est un lieu où les décisions sont prises et tracées.\n\n### Le pilote\n\nUn pilote utile n'est ni une démonstration trop facile, ni un projet complet déguisé. Il porte sur un cas représentatif, avec une population limitée mais diverse, et une durée suffisante pour observer les variations. Il fixe une base de comparaison, des critères de succès et une règle d'arrêt avant de commencer.\n\nLes critères peuvent être qualitatifs et quantitatifs : taux de tâches terminées, temps de traitement, taux d'escalade, satisfaction des utilisateurs, coût par dossier, nombre d'incidents. Ils doivent être mesurables avec les outils existants ou avec une instrumentation minimale. Un critère que personne ne peut vérifier n'est pas un critère.\n\nLa règle d'arrêt est aussi importante que les critères. Elle indique dans quels cas le pilote est interrompu : incident de sécurité, dérive des coûts, qualité insuffisante, adoption trop faible. Elle protège l'équipe et le budget.\n\n### L'intégration\n\nL'intégration couvre l'authentification, les permissions, les flux de données, les interfaces, la latence, la gestion des erreurs et le mode de secours. Un assistant qui répond en dix secondes peut être inutilisable dans un centre d'appels. Un agent qui appelle un outil sans permission peut bloquer un processus. Une automatisation qui échoue silencieusement peut produire des erreurs pendant des jours.\n\nIl faut tester avec des données réelles ou réalistes, en volume, et avec les cas limites : documents incomplets, doublons, langues mélangées, coupures réseau, indisponibilité du fournisseur. Le mode de secours doit être connu : retour à la procédure manuelle, file d'attente, message explicite. Un système qui ne sait pas échouer proprement n'est pas prêt.\n\n### La conduite du changement\n\nLa conduite du changement ne se réduit pas à une session de formation. Elle commence par comprendre le travail réel des utilisateurs, leurs contraintes et leurs inquiétudes. Elle se poursuit par la modification des procédures, des indicateurs et parfois des rôles. Elle se mesure par l'usage et les résultats, pas par le nombre de personnes formées.\n\nLes utilisateurs doivent savoir ce que le système fait, ce qu'il ne fait pas, quand le vérifier et comment signaler un problème. Les managers doivent savoir quels indicateurs suivre et comment traiter les exceptions. Les équipes de support doivent disposer d'un canal et d'un délai de réponse. Sans ces relais, l'outil est abandonné ou utilisé de travers.\n\n### La supervision humaine\n\nLa supervision humaine n'est pas une case à cocher. Elle précise qui examine la sortie, à quel moment, avec quelles informations et avec quelle autorité pour modifier ou refuser. Pour une action sensible, la confirmation humaine doit être explicite et intervenir avant l'effet, pas après.\n\nIl faut aussi prévoir la contestation : comment une personne affectée peut demander une révision, et qui répond. La supervision doit être documentée : journaux, motifs de refus, corrections. Ces traces servent à améliorer le système et à démontrer que le contrôle existe réellement.\n\n### La supervision opérationnelle\n\nUne fois en production, le système doit être surveillé. Les indicateurs portent sur la qualité, le coût, la latence, les incidents, l'usage et la dérive. La dérive peut venir des données, des modèles, des prompts ou du comportement des utilisateurs. Un tableau de bord sans seuil d'alerte et sans responsable n'est qu'un décor.\n\nLes versions doivent être identifiées : modèle, prompt, base documentaire, configuration. Un changement doit pouvoir être relié à un effet observé. Les échantillons audités, les tests de régression et les revues périodiques complètent la surveillance automatique. Le coût doit être suivi par cas d'usage, pas seulement au niveau de la facture globale.\n\n### Le passage à l'échelle\n\nLe passage à l'échelle ajoute des contraintes de capacité, de support, de sécurité, d'achat et de droit. Il faut vérifier que le fournisseur peut suivre le volume, que le support peut absorber les demandes, que les permissions restent maîtrisées et que les coûts restent dans l'enveloppe. Les conditions contractuelles doivent prévoir la révision des prix, la sortie et la réversibilité.\n\nLe déploiement doit rester réversible. Un plan de repli testé, un mode dégradé et une procédure de retour à la version précédente limitent l'impact d'un incident. La sortie doit être préparée : récupération des données, continuité du service, suppression des accès. Un client qui ne peut pas partir est un client captif, pas un client satisfait.\n\n### Les échecs fréquents\n\nLes échecs se ressemblent : pas de propriétaire, pas de base de comparaison, pilote trop isolé, intégration sous-estimée, formation sans changement de procédure, coûts non suivis, aucun plan de repli. Le modèle peut être excellent et le déploiement échouer pour l'une de ces raisons.\n\nLes guides d'OpenAI et d'Anthropic décrivent des architectures et des pratiques de construction. Ce sont des documents de vendeur, utiles pour comprendre les patterns, pas des preuves que votre déploiement réussira. Le NIST AI RMF propose un cadre de gouvernance et de gestion des risques ; il est volontaire. La réussite se mesure sur votre terrain, avec vos utilisateurs et vos processus.\n",
+      "diagram": {
+        "title": "Cadrer, piloter, intégrer, étendre",
+        "description": "Schéma illustratif : le déploiement passe par un cadrage, un pilote, une intégration et un passage à l'échelle, avec une boucle de supervision. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Déploiement en quatre étapes : cadrage, pilote, intégration et échelle, avec supervision\">\n  <defs>\n    <marker id=\"b2b-dep-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"440\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Un déploiement par étapes, avec retour arrière</text>\n  <text x=\"410\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n  <g id=\"cadrage\">\n    <rect x=\"40\" y=\"100\" width=\"170\" height=\"110\" rx=\"12\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"125\" y=\"130\" fill=\"#e0f2fe\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Cadrage</text>\n    <text x=\"125\" y=\"154\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">problème, population</text>\n    <text x=\"125\" y=\"174\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">mesure, propriétaire</text>\n    <text x=\"125\" y=\"194\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">ce qui est exclu</text>\n  </g>\n  <g id=\"pilote\">\n    <rect x=\"240\" y=\"100\" width=\"170\" height=\"110\" rx=\"12\" fill=\"#0f172a\" stroke=\"#818cf8\" stroke-width=\"2\"/>\n    <text x=\"325\" y=\"130\" fill=\"#e0e7ff\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Pilote</text>\n    <text x=\"325\" y=\"154\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">cas représentatif</text>\n    <text x=\"325\" y=\"174\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">critères de succès</text>\n    <text x=\"325\" y=\"194\" fill=\"#a5b4fc\" font-size=\"11\" text-anchor=\"middle\">règle d'arrêt</text>\n  </g>\n  <g id=\"integration\">\n    <rect x=\"440\" y=\"100\" width=\"170\" height=\"110\" rx=\"12\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <text x=\"525\" y=\"130\" fill=\"#fef3c7\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Intégration</text>\n    <text x=\"525\" y=\"154\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">identité, permissions</text>\n    <text x=\"525\" y=\"174\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">données, secours</text>\n    <text x=\"525\" y=\"194\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">tests de volume</text>\n  </g>\n  <g id=\"echelle\">\n    <rect x=\"640\" y=\"100\" width=\"140\" height=\"110\" rx=\"12\" fill=\"#0f172a\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"710\" y=\"130\" fill=\"#fce7f3\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Échelle</text>\n    <text x=\"710\" y=\"154\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">capacité, support</text>\n    <text x=\"710\" y=\"174\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">coûts, contrats</text>\n    <text x=\"710\" y=\"194\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">réversibilité</text>\n  </g>\n  <g stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#b2b-dep-arrow)\">\n    <line x1=\"210\" y1=\"155\" x2=\"240\" y2=\"155\"/>\n    <line x1=\"410\" y1=\"155\" x2=\"440\" y2=\"155\"/>\n    <line x1=\"610\" y1=\"155\" x2=\"640\" y2=\"155\"/>\n  </g>\n  <g id=\"supervision\">\n    <rect x=\"250\" y=\"300\" width=\"320\" height=\"70\" rx=\"10\" fill=\"#111827\" stroke=\"#38bdf8\" stroke-width=\"1.8\"/>\n    <text x=\"410\" y=\"326\" fill=\"#e0f2fe\" font-size=\"12\" text-anchor=\"middle\">supervision et conduite du changement</text>\n    <text x=\"410\" y=\"346\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">usage, qualité, coût, incidents, contestation</text>\n  </g>\n  <g stroke=\"#38bdf8\" stroke-width=\"1.6\" stroke-dasharray=\"5 4\">\n    <line x1=\"125\" y1=\"210\" x2=\"125\" y2=\"335\"/>\n    <line x1=\"325\" y1=\"210\" x2=\"325\" y2=\"300\"/>\n    <line x1=\"525\" y1=\"210\" x2=\"525\" y2=\"300\"/>\n    <line x1=\"710\" y1=\"210\" x2=\"710\" y2=\"335\"/>\n  </g>\n  <g id=\"repli\">\n    <path d=\"M710 370 C710 410 525 410 525 370\" fill=\"none\" stroke=\"#f472b6\" stroke-width=\"2\" stroke-dasharray=\"6 4\" marker-end=\"url(#b2b-dep-arrow)\"/>\n    <text x=\"617\" y=\"424\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">plan de repli</text>\n  </g>\n  <text x=\"410\" y=\"424\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">Le retour à la procédure précédente doit être testé avant le passage à l'échelle.</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Le cadrage",
+            "explanation": "Le problème, la population, la mesure de succès et le propriétaire sont définis. La liste de ce qui est exclu évite les attentes floues.",
+            "highlight": [
+              "cadrage"
+            ]
+          },
+          {
+            "title": "2. Le pilote",
+            "explanation": "Le pilote porte sur un cas représentatif, avec des critères et une règle d'arrêt fixés avant le lancement. Il produit des preuves, pas seulement une démonstration.",
+            "highlight": [
+              "pilote"
+            ]
+          },
+          {
+            "title": "3. L'intégration",
+            "explanation": "Identité, permissions, données, latence, erreurs et mode de secours sont testés en volume. C'est souvent l'étape la plus longue.",
+            "highlight": [
+              "integration"
+            ]
+          },
+          {
+            "title": "4. L'échelle et la supervision",
+            "explanation": "Le passage à l'échelle ajoute capacité, support, contrats et coûts. La supervision et le plan de repli restent actifs pendant toute la durée de vie du service.",
+            "highlight": [
+              "echelle",
+              "supervision",
+              "repli"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Qu'est-ce qui rend un pilote utile ?",
+          "options": [
+            "Un périmètre très étroit choisi pour être certain de réussir",
+            "Une démonstration devant le comité de direction",
+            "Un cas représentatif, une base de comparaison, des critères de succès et une règle d'arrêt",
+            "Un modèle plus grand que celui de production"
+          ],
+          "correctIndex": 2,
+          "explanation": "Un pilote utile produit des preuves transférables. Il doit représenter le cas réel, être comparé à une base et pouvoir être arrêté selon des critères définis à l'avance."
+        },
+        {
+          "question": "Pourquoi l'intégration est-elle souvent plus lourde que prévu ?",
+          "options": [
+            "Parce que les modèles sont toujours lents",
+            "Parce qu'elle doit gérer identité, permissions, données, erreurs, latence et mode de secours",
+            "Parce qu'elle interdit les tests",
+            "Parce qu'elle supprime la supervision humaine"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le modèle n'est qu'un composant. Les flux, les accès, les cas limites et la continuité de service demandent du travail et des tests qui ne se voient pas dans une démonstration."
+        },
+        {
+          "question": "Quel indicateur mesure le mieux l'adoption ?",
+          "options": [
+            "L'usage réel et les résultats sur le processus",
+            "Le nombre de réunions de lancement",
+            "Le nombre de personnes formées",
+            "Le nombre de fonctionnalités du produit"
+          ],
+          "correctIndex": 0,
+          "explanation": "La formation et les réunions mesurent l'exposition, pas l'usage. L'adoption se vérifie dans les tâches réalisées, la qualité et les résultats du processus."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Pilote",
+          "definition": "Déploiement limité destiné à produire des preuves sur un cas représentatif, avec des critères de succès et une règle d'arrêt."
+        },
+        {
+          "term": "Conduite du changement",
+          "definition": "Ensemble des actions qui adaptent les procédures, les rôles et les compétences pour que le nouvel outil soit réellement utilisé."
+        },
+        {
+          "term": "Supervision humaine",
+          "definition": "Contrôle exercé par une personne sur une décision ou une action du système, avec une autorité et des informations définies."
+        },
+        {
+          "term": "Plan de repli",
+          "definition": "Procédure testée qui permet de revenir à la version ou au processus précédent en cas d'incident."
+        }
+      ],
+      "example": {
+        "title": "Un pilote de six semaines",
+        "text": "**Scénario illustratif.** Un pilote commence avec un périmètre étroit, un jeu de test et des critères de sortie. Il mesure la qualité, le temps de traitement, les exceptions et la charge de relecture. À la fin, l'équipe décide d'étendre, de corriger ou d'arrêter. Un pilote sans critère d'arrêt devient une démonstration permanente."
+      },
+      "exercises": [
+        {
+          "title": "Un pilote sans règle d’arrêt",
+          "prompt": "Une équipe lance un pilote de six semaines sur le traitement de dossiers. Elle a formé les utilisateurs et mesurera la satisfaction. Quels éléments manquent pour que ce pilote produise une décision défendable, et quels points d’intégration faut-il tester avant l’extension ?",
+          "solution": "Il manque un cas représentatif et une population diverse, une base de comparaison mesurée avant le pilote, des critères de succès vérifiables (tâches terminées, temps de traitement, taux d’escalade, coût par dossier) et une règle d’arrêt écrite. La satisfaction seule ne dit pas si le processus s’améliore. Avant d’étendre, il faut tester l’authentification et les permissions, les flux de données, la latence, la gestion des erreurs et le mode de secours, avec des cas limites et un volume réaliste. Il faut aussi nommer le propriétaire du produit et celui du processus, et suivre les coûts par cas d’usage."
+        }
+      ],
+      "sources": [
+        {
+          "label": "NIST, AI Risk Management Framework, consulté le 21 octobre 2026.",
+          "href": "https://www.nist.gov/itl/ai-risk-management-framework"
+        },
+        {
+          "label": "NIST, Generative AI Profile, NIST AI 600-1, 2024.",
+          "href": "https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf"
+        },
+        {
+          "label": "OpenAI, A Practical Guide to Building Agents, guide de vendeur, consulté le 21 octobre 2026.",
+          "href": "https://cdn.openai.com/business-guides-and-resources/a-practical-guide-to-building-agents.pdf"
+        }
+      ]
+    },
+    {
+      "id": "dossier-client",
+      "title": "Construire une offre et un dossier client",
+      "keyTakeaways": [
+        "Une offre B2B se construit autour d’un problème, d’un acheteur et d’une preuve, pas autour d’un modèle.",
+        "Le pilote doit avoir un périmètre, un jeu de test, des critères de succès et des critères d’arrêt.",
+        "Le prix, le contrat et la conformité font partie de la conception, pas de la fin du projet.",
+        "La valeur se démontre par un coût complet et une mesure sur les cas du client.",
+        "Le déploiement inclut la formation, la supervision, la maintenance et la sortie."
+      ],
+      "theory": "### Partir du problème, pas du modèle\n\nUne offre B2B commence par un problème coûteux et récurrent. Un client ne paie pas pour un modèle : il paie pour réduire un délai, éviter une erreur, traiter un volume ou améliorer une décision. Le vocabulaire du modèle arrive après. Si l'équipe ne sait pas quel processus change, quel indicateur bouge et qui vérifie le résultat, la démonstration reste une curiosité.\n\nLe problème doit être décrit avec un périmètre. « Améliorer le support » est trop large. « Router les demandes de remboursement vers la bonne file, avec une relecture humaine au-dessus d'un seuil » est testable. Le périmètre inclut les entrées, les sorties, les exceptions et les personnes qui interviennent. Il exclut aussi ce que le projet ne fera pas.\n\n### L'acheteur et les parties prenantes\n\nUn projet B2B a plusieurs parties. L'utilisateur veut un outil qui lui fait gagner du temps. Le responsable métier veut un résultat mesurable. Le responsable technique veut un système maintenable. Le juridique veut un contrat, une base légale et des responsabilités. L'acheteur veut un prix et un risque acceptables. Une offre qui ne parle qu'à l'utilisateur ignore les autres.\n\nLe dossier doit répondre aux questions de chaque partie. Qui utilise l'outil ? Qui vérifie les cas incertains ? Qui possède les données ? Que se passe-t-il si le fournisseur disparaît ? Qui paie la maintenance ? Ces questions ne sont pas des détails commerciaux : elles déterminent la faisabilité.\n\n### Le pilote\n\nUn pilote utile a un périmètre étroit, une durée limitée et un jeu de test défini avant le début. Il mesure la qualité sur des cas réels, le temps de traitement, la charge de relecture et les exceptions. Il doit avoir des critères de succès et des critères d'arrêt. Sans critère d'arrêt, le pilote devient une démonstration permanente.\n\nLe pilote ne doit pas être entraîné sur les cas de test. Il faut séparer les exemples de conception, les exemples de réglage et les exemples d'évaluation. Si le client fournit peu de cas, il faut documenter cette limite et éviter de conclure trop vite. Un résultat sur vingt tickets ne prouve pas la performance sur vingt mille.\n\n### La preuve de valeur\n\nLa valeur se calcule avec le client. Le coût complet inclut l'inférence, l'infrastructure, l'intégration, la formation, la relecture et la maintenance. Le gain inclut le temps économisé, les erreurs évitées, le volume traité et la qualité de service. Une réduction de temps qui crée une file de relecture n'est pas un gain net.\n\nLes chiffres doivent être datés et attachés à des hypothèses. Un retour sur investissement présenté comme une certitude est un signal d'alerte. Une fourchette, un scénario bas et un scénario haut sont plus honnêtes. Le client doit pouvoir refaire le calcul avec ses propres valeurs.\n\n### Prix, contrat et conformité\n\nLe prix peut être au siège, à l'usage, au volume ou au forfait. Chaque modèle a un effet sur le budget du client et sur le risque du fournisseur. Un prix par ticket aligne la facture sur l'usage, mais peut rendre le coût imprévisible. Un prix par siège est stable, mais ne suit pas la valeur. Un forfait mixte peut convenir si les inclusions sont claires.\n\nLe contrat doit préciser les niveaux de service, la disponibilité, les délais de correction, la propriété des données, la restitution et la sortie. Il doit aussi préciser ce qui se passe en cas d'erreur du modèle. Le fournisseur ne peut pas promettre une exactitude absolue. Il peut définir une procédure d'escalade et une limite de responsabilité.\n\nLa conformité dépend de l'usage. Un système qui trie des CV, évalue un crédit ou recommande un traitement médical n'a pas le même régime qu'un assistant qui rédige un brouillon. Le dossier doit identifier les rôles, la base légale, les données sensibles, la supervision humaine et les obligations de transparence. Une revue juridique reste nécessaire.\n\n### Déploiement et sortie\n\nLe déploiement comprend l'intégration, la formation, la supervision et la maintenance. Les utilisateurs doivent savoir quand faire confiance au système et quand vérifier. Les exceptions doivent avoir un chemin clair. Les journaux doivent permettre de reconstruire une décision sans conserver plus de données que nécessaire.\n\nLa sortie fait partie du contrat. Si le client arrête, que devient le modèle ? Les données ? Les adaptateurs ? Les journaux ? Une migration doit être possible. Un système sans procédure de sortie crée une dépendance difficile à négocier.\n\n> **Repère.** Une offre B2B n'est pas un modèle vendu au mois. C'est un processus, une preuve, un contrat et une exploitation.",
+      "diagram": {
+        "title": "Du problème au contrat",
+        "description": "Schéma illustratif : problème, pilote, preuve, contrat et déploiement forment une chaîne.",
+        "svg": "<svg viewBox=\"0 0 900 360\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Schéma illustratif : construction d'une offre B2B\">\n  <defs><marker id=\"b2b7-arrow\" markerWidth=\"9\" markerHeight=\"7\" refX=\"7\" refY=\"3.5\" orient=\"auto\"><path d=\"M0,0 L9,3.5 L0,7 z\" fill=\"#38bdf8\" /></marker></defs>\n  <rect width=\"900\" height=\"360\" rx=\"16\" fill=\"#0f172a\" />\n  <text x=\"450\" y=\"32\" fill=\"#7dd3fc\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"16\" text-anchor=\"middle\">Une offre se construit dans l'ordre</text>\n  <g id=\"b2b7-problem\"><rect x=\"30\" y=\"74\" width=\"150\" height=\"100\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" /><text x=\"105\" y=\"106\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">Problème</text><text x=\"105\" y=\"130\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">processus et coût</text><text x=\"105\" y=\"150\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">qui décide ?</text></g>\n  <g id=\"b2b7-pilot\"><rect x=\"210\" y=\"74\" width=\"150\" height=\"100\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#34d399\" /><text x=\"285\" y=\"106\" fill=\"#a7f3d0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">Pilote</text><text x=\"285\" y=\"130\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">périmètre étroit</text><text x=\"285\" y=\"150\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">critères d'arrêt</text></g>\n  <g id=\"b2b7-proof\"><rect x=\"390\" y=\"74\" width=\"150\" height=\"100\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#a78bfa\" /><text x=\"465\" y=\"106\" fill=\"#ede9fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">Preuve</text><text x=\"465\" y=\"130\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">qualité et coût</text><text x=\"465\" y=\"150\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">hypothèses datées</text></g>\n  <g id=\"b2b7-contract\"><rect x=\"570\" y=\"74\" width=\"150\" height=\"100\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#fbbf24\" /><text x=\"645\" y=\"106\" fill=\"#fde68a\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">Contrat</text><text x=\"645\" y=\"130\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">prix, données</text><text x=\"645\" y=\"150\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">responsabilité</text></g>\n  <g id=\"b2b7-deploy\"><rect x=\"750\" y=\"74\" width=\"120\" height=\"100\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#fb923c\" /><text x=\"810\" y=\"106\" fill=\"#fed7aa\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">Déploiement</text><text x=\"810\" y=\"130\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">formation</text><text x=\"810\" y=\"150\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">sortie</text></g>\n  <path d=\"M182,124 L208,124\" stroke=\"#38bdf8\" stroke-width=\"2\" fill=\"none\" marker-end=\"url(#b2b7-arrow)\" />\n  <path d=\"M362,124 L388,124\" stroke=\"#38bdf8\" stroke-width=\"2\" fill=\"none\" marker-end=\"url(#b2b7-arrow)\" />\n  <path d=\"M542,124 L568,124\" stroke=\"#38bdf8\" stroke-width=\"2\" fill=\"none\" marker-end=\"url(#b2b7-arrow)\" />\n  <path d=\"M722,124 L748,124\" stroke=\"#38bdf8\" stroke-width=\"2\" fill=\"none\" marker-end=\"url(#b2b7-arrow)\" />\n  <g id=\"b2b7-measure\"><rect x=\"120\" y=\"230\" width=\"660\" height=\"64\" rx=\"10\" fill=\"#0d1f2d\" stroke=\"#38bdf8\" /><text x=\"450\" y=\"256\" fill=\"#bae6fd\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">À chaque étape : une mesure, un responsable, une limite</text><text x=\"450\" y=\"278\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">Sans mesure, le pilote devient une démonstration ; sans sortie, le client devient dépendant.</text></g>\n</svg>",
+        "steps": [
+          {
+            "title": "Le problème",
+            "explanation": "Le processus, le coût et la personne qui décide doivent être explicites avant de parler de modèle.",
+            "highlight": [
+              "b2b7-problem"
+            ]
+          },
+          {
+            "title": "Pilote et preuve",
+            "explanation": "Le pilote a un périmètre, un jeu de test et des critères d’arrêt. La valeur se calcule avec le client.",
+            "highlight": [
+              "b2b7-pilot",
+              "b2b7-proof"
+            ]
+          },
+          {
+            "title": "Contrat et déploiement",
+            "explanation": "Le prix, la conformité, la formation et la sortie font partie de l’offre, pas de l’après-vente.",
+            "highlight": [
+              "b2b7-contract",
+              "b2b7-deploy",
+              "b2b7-measure"
+            ]
+          }
+        ]
+      },
+      "example": {
+        "title": "Préparer un pilote de traitement de factures",
+        "text": "**Scénario illustratif.** Un cabinet comptable reçoit 30 000 factures par an. Le pilote porte sur 2 000 factures, avec un jeu de test de 200 documents et une relecture humaine. Les critères sont le taux d'extraction correcte, le temps de traitement, le taux d'exceptions et le coût par facture. Le prix est calculé avec le coût de relecture et la maintenance. Le contrat précise la propriété des documents, la durée de conservation et la sortie. Un résultat sur 200 factures ne garantit pas les 30 000, mais il permet de décider si l'extension est raisonnable."
+      },
+      "quiz": [
+        {
+          "question": "Par quoi commence une offre B2B utile ?",
+          "options": [
+            "Par le choix du modèle",
+            "Par le problème, le processus et la personne qui décide",
+            "Par le logo",
+            "Par le nombre de paramètres"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le modèle est un moyen. Le problème, le processus et la décision déterminent ce qui doit être construit et mesuré."
+        },
+        {
+          "question": "Quel est le rôle des critères d’arrêt dans un pilote ?",
+          "options": [
+            "Ils garantissent le succès",
+            "Ils permettent d’arrêter ou de corriger sans transformer le pilote en démonstration permanente",
+            "Ils remplacent le contrat",
+            "Ils suppriment la relecture"
+          ],
+          "correctIndex": 1,
+          "explanation": "Un pilote sans critère d’arrêt continue souvent par inertie. Les critères rendent la décision explicite."
+        },
+        {
+          "question": "Que doit inclure le coût complet d’une solution ?",
+          "options": [
+            "Uniquement l’inférence",
+            "L’inférence, l’intégration, la relecture, la formation et la maintenance",
+            "Uniquement le prix du modèle",
+            "Uniquement le matériel"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le coût complet dépasse la facture du modèle. Il inclut le travail humain et l’exploitation."
+        },
+        {
+          "question": "Pourquoi prévoir une procédure de sortie dans le contrat ?",
+          "options": [
+            "Pour augmenter la dépendance",
+            "Pour savoir ce qu’il advient des données, des modèles et des journaux",
+            "Pour éviter la formation",
+            "Pour supprimer la conformité"
+          ],
+          "correctIndex": 1,
+          "explanation": "La sortie définit la restitution, la migration et la suppression. Elle limite la dépendance au fournisseur."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Pilote",
+          "definition": "Déploiement limité et mesuré, avec un périmètre et des critères de décision."
+        },
+        {
+          "term": "Coût complet",
+          "definition": "Somme des coûts d’inférence, d’intégration, de relecture, de formation et de maintenance."
+        },
+        {
+          "term": "Critère d’arrêt",
+          "definition": "Condition définie à l’avance qui conduit à arrêter ou corriger le projet."
+        },
+        {
+          "term": "Sortie",
+          "definition": "Procédure de restitution, migration et suppression des données et des composants."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Problème avant modèle",
+          "prompt": "Pourquoi une offre B2B doit-elle partir d’un problème et d’un acheteur, plutôt que du modèle ou de ses performances ?",
+          "solution": "Le client paie pour un processus modifié et une valeur mesurable. Sans problème, indicateur, périmètre et preuve, la démonstration reste une curiosité. Le pilote doit avoir des critères de succès et d’arrêt, et le prix, le contrat et la conformité font partie de la conception."
+        }
+      ],
+      "sources": [
+        {
+          "label": "NIST, AI Risk Management Framework, consulté le 21 octobre 2026.",
+          "href": "https://www.nist.gov/itl/ai-risk-management-framework"
+        },
+        {
+          "label": "Règlement (UE) 2024/1689, AI Act.",
+          "href": "https://eur-lex.europa.eu/eli/reg/2024/1689/oj"
+        },
+        {
+          "label": "Stanford HAI, AI Index Report 2026, consulté le 21 octobre 2026.",
+          "href": "https://hai.stanford.edu/ai-index"
+        },
+        {
+          "label": "OpenAI, A Practical Guide to Building Agents, guide de vendeur, consulté le 21 octobre 2026.",
+          "href": "https://cdn.openai.com/business-guides-and-resources/a-practical-guide-to-building-agents.pdf"
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "label": "NIST, AI Risk Management Framework, consulté le 21 octobre 2026.",
+      "href": "https://www.nist.gov/itl/ai-risk-management-framework"
+    },
+    {
+      "label": "NIST, Generative AI Profile, NIST AI 600-1, 2024.",
+      "href": "https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf"
+    },
+    {
+      "label": "Règlement (UE) 2024/1689, AI Act.",
+      "href": "https://eur-lex.europa.eu/eli/reg/2024/1689/oj"
+    },
+    {
+      "label": "Stanford HAI, AI Index Report 2026, consulté le 21 octobre 2026.",
+      "href": "https://hai.stanford.edu/ai-index"
+    },
+    {
+      "label": "OpenAI, A Practical Guide to Building Agents, guide de vendeur, consulté le 21 octobre 2026.",
+      "href": "https://cdn.openai.com/business-guides-and-resources/a-practical-guide-to-building-agents.pdf"
+    },
+    {
+      "label": "Anthropic, Building Effective Agents, article de vendeur, consulté le 21 octobre 2026.",
+      "href": "https://www.anthropic.com/research/building-effective-agents"
+    },
+    {
+      "label": "Deloitte, State of AI in the Enterprise, 3rd Edition, 2020, enquête de vendeur, consultée le 21 octobre 2026.",
+      "href": "https://www.deloitte.com/content/dam/insights/articles/2024/6462_state-of-ai-in-the-enterprise/DI_State-of-AI.pdf"
+    }
+  ],
+  "related": [
+    {
+      "to": "/calculateur-couts-ia",
+      "title": "Calculateur de coûts d'API IA",
+      "description": "Estimer le coût d'usage des API de modèles d'IA selon le volume de tokens, avec des tarifs indicatifs à vérifier."
+    },
+    {
+      "to": "/comparateur-modeles-ia",
+      "title": "Comparateur de modèles IA",
+      "description": "Noter des modèles sur vos propres exemples et comparer le coût par tâche réussie."
+    },
+    {
+      "to": "/cours/ia-environnement",
+      "title": "Cours : l'IA et son environnement",
+      "description": "Le cadre matériel, énergétique et économique dans lequel s'inscrit un déploiement d'IA."
+    }
+  ]
+}

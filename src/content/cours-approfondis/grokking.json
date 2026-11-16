@@ -1,0 +1,856 @@
+{
+  "slug": "grokking",
+  "title": "Le grokking : quand un réseau généralise longtemps après avoir mémorisé",
+  "subtitle": "Généralisation retardée, rôle du weight decay et lecture des circuits appris sur l'addition modulaire",
+  "level": "Avancé",
+  "tags": [
+    "Grokking",
+    "Généralisation",
+    "Weight decay",
+    "Interprétabilité mécanistique",
+    "Arithmétique modulaire",
+    "Transformers"
+  ],
+  "summary": "Ce cours présente le **grokking** : un petit réseau de neurones atteint presque 100 % de précision sur ses données d'entraînement, reste au niveau du hasard sur les autres, puis généralise des milliers de pas plus tard. Il suit l'article fondateur de Power et al. (2022), le rôle du weight decay, l'analyse de Nanda et al. (2023) sur l'addition modulaire, et propose une expérience PyTorch réduite, exécutable sur un CPU. Il s'adresse à des lecteurs qui connaissent déjà l'entraînement d'un réseau de neurones.",
+  "introduction": "### Pourquoi ce sujet compte\n\nOn apprend très tôt qu'un modèle qui réussit à l'entraînement et échoue en validation « surapprend », et qu'il faut alors s'arrêter ou le contraindre. Le grokking est une situation où ce réflexe, raisonnable dans la plupart des cas, aurait fait manquer la suite. Il intéresse aussi les chercheurs pour une autre raison : c'est un cas où l'on peut regarder, dans les poids, comment une solution générale se forme. Il touche donc à deux questions de fond, la généralisation et l'interprétabilité.\n\n### D'où il vient\n\n- **L'article fondateur.** Alethea Power, Yuri Burda, Harri Edwards, Igor Babuschkin et Vedant Misra publient en janvier 2022 *Grokking : Generalization Beyond Overfitting on Small Algorithmic Datasets* (arXiv:2201.02177), qui décrit le phénomène sur des tables d'opérations binaires.\n- **L'analyse des circuits.** Neel Nanda, Lawrence Chan, Tom Lieberum, Jess Smith et Jacob Steinhardt publient *Progress measures for grokking via mechanistic interpretability* (arXiv:2301.05217, ICLR 2023). Ils rétro-conçoivent l'algorithme appris par un petit transformer sur l'addition modulaire et définissent des mesures qui progressent avant la généralisation.\n- **Des explications concurrentes.** Liu et al. (2022), Liu, Michaud et Tegmark (2022) et Varma et al. (2023) proposent d'autres lectures, liées à la norme des poids et à l'efficacité des circuits.\n\n### Ce qu'il faut savoir avant\n\nNotions d'entraînement d'un réseau (perte, gradient, époque), de surapprentissage et de jeu de validation, et un peu de trigonométrie (sinus, cosinus, angle). Le code est en Python avec PyTorch, mais la lecture des modules ne l'exige pas.\n\n### Ce que vous saurez expliquer à la fin\n\n- ce qu'est le grokking, dans quel cadre il a été observé et pourquoi il met en défaut un critère d'arrêt fondé sur la perte de validation ;\n- ce que fait le weight decay, ce que les expériences établissent à son sujet et ce qui reste une hypothèse ;\n- comment un petit réseau résout l'addition modulaire avec des sinus et des cosinus, et comment on l'a vérifié par des ablations ;\n- les trois phases de Nanda et al., et ce qu'une expérience réduite en reproduit ;\n- pourquoi ces résultats ne se transposent pas tels quels aux grands modèles de langage.\n\n### Les limites de ce cours\n\nChaque chiffre de ce cours a été vérifié sur les articles : ceux qui n'y figurent pas ne sont pas repris. Le grokking a été étudié surtout sur de petites tâches algorithmiques. Les causes exactes (rôle du weight decay, forme des paysages de perte) sont encore discutées, et le lien avec les grands modèles de langage reste une question ouverte. Les formulations « on pense que » ou « une explication proposée est » signalent ces cas.",
+  "prerequisites": [
+    "Entraînement d'un réseau de neurones : perte, gradient, époque",
+    "Surapprentissage, jeu d'entraînement et jeu de validation",
+    "Trigonométrie élémentaire : sinus, cosinus, angle",
+    "Lecture de code Python et PyTorch (pour les exemples)"
+  ],
+  "checkedOn": "2026-10-18",
+  "cover": {
+    "src": "pics/cours/grokking.webp",
+    "alt": "Réseau de nœuds lumineux d'abord tassé au sol, puis jaillissant en branches lumineuses vers le haut."
+  },
+  "modules": [
+    {
+      "id": "phenomene",
+      "title": "Le phénomène : généraliser longtemps après avoir mémorisé",
+      "keyTakeaways": [
+        "Power et al. (2022) observent, sur de petits jeux de données générés par un algorithme, que la précision de validation peut passer du niveau du hasard à une généralisation presque parfaite bien après que la précision d'entraînement a atteint son maximum. Ils nomment ce comportement « grokking ».",
+        "Dans l'exemple vedette de l'article (division modulaire, la moitié des équations en entraînement), la précision de validation ne décolle du hasard qu'après environ 1 000 fois plus de pas d'optimisation que ce qu'il faut pour que la précision d'entraînement devienne presque parfaite.",
+        "Un arrêt anticipé fondé sur la perte de validation aurait interrompu ces entraînements avant la généralisation. Cela ne remet pas en cause la technique en général : le grokking a été décrit dans un cadre particulier (petits jeux de données, tâches algorithmiques).",
+        "Le mot vient du roman de Robert Heinlein, Stranger in a Strange Land (1961). Les auteurs pensent que ce phénomène pourrait être distinct de la double descente décrite par Nakkiran et al. ; la question n'est pas tranchée."
+      ],
+      "theory": "### Le montage expérimental\n\nEn janvier 2022, Alethea Power, Yuri Burda, Harri Edwards, Igor Babuschkin et Vedant Misra publient sur arXiv une étude de la généralisation sur de **petits jeux de données générés par un algorithme**. Le principe est simple : on choisit une opération binaire, par exemple l'addition modulo un nombre premier $p$, et on écrit toutes les équations possibles :\n\n$$a \\circ b = c \\pmod{p}$$\n\nChaque équation est une courte suite de jetons (*tokens*) : `a`, `∘`, `b`, `=`, `c`. Le modèle est un petit transformer qui lit les quatre premiers et doit produire le dernier. D'après l'article, il s'agit d'un décodeur à 2 couches, de largeur 128, avec 4 têtes d'attention, soit environ $4 \\cdot 10^5$ paramètres hors embeddings. L'optimiseur est AdamW (taux d'apprentissage $10^{-3}$, weight decay 1), avec un budget de $10^5$ mises à jour. Les opérations modulaires y utilisent $p = 97$.\n\nPour chaque expérience, on tire au hasard une fraction des équations pour l'**entraînement**. Les autres forment la **validation** : ce sont des « cases vides » de la table, que le modèle n'a jamais vues. Il ne peut y répondre correctement que s'il a trouvé une règle, car aucune information ne les relie par simple mémorisation aux cases connues.\n\nDeux mesures suivent l'entraînement :\n\n- la **précision** (*accuracy*) : la part des réponses exactes ;\n- la **perte** (*loss*) : ici l'entropie croisée, qui mesure à quel point la probabilité donnée à la bonne réponse est faible. Plus elle est basse, mieux le modèle prédit.\n\n### Ce qu'ils observent\n\nSur l'exemple de la figure 1 de l'article (la division modulaire, avec la moitié des équations en entraînement), la précision d'entraînement est presque parfaite en moins de $10^3$ pas. La précision de validation, elle, reste au niveau du hasard pendant très longtemps, puis se met à monter. Selon les auteurs, elle ne commence à dépasser le hasard qu'après environ **1 000 fois plus de pas** que ce qu'il faut pour que l'entraînement soit presque parfait.\n\nLe niveau du hasard se calcule : avec $p = 97$ réponses possibles, tirer au sort donne $1/97 \\approx 1{,}03\\ \\%$ de réussite.\n\nLa fraction de données joue un rôle décisif : près de 25 à 30 % de données (cas du produit dans le groupe de permutations $S_5$), une baisse de 1 point de pourcentage des données d'entraînement augmente de 40 à 50 % le temps médian jusqu'à la généralisation (Power et al., 2022). Avec trop peu de données, la généralisation n'arrive pas dans le budget fixé.\n\n### Pourquoi « grokking » ?\n\nLe verbe *to grok* vient du roman *Stranger in a Strange Land* (Robert A. Heinlein, 1961), où c'est un mot martien. Le roman l'emploie d'abord sans le définir ; son sens figuré, que retient le dictionnaire Oxford, est « comprendre intuitivement, ou par empathie ». Les auteurs de l'article écrivent : « We call this phenomenon \"grokking\" ». Le nom est une image : il ne prouve pas que le réseau « comprend » au sens humain.\n\n### Le lien avec l'arrêt anticipé\n\nL'**arrêt anticipé** (*early stopping*) consiste à interrompre l'entraînement quand la perte de validation cesse de baisser ou remonte. C'est une pratique courante et raisonnable : sur la plupart des tâches, une validation qui se dégrade durablement signale un surapprentissage.\n\nDans ces expériences, la perte de validation **remonte** pendant que le modèle mémorise, puis redescend très tard (figure 4 de l'article). Un critère d'arrêt appliqué pendant la remontée aurait donc coupé l'entraînement avant la généralisation. L'article ne discute pas l'arrêt anticipé ; c'est une conséquence directe de ce qu'il décrit.\n\n| Observation | Lecture habituelle | Ce que montrent ces expériences |\n| :--- | :--- | :--- |\n| Précision d'entraînement proche de 100 %, validation au hasard | Surapprentissage | Vrai à ce stade, mais pas forcément définitif |\n| Perte de validation qui remonte | Signal pour s'arrêter | Elle peut redescendre beaucoup plus tard |\n| Perte d'entraînement presque nulle | Plus rien à apprendre | Les poids continuent d'évoluer (voir le module 2) |\n\n### Un phénomène distinct de la double descente ?\n\nLa **double descente** (Nakkiran et al., 2019) désigne le fait que l'erreur de test peut remonter puis redescendre quand la taille du modèle grandit, et aussi, dans certains cas, quand l'entraînement se prolonge. Power et al. observent une seconde descente de la perte de validation (mais pas de la précision) au fil de l'entraînement, bien après que la perte d'entraînement est devenue très faible (« des dizaines de milliers d'époques » dans certaines expériences). Ils pensent que leur phénomène pourrait être distinct. Il ne faut donc pas présenter le grokking comme « une double descente sur l'axe du temps » ni, à l'inverse, comme un phénomène sans rapport : la question reste discutée.",
+      "analogy": {
+        "title": "L'élève et la table d'addition sur un cadran",
+        "text": "Imaginez une table d'addition sur un cadran de 12 heures où l'on vous montre la moitié des cases. Vous pouvez apprendre ces cases par cœur : vous aurez tout bon sur ce que vous avez vu, et vous échouerez sur les autres. Si vous continuez à vous exercer, votre cerveau, limité en mémoire, peut finir par remarquer la règle (avancer l'aiguille de b crans) qui rend la table inutile.\n\n**Limite de l'analogie :** l'élève a une intention et une manière consciente de chercher une règle. Le réseau ne fait que modifier des nombres pour réduire une perte, et rien ne garantit que cette règle émerge : cela dépend des données, de leur quantité et du réglage."
+      },
+      "example": {
+        "title": "Compter les équations",
+        "text": "Avec $p = 97$, il y a $97 \\times 97 = 9\\,409$ équations $a + b = c$ possibles. Si l'on en garde la moitié pour l'entraînement, il en reste environ 4 700 que le modèle ne verra jamais pendant l'entraînement. C'est sur elles que l'on mesure la généralisation, avec un hasard à $1/97 \\approx 1{,}03\\ \\%$.\n\nCes valeurs sont un calcul d'illustration sur l'énoncé du problème, pas des résultats d'entraînement."
+      },
+      "diagram": {
+        "title": "Allure des courbes d'un entraînement avec grokking",
+        "description": "Schéma qualitatif : précision et perte, pour l'entraînement et pour le test, sur une échelle de temps logarithmique. Les courbes ne sont pas des mesures.",
+        "svg": "<svg viewBox=\"0 0 800 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Schéma qualitatif : courbes de précision et de perte, entraînement et test, pendant un entraînement avec grokking\">\n  <defs>\n    <linearGradient id=\"grad-bg-1\" x1=\"0%\" y1=\"0%\" x2=\"100%\" y2=\"100%\">\n      <stop offset=\"0%\" stop-color=\"#050811\"/>\n      <stop offset=\"100%\" stop-color=\"#0d1527\"/>\n    </linearGradient>\n  </defs>\n\n  <rect x=\"0\" y=\"0\" width=\"800\" height=\"440\" rx=\"16\" fill=\"url(#grad-bg-1)\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n\n  <!-- Panneau gauche : précision -->\n  <g transform=\"translate(40, 40)\">\n    <text x=\"160\" y=\"0\" fill=\"#f8fafc\" font-size=\"14\" font-weight=\"bold\" text-anchor=\"middle\">Précision</text>\n\n    <line x1=\"40\" y1=\"280\" x2=\"320\" y2=\"280\" stroke=\"#64748b\" stroke-width=\"1.5\"/>\n    <line x1=\"40\" y1=\"30\" x2=\"40\" y2=\"280\" stroke=\"#64748b\" stroke-width=\"1.5\"/>\n\n    <text x=\"32\" y=\"35\" fill=\"#cbd5e1\" font-size=\"11\" text-anchor=\"end\">100 %</text>\n    <text x=\"32\" y=\"283\" fill=\"#cbd5e1\" font-size=\"11\" text-anchor=\"end\">hasard</text>\n    <text x=\"180\" y=\"308\" fill=\"#cbd5e1\" font-size=\"11\" text-anchor=\"middle\">temps d'entraînement (échelle logarithmique)</text>\n\n    <rect id=\"zone-p1\" x=\"40\" y=\"30\" width=\"80\" height=\"250\" fill=\"rgba(56, 189, 248, 0.10)\"/>\n    <rect id=\"zone-p2\" x=\"120\" y=\"30\" width=\"130\" height=\"250\" fill=\"rgba(244, 63, 94, 0.07)\"/>\n    <rect id=\"zone-p3\" x=\"250\" y=\"30\" width=\"70\" height=\"250\" fill=\"rgba(16, 185, 129, 0.12)\"/>\n\n    <text x=\"80\" y=\"22\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">mémorisation</text>\n    <text x=\"185\" y=\"22\" fill=\"#fda4af\" font-size=\"11\" text-anchor=\"middle\">plateau apparent</text>\n    <text x=\"285\" y=\"22\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">généralisation</text>\n\n    <path id=\"curve-train-acc\" d=\"M 40,275 C 62,262 78,120 110,40 L 320,38\" fill=\"none\" stroke=\"#38bdf8\" stroke-width=\"3\"/>\n    <circle cx=\"110\" cy=\"38\" r=\"4.5\" fill=\"#38bdf8\"/>\n    <text x=\"130\" y=\"58\" fill=\"#7dd3fc\" font-size=\"11\" font-weight=\"bold\">entraînement</text>\n\n    <path id=\"curve-test-acc\" d=\"M 40,277 L 245,276 Q 260,275 270,180 T 295,42 L 320,40\" fill=\"none\" stroke=\"#fb7185\" stroke-width=\"3\"/>\n    <circle id=\"point-grok-leap\" cx=\"272\" cy=\"160\" r=\"5.5\" fill=\"#10b981\" stroke=\"#ffffff\" stroke-width=\"2\"/>\n    <text x=\"236\" y=\"146\" fill=\"#6ee7b7\" font-size=\"11\" font-weight=\"bold\" text-anchor=\"end\">saut tardif</text>\n    <text x=\"150\" y=\"266\" fill=\"#fda4af\" font-size=\"11\" font-weight=\"bold\">test</text>\n  </g>\n\n  <!-- Panneau droit : perte -->\n  <g transform=\"translate(420, 40)\">\n    <text x=\"180\" y=\"0\" fill=\"#f8fafc\" font-size=\"14\" font-weight=\"bold\" text-anchor=\"middle\">Perte (échelle logarithmique)</text>\n\n    <line x1=\"40\" y1=\"280\" x2=\"340\" y2=\"280\" stroke=\"#64748b\" stroke-width=\"1.5\"/>\n    <line x1=\"40\" y1=\"30\" x2=\"40\" y2=\"280\" stroke=\"#64748b\" stroke-width=\"1.5\"/>\n\n    <text x=\"32\" y=\"35\" fill=\"#cbd5e1\" font-size=\"11\" text-anchor=\"end\">élevée</text>\n    <text x=\"32\" y=\"283\" fill=\"#cbd5e1\" font-size=\"11\" text-anchor=\"end\">faible</text>\n    <text x=\"190\" y=\"308\" fill=\"#cbd5e1\" font-size=\"11\" text-anchor=\"middle\">temps d'entraînement (échelle logarithmique)</text>\n\n    <path id=\"curve-train-loss\" d=\"M 40,50 C 70,90 90,230 125,268 L 340,270\" fill=\"none\" stroke=\"#38bdf8\" stroke-width=\"2.5\" stroke-dasharray=\"4,4\"/>\n    <text x=\"150\" y=\"258\" fill=\"#7dd3fc\" font-size=\"11\">perte d'entraînement</text>\n\n    <path id=\"curve-test-loss\" d=\"M 40,55 Q 70,100 100,85 T 180,60 T 255,55 Q 270,70 280,180 T 305,265 L 340,268\" fill=\"none\" stroke=\"#fb7185\" stroke-width=\"3\"/>\n    <circle id=\"point-divergence\" cx=\"200\" cy=\"58\" r=\"4.5\" fill=\"#fb7185\"/>\n    <text x=\"200\" y=\"42\" fill=\"#fda4af\" font-size=\"11\" font-weight=\"bold\" text-anchor=\"middle\">la perte de test remonte</text>\n    <text x=\"330\" y=\"236\" fill=\"#6ee7b7\" font-size=\"11\" font-weight=\"bold\" text-anchor=\"end\">seconde descente</text>\n  </g>\n\n  <!-- Légende -->\n  <g transform=\"translate(150, 392)\" font-size=\"12\" fill=\"#e2e8f0\">\n    <line x1=\"0\" y1=\"0\" x2=\"25\" y2=\"0\" stroke=\"#38bdf8\" stroke-width=\"3\"/>\n    <text x=\"32\" y=\"4\">entraînement</text>\n    <line x1=\"170\" y1=\"0\" x2=\"195\" y2=\"0\" stroke=\"#fb7185\" stroke-width=\"3\"/>\n    <text x=\"202\" y=\"4\">test (validation)</text>\n    <circle cx=\"360\" cy=\"0\" r=\"5\" fill=\"#10b981\"/>\n    <text x=\"372\" y=\"4\">généralisation retardée</text>\n  </g>\n  <text x=\"400\" y=\"422\" fill=\"#cbd5e1\" font-size=\"11\" text-anchor=\"middle\">Schéma qualitatif, sans échelle : ce ne sont pas des mesures.</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Mémorisation rapide",
+            "explanation": "La perte d'entraînement s'effondre et la précision d'entraînement devient presque parfaite. Le réseau retrouve les réponses des équations qu'il a vues.",
+            "highlight": [
+              "zone-p1",
+              "curve-train-acc",
+              "curve-train-loss"
+            ]
+          },
+          {
+            "title": "2. Un plateau trompeur",
+            "explanation": "La précision de test reste au niveau du hasard, et la perte de test remonte. Un critère d'arrêt anticipé fondé sur cette perte déclencherait ici.",
+            "highlight": [
+              "zone-p2",
+              "curve-test-loss",
+              "point-divergence"
+            ]
+          },
+          {
+            "title": "3. Généralisation tardive",
+            "explanation": "Très longtemps après, la précision de test monte vers 100 % et la perte de test redescend (seconde descente), sans que la perte d'entraînement ait changé de façon visible.",
+            "highlight": [
+              "zone-p3",
+              "point-grok-leap",
+              "curve-test-acc"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Construction du jeu de données du cours : toutes les équations a + b = c modulo 53, coupées en deux au hasard (graine fixée). Le programme calcule aussi une particularité de l'addition : sa commutativité. Elle explique pourquoi, dans l'expérience du module 4, la précision de test dépasse le hasard dès la mémorisation.",
+        "code": "# Le jeu de données du grokking : toutes les équations a + b = c (mod p), coupées en deux au hasard.\nimport torch\n\nP = 53\ntorch.manual_seed(0)\n\na = torch.arange(P).repeat_interleave(P)   # premier opérande de chaque paire\nb = torch.arange(P).repeat(P)              # second opérande\nc = (a + b) % P                            # réponse attendue\nn_total = P * P\nn_train = n_total // 2\n\nperm = torch.randperm(n_total)\ntrain_idx, test_idx = perm[:n_train], perm[n_train:]\nin_train = torch.zeros(n_total, dtype=torch.bool)\nin_train[train_idx] = True\n\nprint(f\"p = {P} : {n_total} équations possibles\")\nprint(f\"entraînement : {n_train}, test : {n_total - n_train}\")\nprint(f\"précision d'un tirage au hasard : {100 / P:.1f} %\")\n\n# L'addition est commutative : a + b et b + a ont la même réponse.\n# Parmi les équations de test (a != b), combien ont leur « jumelle » b + a dans l'entraînement ?\nswapped = b[test_idx] * P + a[test_idx]\nmask = a[test_idx] != b[test_idx]\nshare = in_train[swapped][mask].float().mean().item()\nprint(f\"équations de test dont la jumelle b + a est vue à l'entraînement : {100 * share:.0f} %\")",
+        "output": "p = 53 : 2809 équations possibles\nentraînement : 1404, test : 1405\nprécision d'un tirage au hasard : 1.9 %\néquations de test dont la jumelle b + a est vue à l'entraînement : 50 %",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Dans l'étude de Power et al. (2022), que désigne le mot « grokking » ?",
+          "options": [
+            "Une précision de validation qui passe du hasard à une généralisation presque parfaite bien après que la précision d'entraînement a atteint son maximum",
+            "Une précision d'entraînement qui augmente plus vite grâce à un taux d'apprentissage élevé",
+            "Une précision de validation supérieure à la précision d'entraînement dès le début",
+            "Une perte qui diminue en même temps sur l'entraînement et sur la validation"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le grokking est un décalage dans le temps : l'entraînement est déjà presque parfait, et la généralisation arrive beaucoup plus tard. Une baisse simultanée des deux pertes est le comportement habituel, pas le grokking."
+        },
+        {
+          "question": "Pourquoi un arrêt anticipé fondé sur la perte de validation aurait-il interrompu ces expériences avant la généralisation ?",
+          "options": [
+            "Parce que la perte de validation remonte pendant la phase de mémorisation, et que le critère s'en sert comme signal d'arrêt",
+            "Parce que l'arrêt anticipé empêche la précision d'entraînement d'atteindre 100 %",
+            "Parce que l'arrêt anticipé réinitialise les poids du modèle",
+            "Parce que la précision de test baisse nettement pendant cette phase"
+          ],
+          "correctIndex": 0,
+          "explanation": "La précision d'entraînement est déjà presque parfaite quand la perte de validation remonte : l'arrêt anticipé ne l'empêche pas. La précision de test reste proche du hasard, elle ne s'effondre pas. L'arrêt anticipé garde son intérêt dans la plupart des cas ; ce qui est remarquable ici, c'est un cas où la remontée n'est pas définitive."
+        },
+        {
+          "question": "Que disent Power et al. à propos du lien entre grokking et double descente ?",
+          "options": [
+            "Ils observent une seconde descente de la perte de validation bien après que la perte d'entraînement est devenue très faible, et pensent que le phénomène pourrait être distinct de la double descente de Nakkiran et al.",
+            "Ils affirment que les deux phénomènes sont identiques",
+            "Ils montrent que le grokking ne dépend que de la taille du modèle, alors que la double descente ne dépend que du temps",
+            "Ils estiment que la double descente n'existe pas sur les jeux de données algorithmiques"
+          ],
+          "correctIndex": 0,
+          "explanation": "La double descente a elle aussi été décrite en fonction du temps d'entraînement dans certains cas (Nakkiran et al., 2019). La différence invoquée par Power et al. est l'échelle de temps (des dizaines de milliers d'époques après que la perte d'entraînement est très faible) et l'absence de comportement non monotone de la précision. Ils expriment une croyance, pas une démonstration."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Grokking",
+          "definition": "Généralisation tardive : la précision de validation passe du hasard à une valeur élevée bien après que la précision d'entraînement a atteint son maximum (Power et al., 2022)."
+        },
+        {
+          "term": "Arrêt anticipé (early stopping)",
+          "definition": "Interrompre l'entraînement quand la perte de validation cesse de s'améliorer, pour limiter le surapprentissage."
+        },
+        {
+          "term": "Surapprentissage (overfitting)",
+          "definition": "Situation où un modèle s'ajuste aux exemples d'entraînement au point de mal prédire les exemples nouveaux."
+        },
+        {
+          "term": "Double descente",
+          "definition": "Comportement où l'erreur de test remonte puis redescend quand la taille du modèle grandit, ou dans certains cas au fil de l'entraînement (Nakkiran et al., 2019)."
+        },
+        {
+          "term": "Jeton (token)",
+          "definition": "Unité discrète lue par un transformer. Ici, chaque nombre, chaque opérateur et le signe « = » est un jeton."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Compter les cases vides",
+          "prompt": "Avec p = 97, combien d’équations a + b = c existent, et quel est le niveau du hasard ? Pourquoi la précision de validation peut-elle rester au hasard alors que celle d’entraînement est presque parfaite ?",
+          "solution": "Il y a 97 × 97 = 9 409 équations ; avec la moitié en entraînement, environ 4 700 ne sont jamais vues. Le hasard vaut 1/97, soit environ 1,03 %. Mémoriser les couples vus ne dit rien des cases vides : aucune information ne les relie directement aux exemples connus. Le modèle ne peut y répondre qu’en trouvant la règle de l’addition modulaire, ce qui demande de coordonner plusieurs composantes et arrive bien plus tard. La précision d’entraînement, elle, mesure seulement la mémorisation."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Power et al. (2022), Grokking : Generalization Beyond Overfitting on Small Algorithmic Datasets",
+          "href": "https://arxiv.org/abs/2201.02177"
+        },
+        {
+          "label": "Nanda et al. (2023), Progress measures for grokking via mechanistic interpretability (ICLR 2023)",
+          "href": "https://arxiv.org/abs/2301.05217"
+        }
+      ]
+    },
+    {
+      "id": "weight-decay",
+      "title": "Le rôle du weight decay",
+      "keyTakeaways": [
+        "Le weight decay (décroissance des poids) rétrécit les poids à chaque pas, indépendamment du gradient de la perte. Avec les réglages de Power et al. (taux d'apprentissage $10^{-3}$, weight decay 1), les poids sont multipliés par 0,999 à chaque pas.",
+        "Power et al. (2022) trouvent que le weight decay est, parmi les interventions testées sur la tâche S5, la plus efficace pour réduire la quantité de données nécessaire. Nanda et al. (2023) constatent que leurs réseaux ne groquent pas sans weight decay ou autre régularisation.",
+        "Que le weight decay soit utile ne dit pas pourquoi : plusieurs explications coexistent (zone « Goldilocks », mécanisme LU, efficacité des circuits). Elles sont complémentaires ou concurrentes selon les points, et aucune n'est considérée comme définitive.",
+        "Le weight decay ne s'applique pas qu'après la mémorisation : il agit dès le début, et le réglage doit être adapté (Nanda et al. ont dû passer de 1 à 5 pour obtenir le grokking avec un module plus petit)."
+      ],
+      "theory": "### Pourquoi le réseau mémorise-t-il d'abord ?\n\nDans les deux articles, la précision d'entraînement devient presque parfaite très tôt. Dans le montage de Nanda et al. (module 4), la phase de mémorisation se termine vers l'époque 1 400 sur un entraînement de 40 000 époques. Une explication proposée est que mémoriser est plus facile : il suffit d'associer chaque couple $(a, b)$ vu à sa réponse, sans qu'aucun lien entre les exemples soit nécessaire. Trouver la règle demande de coordonner plusieurs composantes du réseau. Cela reste une explication plausible, pas une démonstration.\n\n### Ce qu'est le weight decay\n\nLe **weight decay** consiste à tirer les poids vers zéro à chaque pas d'entraînement. Dans sa forme la plus simple, on ajoute à la perte une pénalité sur la norme $\\lVert W \\rVert$ des poids (la **pénalité L2**) :\n\n$$\\mathcal{L}_{\\text{total}}(W) = \\mathcal{L}(W) + \\frac{\\lambda}{2}\\,\\lVert W \\rVert^2$$\n\noù $\\lambda$ est le coefficient de pénalité. Avec la descente de gradient simple et un taux d'apprentissage $\\eta$, la mise à jour devient :\n\n$$W \\leftarrow (1 - \\eta\\lambda)\\,W - \\eta\\,\\nabla \\mathcal{L}(W)$$\n\nLe premier terme réduit les poids d'un petit facteur à chaque pas, le second corrige les erreurs de prédiction.\n\nAvec un optimiseur adaptatif comme Adam, ajouter une pénalité à la perte n'est **pas équivalent** à rétrécir directement les poids. Loshchilov et Hutter (2017) proposent AdamW, qui applique la décroissance séparément du pas d'Adam : $W \\leftarrow W - \\eta\\,(\\text{pas d'Adam} + \\lambda W)$. C'est l'optimiseur utilisé dans les deux articles du cours. Dans AdamW, un poids qui ne reçoit aucun gradient est multiplié par $1 - \\eta\\lambda$ à chaque pas.\n\nAvec les réglages de ces articles ($\\eta = 10^{-3}$, $\\lambda = 1$), ce facteur vaut $0{,}999$. Après 1 000 pas, il vaut $0{,}999^{1000} \\approx 0{,}368$ pour les poids, donc environ $0{,}135$ pour leur somme des carrés. Le code ci-dessous le vérifie.\n\n### Une force qui persiste quand la perte est presque nulle\n\nQuand le réseau a mémorisé l'entraînement, la perte d'entraînement est presque nulle et son gradient aussi (avec l'entropie croisée il n'est jamais exactement nul). La décroissance, elle, continue d'agir. Elle ne peut pas rétrécir indéfiniment les poids sans faire remonter la perte : il s'établit un équilibre entre les deux effets.\n\n### Ce qui est établi par les expériences\n\n- **Power et al. (2022)** comparent plusieurs interventions sur la tâche du produit dans $S_5$ : descente de gradient sur lot complet, dropout résiduel, bruit sur le gradient ou les poids, weight decay. Le weight decay est celui qui améliore le plus la généralisation, en réduisant de plus de moitié la quantité de données nécessaire par rapport à la plupart des autres interventions. Un bruit d'optimisation (lots de petite taille, bruit sur les poids) aide aussi.\n- **Nanda et al. (2023)** observent que leurs réseaux ne groquent pas sur l'addition modulaire sans weight decay ni autre régularisation. Avec un coefficient plus faible, le grokking est plus lent. Avec un module plus petit ($p = 53$), le réglage $\\lambda = 1$ n'a pas suffi : il a fallu monter à $\\lambda = 5$.\n- Dans leurs courbes, la **norme des poids** présente un changement de pente à chaque phase (module 4).\n\n### Ce qui reste une hypothèse\n\nSavoir *pourquoi* le weight decay conduit à la solution générale est une question ouverte. Trois lectures publiées, que le cours ne tranche pas :\n\n- **Zone « Goldilocks »** (Liu et al., 2022) : l'apprentissage de bonnes représentations aurait lieu dans une zone intermédiaire entre mémorisation et « confusion ».\n- **Mécanisme LU** (Omnigrok, Liu, Michaud et Tegmark, 2022) : en fonction de la norme des poids, la perte d'entraînement aurait une forme de « L » et la perte de test une forme de « U ». Leurs auteurs montrent qu'on peut induire du grokking sur des tâches d'images, de langage et de molécules, et le supprimer sur des tâches algorithmiques en contraignant la norme.\n- **Efficacité des circuits** (Varma et al., 2023) : une tâche aurait deux solutions, l'une mémorisante, l'autre généralisante, plus lente à apprendre mais plus *efficace*, c'est-à-dire produisant de plus grandes sorties pour une même norme de poids. Cette idée prédit des comportements nouveaux, comme le *ungrokking* (la précision de test retombe) ou le *semi-grokking* (la généralisation reste partielle).\n\nL'image « le weight decay choisit la solution de plus faible norme » est donc commode, mais elle résume des travaux qui ne disent pas tous la même chose.",
+      "analogy": {
+        "title": "La fiche de révision à taille limitée",
+        "text": "Un élève prépare une fiche de révision sur laquelle on lui retire un peu d'encre à chaque relecture. Une fiche remplie de cas particuliers s'efface plus vite que celle qui contient une règle courte : seule la règle, relue et retracée à chaque fois, reste lisible.\n\n**Limite de l'analogie :** le weight decay ne mesure pas la « simplicité » d'une règle, il pénalise la **norme des poids**. Une solution de faible norme n'est pas automatiquement une solution plus simple ou plus générale."
+      },
+      "example": {
+        "title": "Rétrécir sans gradient : l'arithmétique",
+        "text": "Avec $\\eta = 10^{-3}$ et $\\lambda = 1$, un poids qui ne reçoit aucun gradient est multiplié par $0{,}999$ à chaque pas. Après 1 000 pas, il vaut environ 37 % de sa valeur de départ. Après 10 000 pas, il vaut environ $0{,}0045\\ \\%$ de sa valeur de départ.\n\n**Ce que cet exemple ne dit pas :** dans un entraînement réel, le gradient de la perte contrebalance cette décroissance. Le calcul illustre la force du terme de décroissance, pas la trajectoire des poids d'un réseau."
+      },
+      "diagram": {
+        "title": "Deux solutions, une pression vers les petits poids",
+        "description": "Image proposée pour se représenter l'effet du weight decay. Elle n'est pas une mesure : les deux « bassins » et leurs normes sont des hypothèses de travail.",
+        "svg": "<svg viewBox=\"0 0 800 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Schéma d'une image proposée : deux solutions possibles et la pression du weight decay vers les poids de faible norme\">\n  <defs>\n    <radialGradient id=\"grad-basin-mem\" cx=\"50%\" cy=\"50%\" r=\"50%\">\n      <stop offset=\"0%\" stop-color=\"#4c0519\"/>\n      <stop offset=\"80%\" stop-color=\"#1e1022\"/>\n      <stop offset=\"100%\" stop-color=\"#0b0f19\"/>\n    </radialGradient>\n    <radialGradient id=\"grad-basin-algo\" cx=\"50%\" cy=\"50%\" r=\"50%\">\n      <stop offset=\"0%\" stop-color=\"#064e3b\"/>\n      <stop offset=\"80%\" stop-color=\"#062d27\"/>\n      <stop offset=\"100%\" stop-color=\"#0b0f19\"/>\n    </radialGradient>\n  </defs>\n\n  <rect width=\"800\" height=\"440\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n\n  <text x=\"400\" y=\"40\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Deux solutions qui donnent 100 % à l'entraînement</text>\n  <text x=\"400\" y=\"64\" fill=\"#cbd5e1\" font-size=\"12\" text-anchor=\"middle\">Image proposée pour se représenter la situation : ce n'est pas une mesure.</text>\n\n  <g stroke=\"#475569\" stroke-width=\"1\" stroke-dasharray=\"3,3\" opacity=\"0.5\" fill=\"none\">\n    <ellipse cx=\"240\" cy=\"235\" rx=\"170\" ry=\"130\"/>\n    <ellipse cx=\"240\" cy=\"235\" rx=\"130\" ry=\"95\"/>\n    <ellipse cx=\"580\" cy=\"235\" rx=\"140\" ry=\"110\"/>\n    <ellipse cx=\"580\" cy=\"235\" rx=\"95\" ry=\"70\"/>\n  </g>\n\n  <g id=\"basin-memorization\" transform=\"translate(140, 135)\">\n    <circle cx=\"100\" cy=\"100\" r=\"95\" fill=\"url(#grad-basin-mem)\" stroke=\"#fb7185\" stroke-width=\"2\"/>\n    <text x=\"100\" y=\"62\" fill=\"#fecdd3\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Solution par cœur</text>\n    <text x=\"100\" y=\"84\" fill=\"#e2e8f0\" font-size=\"11\" text-anchor=\"middle\">une réponse mémorisée</text>\n    <text x=\"100\" y=\"100\" fill=\"#e2e8f0\" font-size=\"11\" text-anchor=\"middle\">par équation vue</text>\n    <text x=\"100\" y=\"126\" fill=\"#fda4af\" font-size=\"12\" font-weight=\"bold\" text-anchor=\"middle\">poids de plus grande norme</text>\n    <text x=\"100\" y=\"144\" fill=\"#e2e8f0\" font-size=\"11\" text-anchor=\"middle\">(hypothèse)</text>\n  </g>\n\n  <g id=\"basin-algorithm\" transform=\"translate(480, 135)\">\n    <circle cx=\"100\" cy=\"100\" r=\"75\" fill=\"url(#grad-basin-algo)\" stroke=\"#10b981\" stroke-width=\"2\"/>\n    <text x=\"100\" y=\"70\" fill=\"#a7f3d0\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Solution générale</text>\n    <text x=\"100\" y=\"90\" fill=\"#e2e8f0\" font-size=\"11\" text-anchor=\"middle\">un circuit qui calcule</text>\n    <text x=\"100\" y=\"106\" fill=\"#e2e8f0\" font-size=\"11\" text-anchor=\"middle\">la somme modulo p</text>\n    <text x=\"100\" y=\"130\" fill=\"#6ee7b7\" font-size=\"12\" font-weight=\"bold\" text-anchor=\"middle\">poids de plus faible norme</text>\n    <text x=\"100\" y=\"146\" fill=\"#e2e8f0\" font-size=\"11\" text-anchor=\"middle\">(hypothèse)</text>\n  </g>\n\n  <g id=\"vector-decay\" transform=\"translate(345, 235)\">\n    <line x1=\"0\" y1=\"0\" x2=\"120\" y2=\"0\" stroke=\"#a5b4fc\" stroke-width=\"4\"/>\n    <polygon points=\"120,-8 135,0 120,8\" fill=\"#a5b4fc\"/>\n    <text x=\"67\" y=\"-16\" fill=\"#e0e7ff\" font-size=\"12\" font-weight=\"bold\" text-anchor=\"middle\">weight decay</text>\n    <text x=\"67\" y=\"26\" fill=\"#cbd5e1\" font-size=\"11\" text-anchor=\"middle\">tire les poids vers 0</text>\n  </g>\n\n  <text x=\"400\" y=\"412\" fill=\"#cbd5e1\" font-size=\"12\" text-anchor=\"middle\">Le weight decay ne désigne pas une solution : il pénalise les poids de grande norme.</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. La solution par cœur",
+            "explanation": "Le réseau trouve d'abord une solution qui retient les équations vues. Selon une explication proposée, elle est facile à atteindre mais demande des poids de plus grande norme.",
+            "highlight": [
+              "basin-memorization"
+            ]
+          },
+          {
+            "title": "2. Une pression constante",
+            "explanation": "Le weight decay tire les poids vers zéro à chaque pas, même quand le gradient de la perte est presque nul. Il n'indique pas de direction particulière : il pénalise la norme.",
+            "highlight": [
+              "vector-decay"
+            ]
+          },
+          {
+            "title": "3. Une solution plus économe",
+            "explanation": "Si une solution générale de norme plus faible existe, la pénalité l'avantage peu à peu. Les expériences de Nanda et al. sont compatibles avec cette lecture sur l'addition modulaire, mais la cause exacte reste débattue.",
+            "highlight": [
+              "basin-algorithm"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Deux copies des mêmes poids reçoivent un gradient nul pendant 1 000 pas d'AdamW, l'une sans weight decay, l'autre avec le réglage des articles. On compare le résultat au calcul (1 - lr x wd) puissance 1 000. Le gradient est fixé explicitement à zéro : avec zero_grad() seul, PyTorch laisse le gradient à None et saute le paramètre, donc aussi sa décroissance.",
+        "code": "# Ce que fait le weight decay quand le gradient de la perte est nul :\n# AdamW multiplie chaque poids par (1 - lr * weight_decay) à chaque pas.\nimport torch\n\ntorch.manual_seed(0)\nlr, weight_decay, steps = 1e-3, 1.0, 1000\n\nw_sans = torch.nn.Parameter(torch.randn(64, 64))\nw_avec = torch.nn.Parameter(w_sans.detach().clone())\nopt_sans = torch.optim.AdamW([w_sans], lr=lr, weight_decay=0.0)\nopt_avec = torch.optim.AdamW([w_avec], lr=lr, weight_decay=weight_decay)\n\nnorme_depart = w_sans.norm().item()\nfor _ in range(steps):\n    for w, opt in ((w_sans, opt_sans), (w_avec, opt_avec)):\n        w.grad = torch.zeros_like(w)      # gradient de la perte supposé nul (perte d'entraînement déjà minimale)\n        opt.step()\n\nprint(f\"norme initiale             : {norme_depart:.2f}\")\nprint(f\"après {steps} pas, sans decay : {w_sans.norm().item():.2f}\")\nprint(f\"après {steps} pas, avec decay : {w_avec.norm().item():.2f}\")\nprint(f\"rapport observé            : {w_avec.norm().item() / norme_depart:.4f}\")\nprint(f\"(1 - lr * wd)^pas, calculé : {(1 - lr * weight_decay) ** steps:.4f}\")",
+        "output": "norme initiale             : 63.57\naprès 1000 pas, sans decay : 63.57\naprès 1000 pas, avec decay : 23.38\nrapport observé            : 0.3677\n(1 - lr * wd)^pas, calculé : 0.3677",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "La perte d'entraînement est presque nulle. Pourquoi le weight decay modifie-t-il quand même les poids ?",
+          "options": [
+            "Parce qu'il agit directement sur les poids, en les multipliant par un facteur inférieur à 1 à chaque pas, que le gradient de la perte soit grand ou petit",
+            "Parce que le gradient de la perte reste alors très grand",
+            "Parce que l'optimiseur redémarre à chaque époque et réinitialise les poids",
+            "Parce que le weight decay augmente le taux d'apprentissage quand la perte baisse"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le terme de décroissance ne dépend pas du gradient de la perte. À l'inverse, quand la perte est presque nulle, son gradient l'est aussi : ce n'est pas lui qui continue de bouger les poids. Un équilibre finit par s'établir entre la décroissance et la remontée de la perte."
+        },
+        {
+          "question": "Que peut-on affirmer à propos du weight decay et du grokking ?",
+          "options": [
+            "Dans les expériences de Nanda et al., les réseaux ne groquent pas sans weight decay ou autre régularisation, et un coefficient plus faible ralentit le grokking ; le mécanisme exact reste débattu",
+            "Il est démontré que le weight decay est nécessaire au grokking dans tous les cas",
+            "Le weight decay n'a aucun effet mesurable sur le grokking",
+            "Le weight decay accélère l'atteinte de 100 % de précision d'entraînement"
+          ],
+          "correctIndex": 0,
+          "explanation": "Nanda et al. parlent de leurs réseaux sur l'addition modulaire, pas d'une loi générale. D'autres travaux (cités par Nanda et al.) décrivent du grokking sans weight decay avec Adam. L'entraînement atteint 100 % très tôt de toute façon, avec ou sans weight decay."
+        },
+        {
+          "question": "Pourquoi parle-t-on d'AdamW plutôt que d'Adam avec une pénalité L2 ?",
+          "options": [
+            "Parce qu'avec Adam, ajouter une pénalité L2 à la perte n'équivaut pas à rétrécir directement les poids, alors qu'AdamW applique la décroissance séparément",
+            "Parce qu'AdamW utilise un taux d'apprentissage constant, contrairement à Adam",
+            "Parce qu'AdamW ne calcule aucun gradient",
+            "Parce que la pénalité L2 ne fonctionne qu'avec des réseaux d'une seule couche"
+          ],
+          "correctIndex": 0,
+          "explanation": "Avec la descente de gradient simple, pénalité L2 et weight decay donnent la même mise à jour. Avec un optimiseur adaptatif comme Adam, ce n'est plus le cas, ce qui motive la version « découplée » de Loshchilov et Hutter (2017)."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Weight decay (décroissance des poids)",
+          "definition": "Technique qui tire les poids vers zéro à chaque pas d'entraînement. Avec la descente de gradient simple, elle équivaut à une pénalité L2 sur la perte."
+        },
+        {
+          "term": "Norme L2",
+          "definition": "Longueur d'un vecteur de poids : la racine carrée de la somme des carrés de ses composantes."
+        },
+        {
+          "term": "AdamW",
+          "definition": "Variante d'Adam qui applique le weight decay séparément de la mise à jour adaptative (Loshchilov et Hutter, 2017)."
+        },
+        {
+          "term": "Régularisation",
+          "definition": "Ensemble des techniques qui limitent la capacité d'un modèle à s'ajuster aux détails de l'entraînement, par exemple le weight decay ou le dropout."
+        },
+        {
+          "term": "Efficacité d'un circuit",
+          "definition": "Dans Varma et al. (2023) : capacité d'un circuit à produire de grandes sorties pour une norme de poids donnée."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "L’arithmétique du weight decay",
+          "prompt": "Avec un taux d’apprentissage de 10⁻³ et un weight decay de 1, de combien un poids qui ne reçoit aucun gradient est-il réduit après 1 000 pas ? Pourquoi ce calcul ne décrit-il pas la trajectoire réelle des poids ?",
+          "solution": "Avec AdamW, le poids est multiplié par 1 − ηλ = 0,999 à chaque pas. Après 1 000 pas, il vaut 0,999 multiplié par lui-même 1 000 fois, soit environ 0,37 de sa valeur de départ, et sa somme des carrés environ 0,135. Dans un entraînement réel, le gradient de la perte s’oppose à cette décroissance : un équilibre s’établit, et la perte ne peut pas devenir arbitrairement basse. Le calcul illustre la force du terme de décroissance. Pourquoi elle aide à généraliser reste discuté : zone Goldilocks, mécanisme LU, efficacité des circuits."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Loshchilov et Hutter (2017), Decoupled Weight Decay Regularization",
+          "href": "https://arxiv.org/abs/1711.05101"
+        },
+        {
+          "label": "Nanda et al. (2023), Progress measures for grokking via mechanistic interpretability (ICLR 2023)",
+          "href": "https://arxiv.org/abs/2301.05217"
+        }
+      ]
+    },
+    {
+      "id": "horloge-modulaire",
+      "title": "L'addition modulaire et l'algorithme de l'horloge",
+      "keyTakeaways": [
+        "L'addition modulo $p$ est cyclique : on additionne, puis on retire $p$ autant de fois que nécessaire, comme les heures sur un cadran.",
+        "Nanda et al. (2023) montrent que leurs petits transformers résolvent l'addition modulaire en plaçant les nombres sur des cercles (sinus et cosinus de plusieurs fréquences), en combinant les angles avec des identités trigonométriques, puis en lisant la réponse par interférence constructive d'ondes.",
+        "Ce n'est pas un seul cercle de fréquence 1 : pour $p = 113$, leur modèle principal utilise cinq fréquences clés (k = 14, 35, 41, 42, 52), et ces fréquences dépendent de l'initialisation.",
+        "Ce n'est pas la seule façon de résoudre la tâche : Zhong et al. (2023) montrent que de petits changements d'hyperparamètres ou d'initialisation peuvent conduire à d'autres algorithmes."
+      ],
+      "theory": "### Pourquoi cette tâche sert de laboratoire\n\nL'**arithmétique modulaire** est celle où l'on « enroule » les nombres : calculer $a + b \\pmod{p}$ revient à additionner puis à soustraire $p$ tant que le résultat atteint ou dépasse $p$. C'est l'arithmétique des heures : il est 10 h, dans 5 heures il sera 3 h, car $10 + 5 = 15$ et $15 - 12 = 3$. Le nombre premier $p$ joue le rôle des 12 positions du cadran.\n\nC'est un bon terrain d'étude pour trois raisons : la tâche est entièrement définie, l'ensemble des entrées possibles est petit (tous les couples $(a, b)$), et sa structure mathématique est connue, ce qui permet de chercher dans le réseau une organisation que l'on sait décrire.\n\n### Comment le réseau voit les nombres\n\nUn transformer ne reçoit pas des quantités, mais des **jetons** : le nombre $17$ est un identifiant, comme le serait un mot. À chaque jeton correspond un vecteur appris, l'**embedding** (plongement), initialisé au hasard. Rien ne dit au départ que 16, 17 et 18 sont voisins.\n\nNanda, Chan, Lieberum, Smith et Steinhardt (ICLR 2023) étudient un transformer à **une seule couche**, avec 4 têtes d'attention, une couche MLP de 512 neurones (activation ReLU), une dimension interne de 128, entraîné sur l'addition modulo $p = 113$ avec 30 % des couples. Ils rétro-conçoivent ce que le réseau a appris. Leur résultat, qu'ils appellent la **multiplication de Fourier** :\n\n1. L'embedding envoie chaque nombre $a$ vers des sinus et cosinus à quelques fréquences $w_k = 2\\pi k / p$ :\n   $$\\cos(w_k a),\\ \\sin(w_k a)$$\n2. Les couches d'attention et le MLP calculent, à partir des angles de $a$ et de $b$, les quantités $\\cos(w_k(a+b))$ et $\\sin(w_k(a+b))$ grâce aux identités d'addition d'angles :\n   $$\\cos(\\theta_a + \\theta_b) = \\cos\\theta_a\\cos\\theta_b - \\sin\\theta_a\\sin\\theta_b$$\n   $$\\sin(\\theta_a + \\theta_b) = \\sin\\theta_a\\cos\\theta_b + \\cos\\theta_a\\sin\\theta_b$$\n3. Pour chaque réponse candidate $c$, la couche de sortie forme $\\cos(w_k(a+b-c))$, encore par une identité trigonométrique, et additionne les contributions des fréquences clés :\n   $$\\text{logit}(c) \\approx \\sum_{k \\in \\text{clés}} \\cos\\big(w_k\\,(a+b-c)\\big)$$\n\nChaque terme vaut au plus 1, et il vaut exactement 1 quand $c = a + b \\pmod{p}$. Pour une autre valeur de $c$, les ondes se contredisent en partie : c'est l'**interférence constructive** en $c = a+b$, et destructive ailleurs. La réponse est le $c$ au logit maximal.\n\n### Ce qui est établi, ce qui l'est moins\n\nDans leur modèle principal, les cinq fréquences clés sont $k \\in \\{14, 35, 41, 42, 52\\}$. Les autres graines aléatoires utilisent d'autres ensembles, en général de 3 à 4 fréquences, d'après leur annexe. Une approximation des sorties du réseau par la somme ci-dessus à ces cinq fréquences explique 95 % de la variance des logits d'origine (Nanda et al., 2023). Cette analyse porte sur **cette tâche et ce type de modèle**.\n\nL'algorithme n'est pas le seul possible. Zhong, Liu, Tegmark et Andreas (2023) montrent que, sur l'addition modulaire, de petits changements d'hyperparamètres ou d'initialisation peuvent mener à d'autres algorithmes (ils nomment « Clock » un algorithme de rotation et « Pizza » une procédure différente), parfois plusieurs dans le même réseau. Il faut donc dire « un algorithme que l'on retrouve souvent dans ce montage » et non « l'algorithme appris par les réseaux ».\n\n### Pourquoi plusieurs fréquences ?\n\nUne seule fréquence suffirait mathématiquement à désigner $c = a + b$ comme maximum. Une lecture simple (qui n'est pas affirmée telle quelle dans l'article) est que sommer plusieurs fréquences élargit la marge entre la bonne réponse et les autres, ce qui rend la lecture plus robuste. Le code ci-dessous montre cette marge pour $p = 113$ et les cinq fréquences de Nanda et al.",
+      "analogy": {
+        "title": "Les heures sur un cadran",
+        "text": "Ajouter 5 heures à 10 h, c'est faire tourner l'aiguille de 5 crans : on arrive à 3 h sans compter jusqu'à 15 puis retrancher 12. Placer les nombres sur un cercle rend l'addition modulaire naturelle : une somme d'angles est une rotation, et un tour complet ramène au point de départ.\n\n**Limite de l'analogie :** le réseau n'utilise pas un seul cadran de $p$ graduations. Il combine plusieurs cercles de fréquences différentes, et son « cadran » n'est lisible qu'après analyse de ses poids."
+      },
+      "example": {
+        "title": "Un calcul par interférence",
+        "text": "Avec $p = 113$, $a = 100$ et $b = 57$, on a $a + b = 157$ et $157 \\bmod 113 = 44$. En appliquant la formule des cinq fréquences clés, la réponse $c = 44$ obtient le score maximal possible, 5, alors que $c = 45$ obtient environ $-1{,}97$. Le code du module le calcule.\n\nC'est un calcul **direct de la formule**, pas la sortie d'un réseau entraîné."
+      },
+      "diagram": {
+        "title": "Un cadran à 12 positions et le calcul décrit par Nanda et al.",
+        "description": "À gauche, l'addition 2 + 3 modulo 12 vue comme une rotation. À droite, un résumé du calcul que Nanda et al. décrivent dans leur réseau.",
+        "svg": "<svg viewBox=\"0 0 800 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Addition modulo 12 sur un cadran d'horloge : 2 plus 3 donne 5, et résumé du calcul par angles\">\n  <defs>\n    <radialGradient id=\"grad-clock-dial\" cx=\"50%\" cy=\"50%\" r=\"50%\">\n      <stop offset=\"0%\" stop-color=\"#1e1b4b\"/>\n      <stop offset=\"70%\" stop-color=\"#0f172a\"/>\n      <stop offset=\"100%\" stop-color=\"#020617\"/>\n    </radialGradient>\n  </defs>\n\n  <rect width=\"800\" height=\"440\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n\n  <text x=\"260\" y=\"34\" fill=\"#f8fafc\" font-size=\"14\" font-weight=\"bold\" text-anchor=\"middle\">Un cadran à 12 positions (modulo 12)</text>\n\n  <g transform=\"translate(260, 230)\">\n    <circle cx=\"0\" cy=\"0\" r=\"140\" fill=\"url(#grad-clock-dial)\" stroke=\"#38bdf8\" stroke-width=\"2.5\"/>\n    <circle cx=\"0\" cy=\"0\" r=\"5\" fill=\"#f8fafc\"/>\n\n    <g font-family=\"monospace\" font-size=\"13\" font-weight=\"bold\" fill=\"#cbd5e1\" text-anchor=\"middle\" dominant-baseline=\"central\">\n      <text x=\"0\" y=\"-120\" fill=\"#7dd3fc\">0</text>\n      <text x=\"60\" y=\"-104\">1</text>\n      <text x=\"104\" y=\"-60\">2</text>\n      <text x=\"120\" y=\"0\">3</text>\n      <text x=\"104\" y=\"60\">4</text>\n      <text x=\"60\" y=\"104\">5</text>\n      <text x=\"0\" y=\"120\">6</text>\n      <text x=\"-60\" y=\"104\">7</text>\n      <text x=\"-104\" y=\"60\">8</text>\n      <text x=\"-120\" y=\"0\">9</text>\n      <text x=\"-104\" y=\"-60\">10</text>\n      <text x=\"-60\" y=\"-104\">11</text>\n    </g>\n\n    <line id=\"vec-a\" x1=\"0\" y1=\"0\" x2=\"80\" y2=\"-46\" stroke=\"#38bdf8\" stroke-width=\"3.5\"/>\n    <circle cx=\"80\" cy=\"-46\" r=\"5\" fill=\"#38bdf8\"/>\n    <text x=\"22\" y=\"-64\" fill=\"#7dd3fc\" font-size=\"13\" font-weight=\"bold\">a = 2</text>\n\n    <path id=\"arc-rotation\" d=\"M 80,-46 A 92 92 0 0 1 46,80\" fill=\"none\" stroke=\"#fbbf24\" stroke-width=\"2.5\" stroke-dasharray=\"4,4\"/>\n    <text x=\"148\" y=\"8\" fill=\"#fbbf24\" font-size=\"12\" font-weight=\"bold\">+ b</text>\n    <text x=\"148\" y=\"24\" fill=\"#fbbf24\" font-size=\"12\" font-weight=\"bold\">(3 crans)</text>\n\n    <line id=\"vec-sum\" x1=\"0\" y1=\"0\" x2=\"46\" y2=\"80\" stroke=\"#10b981\" stroke-width=\"4\"/>\n    <circle cx=\"46\" cy=\"80\" r=\"6\" fill=\"#10b981\"/>\n    <text x=\"14\" y=\"168\" fill=\"#6ee7b7\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">(2 + 3) mod 12 = 5</text>\n  </g>\n\n  <g transform=\"translate(470, 60)\">\n    <rect width=\"300\" height=\"320\" rx=\"14\" fill=\"#0d1527\" stroke=\"#475569\" stroke-width=\"1.5\"/>\n    <text x=\"150\" y=\"30\" fill=\"#c7d2fe\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">Le calcul décrit par Nanda et al.</text>\n\n    <g transform=\"translate(18, 52)\" font-size=\"12\" fill=\"#e2e8f0\">\n      <text y=\"8\" fill=\"#7dd3fc\" font-weight=\"bold\">1. Nombres vers angles</text>\n      <text y=\"28\" font-family=\"monospace\">θa = 2π·k·a / p</text>\n      <text y=\"46\" font-family=\"monospace\">θb = 2π·k·b / p</text>\n\n      <text y=\"82\" fill=\"#fbbf24\" font-weight=\"bold\">2. Produits de sinus et cosinus</text>\n      <text y=\"102\" font-family=\"monospace\">cos θa·cos θb , sin θa·sin θb</text>\n      <text y=\"120\" font-family=\"monospace\">sin θa·cos θb , cos θa·sin θb</text>\n\n      <text y=\"156\" fill=\"#6ee7b7\" font-weight=\"bold\">3. Identités d'addition d'angles</text>\n      <text y=\"176\" font-family=\"monospace\">cos(θa+θb) = cos θa·cos θb</text>\n      <text y=\"194\" font-family=\"monospace\">− sin θa·sin θb</text>\n\n      <text y=\"232\" fill=\"#cbd5e1\" font-size=\"11\">Ces identités sont vraies pour toutes</text>\n      <text y=\"248\" fill=\"#cbd5e1\" font-size=\"11\">les paires (a, b), vues ou non</text>\n      <text y=\"264\" fill=\"#cbd5e1\" font-size=\"11\">à l'entraînement.</text>\n    </g>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Un nombre devient un angle",
+            "explanation": "Le premier nombre, ici a = 2, est représenté par une flèche pointant vers une position du cadran. Dans le réseau, ce sont des sinus et des cosinus à plusieurs fréquences, pas un seul cadran.",
+            "highlight": [
+              "vec-a"
+            ]
+          },
+          {
+            "title": "2. Ajouter, c'est tourner",
+            "explanation": "Ajouter b = 3 revient à faire tourner la flèche de 3 crans. Les identités trigonométriques permettent de calculer cette rotation par des produits de sinus et de cosinus.",
+            "highlight": [
+              "arc-rotation"
+            ]
+          },
+          {
+            "title": "3. Lire le résultat",
+            "explanation": "La flèche d'arrivée correspond à (2 + 3) mod 12 = 5. Dans le réseau, la couche de sortie compare la rotation obtenue à chaque réponse candidate et donne le score le plus élevé à la bonne.",
+            "highlight": [
+              "vec-sum"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "On applique la formule de Nanda et al. avec leurs cinq fréquences clés pour p = 113 : aucun apprentissage, seulement le calcul. Le programme vérifie les 12 769 couples, puis montre les scores de quelques réponses candidates pour un exemple.",
+        "code": "# Addition modulaire par interférence d'ondes, avec les cinq fréquences clés\n# relevées par Nanda et al. (2023) pour p = 113. Aucun apprentissage ici : on applique la formule.\nimport math\n\nP = 113\nKEY_FREQS = [14, 35, 41, 42, 52]          # fréquences clés du modèle principal de l'article\n\ndef predict(a, b):\n    # logit(c) = somme sur k de cos(w_k (a + b - c)), avec w_k = 2*pi*k / P\n    best_c, best_score = None, -1e9\n    for c in range(P):\n        score = sum(math.cos(2 * math.pi * k * (a + b - c) / P) for k in KEY_FREQS)\n        if score > best_score:\n            best_c, best_score = c, score\n    return best_c\n\nerrors = sum(predict(a, b) != (a + b) % P for a in range(P) for b in range(P))\nprint(f\"paires testées : {P * P}, erreurs : {errors}\")\n\na, b = 100, 57\ntrue = (a + b) % P\nprint(f\"exemple : ({a} + {b}) mod {P} = {true}\")\nfor c in (true, (true + 1) % P, (true + 40) % P):\n    score = sum(math.cos(2 * math.pi * k * (a + b - c) / P) for k in KEY_FREQS)\n    print(f\"  score pour c = {c:3d} : {score:6.2f}  (maximum possible : {len(KEY_FREQS)})\")",
+        "output": "paires testées : 12769, erreurs : 0\nexemple : (100 + 57) mod 113 = 44\n  score pour c =  44 :   5.00  (maximum possible : 5)\n  score pour c =  45 :  -1.97  (maximum possible : 5)\n  score pour c =  84 :  -0.97  (maximum possible : 5)",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Pourquoi le sinus et le cosinus conviennent-ils à l'addition modulaire ?",
+          "options": [
+            "Ils sont périodiques, ce qui reflète le « modulo p », et leurs identités d'addition transforment une somme d'angles en produits de sinus et de cosinus",
+            "Parce qu'un réseau de neurones ne sait traiter que des nombres compris entre -1 et 1",
+            "Parce que la fonction ReLU est une fonction trigonométrique",
+            "Parce que le modulo oblige à utiliser des nombres complexes dans le code"
+          ],
+          "correctIndex": 0,
+          "explanation": "La périodicité fait que a + b et a + b + p donnent les mêmes valeurs, ce qui correspond au « modulo p ». La ReLU n'est pas trigonométrique, et rien n'oblige un réseau à utiliser des nombres complexes : les résultats de Nanda et al. portent sur des sinus et cosinus calculés par des couches ordinaires."
+        },
+        {
+          "question": "Dans l'algorithme décrit par Nanda et al., comment la bonne réponse c reçoit-elle le logit le plus élevé ?",
+          "options": [
+            "Le logit de c est une somme de termes cos(w(a + b - c)) sur les fréquences clés : tous valent 1 quand c = a + b modulo p, et se contredisent en partie sinon",
+            "Le réseau compare a + b à une table de p valeurs mémorisées une à une",
+            "Le réseau calcule a + b en nombre réel, puis arrondit à l'entier le plus proche",
+            "Le réseau tire au sort une réponse puis la corrige plusieurs fois"
+          ],
+          "correctIndex": 0,
+          "explanation": "Une table de correspondance serait précisément la solution par cœur, qui ne généralise pas aux couples non vus. Le calcul par interférence fonctionne pour toutes les paires, y compris celles absentes de l'entraînement."
+        },
+        {
+          "question": "Que conclure de l'étude de Zhong et al. (2023) sur « Clock » et « Pizza » ?",
+          "options": [
+            "Sur l'addition modulaire, de petits changements d'hyperparamètres ou d'initialisation peuvent conduire à d'autres algorithmes, ce qui interdit de dire que « le » réseau apprend toujours le même",
+            "Que les réseaux apprennent toujours exactement l'algorithme de Nanda et al.",
+            "Que l'algorithme de Nanda et al. est faux",
+            "Que seul un transformer à deux couches peut apprendre l'addition modulaire"
+          ],
+          "correctIndex": 0,
+          "explanation": "Zhong et al. ne contredisent pas Nanda et al. : ils montrent qu'il existe plusieurs solutions, selon les réglages. L'analyse de Nanda et al. décrit correctement un montage précis, mais elle ne se généralise pas automatiquement à tous les réseaux."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Arithmétique modulaire",
+          "definition": "Arithmétique où les nombres sont ramenés dans l'intervalle de 0 à p - 1 par reste de division par p, comme les heures sur un cadran."
+        },
+        {
+          "term": "Embedding (plongement)",
+          "definition": "Vecteur appris associé à chaque jeton d'entrée, qui devient la représentation de ce jeton dans le réseau."
+        },
+        {
+          "term": "Fréquence clé",
+          "definition": "Entier k tel que le réseau utilise des sinus et cosinus d'angle 2πk/p pour résoudre la tâche."
+        },
+        {
+          "term": "Logit",
+          "definition": "Score brut donné à chaque réponse possible avant la normalisation par softmax."
+        },
+        {
+          "term": "Interférence constructive",
+          "definition": "Addition d'ondes qui se renforcent au même endroit et se contredisent ailleurs."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Un tour de cadran",
+          "prompt": "Avec p = 113, a = 100 et b = 57, calculez a + b modulo p. Comment le réseau décrit dans le module représente-t-il ces nombres, et pourquoi la bonne réponse obtient-elle le meilleur score ?",
+          "solution": "100 + 57 = 157, et 157 − 113 = 44. L’embedding place chaque nombre sur des cercles, avec des sinus et cosinus à quelques fréquences ; l’attention et le MLP combinent les angles par les identités d’addition. La sortie forme, pour chaque candidat c, la somme des cosinus de w(a + b − c) : le terme vaut 1 quand c = a + b, donc le score maximal vaut 5 avec les cinq fréquences clés, contre environ −1,97 pour c = 45. Les autres ondes interfèrent de façon destructive."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Nanda et al. (2023), Progress measures for grokking via mechanistic interpretability (ICLR 2023)",
+          "href": "https://arxiv.org/abs/2301.05217"
+        },
+        {
+          "label": "Zhong et al. (2023), The Clock and the Pizza : Two Stories in Mechanistic Explanation of Neural Networks",
+          "href": "https://arxiv.org/abs/2306.17844"
+        }
+      ]
+    },
+    {
+      "id": "trois-phases",
+      "title": "Les trois phases de Nanda et al. et une expérience réduite",
+      "keyTakeaways": [
+        "Nanda et al. (2023) découpent l'entraînement en trois phases : mémorisation, formation du circuit, nettoyage. La mémorisation s'achève très tôt, le circuit se renforce longtemps sans effet visible sur le test, et la perte de test chute pendant le nettoyage.",
+        "Leur idée centrale est qu'il existe des mesures de progression continues, par exemple la « perte restreinte » (calculée avec seulement les fréquences clés), qui s'améliorent avant le saut de la précision de test.",
+        "Le grokking n'est donc pas un changement brutal à l'intérieur du réseau : le circuit se renforce graduellement, et le nettoyage des composantes de mémorisation le rend visible sur le test.",
+        "Dans l'expérience réduite du cours (p = 53, une couche, environ une à deux minutes sur CPU), le test passe de 46 % à plus de 99 % entre les époques 250 et 1 250, avec weight decay. Sans lui, le test reste entre 37 et 44 % pendant 2 500 époques."
+      ],
+      "theory": "### Des mesures qui évoluent avant le saut\n\nAu début, le grokking ressemble à un plateau où « rien ne se passe ». Nanda et al. (2023) montrent qu'on peut, en connaissant l'algorithme (module 3), définir des quantités qui progressent régulièrement pendant ce plateau :\n\n- la **perte restreinte** (*restricted loss*) : on garde, dans les sorties du réseau, uniquement les composantes aux fréquences clés, et l'on mesure la perte ;\n- la **perte exclue** (*excluded loss*) : on retire au contraire ces composantes, et l'on mesure la perte sur l'entraînement ;\n- la **somme des carrés des poids**, c'est-à-dire la norme des poids au carré.\n\nCes mesures se calculent parce qu'on connaît le circuit à chercher. Elles ne sont pas disponibles pour une tâche quelconque.\n\n### Les trois phases\n\nPour leur modèle principal ($p = 113$, 30 % des couples en entraînement, lot complet, AdamW avec $\\lambda = 1$, 40 000 époques), les auteurs distinguent :\n\n1. **Mémorisation** (époques 0 à 1 400 environ). La perte d'entraînement et la perte exclue baissent ; la perte de test et la perte restreinte restent élevées. Les fréquences que le modèle final utilisera ne sont pas encore utilisées.\n2. **Formation du circuit** (environ 1 400 à 9 400). La perte exclue monte, la perte restreinte commence à baisser, la somme des carrés des poids diminue, alors que les pertes d'entraînement et de test restent plates. Le comportement sur l'entraînement passe peu à peu de la solution mémorisée à l'algorithme de Fourier. Ils en déduisent que la formation du circuit est probablement due au weight decay.\n3. **Nettoyage** (environ 9 400 à 14 000). La perte exclue se stabilise, la perte restreinte continue de baisser, la perte de test chute, la somme des carrés des poids baisse nettement. Comme le circuit complet résout la tâche avec des poids de plus faible norme que la mémorisation, le weight decay pousse le réseau à abandonner la solution mémorisée.\n\nLa généralisation apparaît donc pendant le nettoyage, **après** que le mécanisme général est formé. Les auteurs concluent que le grokking provient d'une amplification graduelle de mécanismes structurés, suivie de la suppression des composantes de mémorisation, plutôt que d'un saut soudain.\n\n### Limites que les auteurs signalent\n\nLe modèle est petit, la tâche simple (un seul circuit), et l'analyse a demandé beaucoup de travail manuel. Les mesures de progression sont propres à cette tâche. Les auteurs écrivent qu'ils n'ont pas de notion générale de « criticité » qui permettrait de prédire à l'avance quand la transition aura lieu.\n\n### Une expérience réduite à refaire\n\nReproduire l'expérience de Nanda et al. prend du temps. Le code ci-dessous en propose une version réduite, qui s'exécute sur un CPU en environ une à deux minutes :\n\n- $p = 53$ au lieu de 113, et la moitié des couples en entraînement au lieu de 30 % ;\n- un transformer à une couche : une dimension interne de 128, 4 têtes, un MLP de 256 neurones, sans normalisation de couche ;\n- AdamW ($\\eta = 10^{-3}$, $\\lambda = 1$, $\\beta_2 = 0{,}98$), lot complet, 2 000 époques ;\n- en plus de la précision, on suit la norme des poids et une mesure simple d'**énergie spectrale** : la part de l'énergie de la matrice d'embedding portée par ses 6 fréquences dominantes (valeur de départ 0,26, proche de ce qu'on attend pour un tirage aléatoire).\n\nCes choix ne sont pas ceux de l'article ; le comportement a été observé sur une graine, celle du code. Les valeurs peuvent légèrement varier d'une machine à l'autre.",
+      "analogy": {
+        "title": "Un chantier avant la mise en service",
+        "text": "Pendant la construction d'un pont, la circulation ne change pas : tant qu'il n'est pas relié des deux côtés, personne ne le traverse. Pourtant le chantier avance chaque jour. Mesurer le nombre de voitures ne révèle rien, mais compter les poutres posées montre un progrès continu.\n\n**Limite de l'analogie :** un chantier suit un plan connu à l'avance. Ici, il a fallu rétro-concevoir l'algorithme pour savoir quoi compter, et rien ne dit que cette approche se transpose à des modèles ou des tâches plus complexes."
+      },
+      "example": {
+        "title": "Lire la sortie de l'expérience réduite",
+        "text": "Voici ce que montre l'exécution du code ci-dessous (graine fixée).\n\n| Époque | Précision d'entraînement | Précision de test | Norme² des poids | Énergie des 6 fréquences |\n| :--- | :--- | :--- | :--- | :--- |\n| 0 | 2,4 % | 2,0 % | 375 | 0,26 |\n| 250 | 100 % | 46,0 % | 1 549 | 0,47 |\n| 750 | 100 % | 80,9 % | 1 323 | 0,63 |\n| 1 250 | 100 % | 100 % | 960 | 0,80 |\n| 2 000 | 100 % | 100 % | 743 | 0,93 |\n\n- La mémorisation est quasi complète dès l'époque 250. Le test est déjà à 46 % parce que l'addition est commutative : environ la moitié des équations de test ont leur « jumelle » $b + a$ dans l'entraînement, et mémoriser la jumelle donne la bonne réponse (module 1). La mémorisation n'est donc pas un hasard à 1,9 %.\n- Entre les époques 250 et 1 250, la précision d'entraînement ne bouge plus, la norme des poids baisse (de 1 549 à 960) et l'énergie des fréquences dominantes monte (de 0,47 à 0,80) : un circuit se renforce, comme dans les phases 2 et 3 de Nanda et al. Dans cette version réduite, les phases se chevauchent plus que dans leur figure.\n- Entre les époques 1 250 et 1 500, une brève instabilité apparaît (précision d'entraînement 99,6 %), puis tout se stabilise.\n\n**Variante sans weight decay** (même code avec `WEIGHT_DECAY = 0.0`, exécutée séparément avec la même graine, 2 500 époques) : la précision d'entraînement reste à 100 %, la précision de test reste entre 37 % et 44 % de l'époque 250 à l'époque 2 500, la norme² des poids continue d'augmenter (de 1 905 à 2 420) et l'énergie spectrale reste entre 0,42 et 0,46. Pas de nettoyage, pas de généralisation.\n\n**Prudence :** une graine, un montage réduit, un seul réglage. Ces résultats illustrent le phénomène, ils ne démontrent rien de général. En particulier, avec 30 % des couples et $p = 53$, ce même montage n'a pas généralisé en 4 000 époques lors de nos essais, ce qui rappelle l'importance de la quantité de données et du réglage."
+      },
+      "diagram": {
+        "title": "Les trois phases : un circuit qui se forme avant d'être visible",
+        "description": "Schéma qualitatif d'après la description de Nanda et al. (2023). Ce ne sont pas des mesures.",
+        "svg": "<svg viewBox=\"0 0 800 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Schéma qualitatif des trois phases du grokking : mémorisation, formation du circuit, nettoyage\">\n  <defs>\n    <linearGradient id=\"grad-bg-3\" x1=\"0%\" y1=\"0%\" x2=\"100%\" y2=\"100%\">\n      <stop offset=\"0%\" stop-color=\"#070b14\"/>\n      <stop offset=\"100%\" stop-color=\"#131d33\"/>\n    </linearGradient>\n  </defs>\n\n  <rect width=\"800\" height=\"440\" rx=\"16\" fill=\"url(#grad-bg-3)\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n\n  <line x1=\"80\" y1=\"340\" x2=\"740\" y2=\"340\" stroke=\"#64748b\" stroke-width=\"2\"/>\n  <line x1=\"80\" y1=\"60\" x2=\"80\" y2=\"340\" stroke=\"#64748b\" stroke-width=\"2\"/>\n  <text x=\"410\" y=\"366\" fill=\"#cbd5e1\" font-size=\"12\" text-anchor=\"middle\">temps d'entraînement (sans échelle)</text>\n\n  <line x1=\"200\" y1=\"60\" x2=\"200\" y2=\"340\" stroke=\"#475569\" stroke-dasharray=\"4,4\"/>\n  <line x1=\"560\" y1=\"60\" x2=\"560\" y2=\"340\" stroke=\"#475569\" stroke-dasharray=\"4,4\"/>\n\n  <rect id=\"phase-1\" x=\"85\" y=\"68\" width=\"110\" height=\"40\" rx=\"6\" fill=\"rgba(56, 189, 248, 0.14)\" stroke=\"#38bdf8\"/>\n  <text x=\"140\" y=\"85\" fill=\"#bae6fd\" font-size=\"12\" font-weight=\"bold\" text-anchor=\"middle\">Phase 1</text>\n  <text x=\"140\" y=\"101\" fill=\"#bae6fd\" font-size=\"12\" text-anchor=\"middle\">mémorisation</text>\n\n  <rect id=\"phase-2\" x=\"220\" y=\"68\" width=\"320\" height=\"40\" rx=\"6\" fill=\"rgba(168, 85, 247, 0.14)\" stroke=\"#a855f7\"/>\n  <text x=\"380\" y=\"85\" fill=\"#e9d5ff\" font-size=\"12\" font-weight=\"bold\" text-anchor=\"middle\">Phase 2</text>\n  <text x=\"380\" y=\"101\" fill=\"#e9d5ff\" font-size=\"12\" text-anchor=\"middle\">formation du circuit</text>\n\n  <rect id=\"phase-3\" x=\"580\" y=\"68\" width=\"150\" height=\"40\" rx=\"6\" fill=\"rgba(16, 185, 129, 0.14)\" stroke=\"#10b981\"/>\n  <text x=\"655\" y=\"85\" fill=\"#a7f3d0\" font-size=\"12\" font-weight=\"bold\" text-anchor=\"middle\">Phase 3</text>\n  <text x=\"655\" y=\"101\" fill=\"#a7f3d0\" font-size=\"12\" text-anchor=\"middle\">nettoyage</text>\n\n  <path id=\"curve-fourier-growth\" d=\"M 80,338 Q 180,335 240,320 T 380,245 T 520,160 L 580,125 L 740,120\" fill=\"none\" stroke=\"#c084fc\" stroke-width=\"4\"/>\n  <text x=\"95\" y=\"282\" fill=\"#e9d5ff\" font-size=\"12\" font-weight=\"bold\">progrès du circuit</text>\n  <text x=\"95\" y=\"298\" fill=\"#e9d5ff\" font-size=\"12\" font-weight=\"bold\">de Fourier</text>\n\n  <path id=\"curve-test-jump\" d=\"M 80,336 L 550,335 Q 570,334 585,260 T 620,135 L 740,132\" fill=\"none\" stroke=\"#34d399\" stroke-width=\"3\" stroke-dasharray=\"3,3\"/>\n  <text x=\"600\" y=\"300\" fill=\"#6ee7b7\" font-size=\"12\" font-weight=\"bold\">précision de test</text>\n\n  <path id=\"curve-weight-norm\" d=\"M 200,150 L 540,185 Q 580,195 600,240 T 680,290 L 740,295\" fill=\"none\" stroke=\"#fb7185\" stroke-width=\"2.5\"/>\n  <text x=\"215\" y=\"140\" fill=\"#fecdd3\" font-size=\"12\">norme des poids : baisse lente, puis nette</text>\n\n  <g id=\"callout-stealth\" transform=\"translate(356, 272)\">\n    <rect width=\"208\" height=\"58\" rx=\"8\" fill=\"#090e1a\" stroke=\"#64748b\" stroke-width=\"1\"/>\n    <text x=\"10\" y=\"19\" fill=\"#f1f5f9\" font-size=\"11\" font-weight=\"bold\">Phase 2 : le circuit grandit,</text>\n    <text x=\"10\" y=\"35\" fill=\"#cbd5e1\" font-size=\"11\">mais le test reste bas : la</text>\n    <text x=\"10\" y=\"50\" fill=\"#cbd5e1\" font-size=\"11\">mémorisation pèse encore.</text>\n  </g>\n\n  <text x=\"400\" y=\"410\" fill=\"#cbd5e1\" font-size=\"11\" text-anchor=\"middle\">Schéma qualitatif d'après la description de Nanda et al. (2023) : ce ne sont pas des mesures.</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Mémorisation",
+            "explanation": "Le modèle apprend les équations d'entraînement : la perte d'entraînement baisse, tandis que la perte de test et la perte restreinte restent élevées. Les fréquences que le modèle utilisera plus tard ne servent pas encore.",
+            "highlight": [
+              "phase-1"
+            ]
+          },
+          {
+            "title": "2. Formation du circuit",
+            "explanation": "Le mécanisme de Fourier se renforce progressivement, la norme des poids baisse lentement, mais la précision de test reste basse : la mémorisation pèse encore sur les prédictions.",
+            "highlight": [
+              "phase-2",
+              "curve-fourier-growth",
+              "callout-stealth",
+              "curve-weight-norm"
+            ]
+          },
+          {
+            "title": "3. Nettoyage",
+            "explanation": "Les composantes de mémorisation, devenues inutiles, sont retirées. La norme des poids baisse nettement et la précision de test monte : la généralisation devient visible.",
+            "highlight": [
+              "phase-3",
+              "curve-test-jump",
+              "curve-weight-norm"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Entraînement complet d'un transformer à une couche sur l'addition modulo 53, avec la moitié des couples. Toutes les 250 époques, le programme affiche les pertes et les précisions, la norme des poids et l'énergie spectrale des embeddings. Pour la variante sans weight decay, remplacez WEIGHT_DECAY par 0.0.",
+        "code": "# Grokking sur l'addition modulaire : petit transformer à une couche, AdamW, lot complet.\n# Inspiré du montage de Nanda et al. (2023), réduit pour tourner sur CPU.\nimport math\nimport time\nimport torch\nimport torch.nn as nn\nimport torch.nn.functional as F\n\ntorch.manual_seed(0)\ntorch.set_num_threads(4)\n\nP = 53            # modulo premier (113 dans l'article de Nanda et al.)\nTRAIN_FRAC = 0.5  # fraction des paires (a, b) vue à l'entraînement\nD_MODEL, N_HEADS, D_MLP = 128, 4, 256\nEPOCHS, EVAL_EVERY = 2000, 250\nLR, WEIGHT_DECAY = 1e-3, 1.0\n\n# Toutes les paires (a, b) et leur somme modulo P ; le jeton P sert de signe « = ».\na = torch.arange(P).repeat_interleave(P)\nb = torch.arange(P).repeat(P)\nx = torch.stack([a, b, torch.full_like(a, P)], dim=1)\ny = (a + b) % P\nperm = torch.randperm(P * P)\nn_train = int(TRAIN_FRAC * P * P)\ntr, te = perm[:n_train], perm[n_train:]\nx_tr, y_tr, x_te, y_te = x[tr], y[tr], x[te], y[te]\n\nclass OneLayerTransformer(nn.Module):\n    def __init__(self):\n        super().__init__()\n        self.embed = nn.Embedding(P + 1, D_MODEL)\n        nn.init.normal_(self.embed.weight, std=1 / math.sqrt(D_MODEL))\n        self.pos = nn.Parameter(torch.randn(3, D_MODEL) / math.sqrt(D_MODEL))\n        self.qkv = nn.Linear(D_MODEL, 3 * D_MODEL, bias=False)\n        self.proj = nn.Linear(D_MODEL, D_MODEL, bias=False)\n        self.mlp_in = nn.Linear(D_MODEL, D_MLP)\n        self.mlp_out = nn.Linear(D_MLP, D_MODEL)\n        self.unembed = nn.Linear(D_MODEL, P, bias=False)\n\n    def forward(self, tokens):\n        n, d, h = tokens.shape[0], D_MODEL, N_HEADS\n        z = self.embed(tokens) + self.pos                       # (n, 3, d)\n        q, k, v = self.qkv(z).split(d, dim=-1)\n        q = q[:, -1:].view(n, 1, h, d // h).transpose(1, 2)     # seule la position « = » interroge\n        k = k.view(n, 3, h, d // h).transpose(1, 2)\n        v = v.view(n, 3, h, d // h).transpose(1, 2)\n        att = F.scaled_dot_product_attention(q, k, v)           # (n, h, 1, d/h)\n        r = z[:, -1] + self.proj(att.transpose(1, 2).reshape(n, d))\n        r = r + self.mlp_out(F.relu(self.mlp_in(r)))\n        return self.unembed(r)\n\nmodel = OneLayerTransformer()\nopt = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY, betas=(0.9, 0.98))\n\ndef fourier_concentration():\n    \"\"\"Part de l'énergie de la matrice d'embedding des nombres portée par ses 6 fréquences dominantes.\"\"\"\n    w = model.embed.weight.detach()[:P]                     # (P, D_MODEL)\n    w = w - w.mean(dim=0, keepdim=True)\n    energy = torch.fft.rfft(w, dim=0).abs().pow(2).sum(dim=1)[1:]   # une valeur par fréquence k = 1..P//2\n    return (energy.sort(descending=True).values[:6].sum() / energy.sum()).item()\n\n@torch.no_grad()\ndef evaluate(xs, ys):\n    logits = model(xs)\n    return F.cross_entropy(logits, ys).item(), (logits.argmax(-1) == ys).float().mean().item()\n\nprint(f\"P={P}, {n_train} paires d'entraînement, {P*P-n_train} de test, hasard = {100/P:.1f} %\")\nprint(\"époque | perte train | acc train | perte test | acc test | norme² poids | énergie 6 freq.\")\nt0, first = time.time(), {}\nfor epoch in range(EPOCHS + 1):\n    if epoch % EVAL_EVERY == 0:\n        l_tr, a_tr = evaluate(x_tr, y_tr)\n        l_te, a_te = evaluate(x_te, y_te)\n        sq = sum(p.pow(2).sum().item() for p in model.parameters())\n        print(f\"{epoch:6d} | {l_tr:11.4f} | {a_tr:9.3f} | {l_te:10.4f} | {a_te:8.3f} | {sq:12.0f} | {fourier_concentration():14.2f}\")\n        for name, acc in ((\"train\", a_tr), (\"test\", a_te)):\n            if acc >= 0.99 and name not in first:\n                first[name] = epoch\n    loss = F.cross_entropy(model(x_tr), y_tr)\n    opt.zero_grad()\n    loss.backward()\n    opt.step()\nprint(f\"Première évaluation avec précision >= 99 % : entraînement à l'époque {first.get('train')}, test à l'époque {first.get('test')}\")\nprint(f\"Durée : {time.time() - t0:.0f} s\")",
+        "output": "P=53, 1404 paires d'entraînement, 1405 de test, hasard = 1.9 %\népoque | perte train | acc train | perte test | acc test | norme² poids | énergie 6 freq.\n     0 |      3.9756 |     0.024 |     3.9723 |    0.020 |          375 |           0.26\n   250 |      0.0057 |     1.000 |     7.0500 |    0.460 |         1549 |           0.47\n   500 |      0.0003 |     1.000 |     3.6871 |    0.572 |         1454 |           0.54\n   750 |      0.0000 |     1.000 |     0.8893 |    0.809 |         1323 |           0.63\n  1000 |      0.0000 |     1.000 |     0.0310 |    0.988 |         1148 |           0.72\n  1250 |      0.0000 |     1.000 |     0.0001 |    1.000 |          960 |           0.80\n  1500 |      0.0108 |     0.996 |     0.0247 |    0.990 |          967 |           0.89\n  1750 |      0.0036 |     1.000 |     0.0057 |    1.000 |          685 |           0.90\n  2000 |      0.0004 |     1.000 |     0.0007 |    1.000 |          743 |           0.93\nPremière évaluation avec précision >= 99 % : entraînement à l'époque 250, test à l'époque 1250\nDurée : 79 s",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Dans quel ordre Nanda et al. décrivent-ils les trois phases de l'entraînement ?",
+          "options": [
+            "Mémorisation, formation du circuit, nettoyage",
+            "Mémorisation, nettoyage, formation du circuit",
+            "Initialisation, convergence, surapprentissage",
+            "Formation du circuit, mémorisation, nettoyage"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le réseau mémorise d'abord (c'est plus rapide), le circuit général se renforce ensuite, puis les composantes de mémorisation sont retirées. La généralisation visible sur le test intervient pendant le nettoyage."
+        },
+        {
+          "question": "Pendant la formation du circuit, la perte de test reste élevée. Que montre pourtant la perte restreinte ?",
+          "options": [
+            "Elle diminue progressivement : le mécanisme général se renforce avant d'être visible sur le test",
+            "Elle reste constante, comme la perte de test",
+            "Elle augmente, car le réseau oublie ce qu'il a mémorisé",
+            "Elle devient nulle dès le début de la phase"
+          ],
+          "correctIndex": 0,
+          "explanation": "C'est l'intérêt d'une mesure de progression : elle isole la contribution des fréquences clés, qui progresse même quand la perte globale est masquée par les composantes de mémorisation. Elle ne se calcule que parce qu'on connaît le circuit à chercher."
+        },
+        {
+          "question": "Dans l'expérience réduite du cours, pourquoi la précision de test dépasse-t-elle le hasard (1,9 %) dès que l'entraînement est mémorisé ?",
+          "options": [
+            "Parce que l'addition est commutative : la moitié des équations de test ont leur jumelle b + a dans l'entraînement, dont la réponse a été mémorisée",
+            "Parce que les équations de test sont aussi dans l'entraînement",
+            "Parce que le modèle devine toujours le même nombre",
+            "Parce que les poids sont initialisés avec les bonnes réponses"
+          ],
+          "correctIndex": 0,
+          "explanation": "Les équations de test ne sont pas dans l'entraînement : ce sont des couples différents. Mais a + b = b + a, donc une équation et sa jumelle partagent la réponse. Si le modèle devinait toujours le même nombre, on resterait à 1,9 %."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Mesure de progression (progress measure)",
+          "definition": "Quantité interne qui évolue de façon continue pendant un entraînement, avant que le changement ne soit visible sur la perte ou la précision de test."
+        },
+        {
+          "term": "Perte restreinte (restricted loss)",
+          "definition": "Perte calculée en ne gardant dans les sorties du réseau que les composantes aux fréquences clés."
+        },
+        {
+          "term": "Perte exclue (excluded loss)",
+          "definition": "Perte calculée en retirant les composantes aux fréquences clés des sorties du réseau."
+        },
+        {
+          "term": "Nettoyage (cleanup)",
+          "definition": "Troisième phase décrite par Nanda et al. : retrait des composantes de mémorisation, devenues inutiles, sous l'effet du weight decay."
+        },
+        {
+          "term": "Énergie spectrale",
+          "definition": "Somme des carrés des amplitudes d'une composante de Fourier. Dans le code du cours : part portée par les 6 fréquences dominantes de la matrice d'embedding."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Ce qui bouge pendant le plateau",
+          "prompt": "Pendant le plateau où la précision de test ne bouge pas, quelles mesures Nanda et al. suivent-ils, et que montrent-elles ? Pourquoi ces mesures ne sont-elles pas disponibles pour une tâche quelconque ?",
+          "solution": "Ils suivent la perte restreinte, calculée avec les seules fréquences clés, la perte exclue, calculée sans elles, et la somme des carrés des poids. Pendant la formation du circuit, la perte restreinte baisse et les poids rétrécissent alors que les pertes d’entraînement et de test restent plates ; la chute du test arrive ensuite, au nettoyage. Le circuit se renforce donc graduellement. Ces mesures supposent de connaître le circuit à chercher : elles sont propres à cette tâche et ne se transposent pas telles quelles."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Nanda et al. (2023), Progress measures for grokking via mechanistic interpretability (ICLR 2023)",
+          "href": "https://arxiv.org/abs/2301.05217"
+        },
+        {
+          "label": "Varma et al. (2023), Explaining grokking through circuit efficiency",
+          "href": "https://arxiv.org/abs/2309.02390"
+        }
+      ]
+    },
+    {
+      "id": "frequences-fourier",
+      "title": "Les fréquences de Fourier et les ablations",
+      "keyTakeaways": [
+        "Dans le modèle principal de Nanda et al. (2023), la matrice d'embedding est creuse dans la base de Fourier : seules quelques fréquences ont une norme non négligeable, et cinq d'entre elles (les fréquences clés) sont utilisées dans la suite du réseau.",
+        "La matrice qui relie les neurones du MLP aux logits est approximativement de rang 10 : un cosinus et un sinus pour chacune des cinq fréquences clés. Sur 512 neurones, 433 (84,6 %) ont plus de 85 % de leur variance expliquée par un polynôme de degré 2 d'une seule fréquence.",
+        "Les ablations confirment le rôle causal de ces fréquences : retirer les fréquences clés des logits dégrade les prédictions, et retirer toutes les autres fréquences ne les dégrade pas (la perte baisse même un peu).",
+        "Une « fréquence » k est le nombre de tours que fait le nombre x sur un cercle quand il va de 0 à p - 1 : x est placé à l'angle $2\\pi k x / p$. L'ensemble des fréquences clés dépend de l'initialisation."
+      ],
+      "theory": "### Lire les poids avec une transformée de Fourier\n\nLa **transformée de Fourier discrète** décompose une suite de $p$ valeurs en ondes sinusoïdales de fréquences $k = 0, 1, 2, \\dots$ : l'onde de fréquence $k$ fait $k$ tours complets quand $x$ va de $0$ à $p - 1$. Appliquée à la matrice d'embedding $W_E$ le long de l'axe des nombres, elle indique à quelles fréquences les représentations apprises ont de l'énergie.\n\nDans leur modèle principal, Nanda et al. (2023) trouvent que $W_E$ est **creuse dans la base de Fourier** : la norme des composantes est non négligeable pour 6 fréquences seulement, dont 5 servent ensuite dans le réseau. Ces **fréquences clés** sont $k \\in \\{14, 35, 41, 42, 52\\}$ pour $p = 113$. Tout au long du réseau, on retrouve cette périodicité : dans l'attention, dans les activations des neurones du MLP, dans les logits.\n\n### Ce que la structure permet de vérifier\n\n- **Les logits** : sur les $113^3$ valeurs de sortie, une somme à ces cinq fréquences, $\\sum_k \\alpha_k \\cos(w_k(a+b-c))$, explique 95 % de la variance, et son utilisation à la place des sorties d'origine améliore même légèrement la perte de test (de $2{,}4 \\cdot 10^{-7}$ à $4{,}7 \\cdot 10^{-8}$).\n- **Les neurones** : la plupart sont bien approchés par un polynôme de degré 2 de sinus et de cosinus d'une seule fréquence, ce qui correspond à des produits comme $\\cos\\theta_a\\cos\\theta_b$.\n- **Les ablations** : on remplace ou on retire des composantes du réseau pour voir ce qui se passe. Retirer les fréquences clés des logits fait passer les prédictions à un niveau pire que le hasard. Retirer au contraire toutes les autres fréquences ne les dégrade pas, et améliore légèrement la performance. Cela indique que ce sont bien ces fréquences, et non d'autres composantes du réseau, qui portent la solution générale.\n\nDans leurs expériences, les auteurs observent des résultats comparables sur d'autres graines (3 à 4 fréquences clés selon les graines), d'autres modules premiers et d'autres fractions de données.\n\n### Représentations visibles dès l'article d'origine\n\nPower et al. (2022) avaient déjà projeté les vecteurs de sortie du réseau avec t-SNE (une méthode de visualisation) et noté que, pour l'addition modulaire, les nombres s'ordonnent avec une « ligne numérique » obtenue en ajoutant 8 à chaque élément. Ils écrivent que cette structure est plus nette avec weight decay. C'est une observation qualitative, pas une preuve du circuit de Fourier, qui n'a été mis au jour qu'ensuite.\n\n### Pourquoi plusieurs fréquences ?\n\nVoir le module 3 : une seule fréquence suffirait à désigner la bonne réponse, mais en additionner plusieurs creuse l'écart avec les mauvaises. Les auteurs ne présentent pas cette lecture telle quelle ; elle reste notre interprétation, à prendre comme telle.\n\n### Ce que cela ne montre pas\n\nL'analyse porte sur **un** montage (une couche, une opération). Elle ne dit pas que tout réseau qui groque utilise des fréquences de Fourier, ni que les grands modèles de langage se décrivent ainsi.",
+      "analogy": {
+        "title": "Un accord de plusieurs notes",
+        "text": "Une corde de guitare vibre à une note de base et à des harmoniques. En analysant le son, on retrouve quelques fréquences dominantes et très peu d'énergie ailleurs. Les poids du réseau se laissent lire de la même façon : quelques fréquences portent presque tout.\n\n**Limite de l'analogie :** les fréquences d'un son sont dans le temps ; ici, la « fréquence » désigne le nombre de tours sur un cercle de $p$ positions, et rien n'est acoustique."
+      },
+      "example": {
+        "title": "Un nombre sur deux cercles",
+        "text": "Avec $p = 16$ (pour pouvoir dessiner), le nombre $x = 1$ est placé à l'angle $2\\pi/16$ avec $k = 1$, et à l'angle $3 \\cdot 2\\pi/16$ avec $k = 3$. Avec $k = 1$, les nombres 0, 1, 2, 3 sont voisins sur le cercle. Avec $k = 3$, chaque pas de $x$ est une rotation de $3/16$ de tour : 0 et 1 sont éloignés, mais passer de $x$ à $x + 1$ est toujours la même rotation.\n\nDans ce cas, $\\gcd(3, 16) = 1$, donc les 16 nombres occupent 16 positions distinctes : aucune information n'est perdue."
+      },
+      "diagram": {
+        "title": "Un nombre placé sur des cercles de fréquences différentes",
+        "description": "Illustration construite à la main pour p = 16 : les nombres x placés à l'angle 2πkx/p, avec k = 1 puis k = 3. Ce n'est pas une visualisation de poids appris.",
+        "svg": "<svg viewBox=\"0 0 800 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Les nombres de 0 à 15 placés sur un cercle avec la fréquence 1, puis avec la fréquence 3\">\n  <defs>\n    <radialGradient id=\"grad-circle-fourier\" cx=\"50%\" cy=\"50%\" r=\"50%\">\n      <stop offset=\"0%\" stop-color=\"#1e1b4b\"/>\n      <stop offset=\"80%\" stop-color=\"#0f172a\"/>\n      <stop offset=\"100%\" stop-color=\"#020617\"/>\n    </radialGradient>\n  </defs>\n  <rect width=\"800\" height=\"440\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"34\" fill=\"#f8fafc\" font-size=\"14\" font-weight=\"bold\" text-anchor=\"middle\">Le nombre x est placé à l'angle 2π·k·x / p (ici p = 16, pour pouvoir dessiner)</text>\n  <g id=\"harmonic-k1\" transform=\"translate(230, 240)\">\n    <circle cx=\"0\" cy=\"0\" r=\"110\" fill=\"url(#grad-circle-fourier)\" stroke=\"#38bdf8\" stroke-width=\"2\" stroke-dasharray=\"3,3\"/>\n    <text x=\"0\" y=\"-132\" fill=\"#bae6fd\" font-size=\"14\" font-weight=\"bold\" text-anchor=\"middle\">fréquence k = 1</text>\n    <circle cx=\"110\" cy=\"0\" r=\"6\" fill=\"#38bdf8\"/>\n    <text x=\"132\" y=\"4\" fill=\"#f1f5f9\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">0</text>\n    <circle cx=\"102\" cy=\"-42\" r=\"6\" fill=\"#38bdf8\"/>\n    <text x=\"122\" y=\"-46\" fill=\"#f1f5f9\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">1</text>\n    <circle cx=\"78\" cy=\"-78\" r=\"6\" fill=\"#38bdf8\"/>\n    <text x=\"94\" y=\"-90\" fill=\"#f1f5f9\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">2</text>\n    <circle cx=\"42\" cy=\"-102\" r=\"6\" fill=\"#38bdf8\"/>\n    <text x=\"50\" y=\"-118\" fill=\"#f1f5f9\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">3</text>\n    <circle cx=\"0\" cy=\"-110\" r=\"3.5\" fill=\"#38bdf8\" opacity=\"0.55\"/>\n    <circle cx=\"-42\" cy=\"-102\" r=\"3.5\" fill=\"#38bdf8\" opacity=\"0.55\"/>\n    <circle cx=\"-78\" cy=\"-78\" r=\"3.5\" fill=\"#38bdf8\" opacity=\"0.55\"/>\n    <circle cx=\"-102\" cy=\"-42\" r=\"3.5\" fill=\"#38bdf8\" opacity=\"0.55\"/>\n    <circle cx=\"-110\" cy=\"0\" r=\"3.5\" fill=\"#38bdf8\" opacity=\"0.55\"/>\n    <circle cx=\"-102\" cy=\"42\" r=\"3.5\" fill=\"#38bdf8\" opacity=\"0.55\"/>\n    <circle cx=\"-78\" cy=\"78\" r=\"3.5\" fill=\"#38bdf8\" opacity=\"0.55\"/>\n    <circle cx=\"-42\" cy=\"102\" r=\"3.5\" fill=\"#38bdf8\" opacity=\"0.55\"/>\n    <circle cx=\"0\" cy=\"110\" r=\"3.5\" fill=\"#38bdf8\" opacity=\"0.55\"/>\n    <circle cx=\"42\" cy=\"102\" r=\"3.5\" fill=\"#38bdf8\" opacity=\"0.55\"/>\n    <circle cx=\"78\" cy=\"78\" r=\"3.5\" fill=\"#38bdf8\" opacity=\"0.55\"/>\n    <circle cx=\"102\" cy=\"42\" r=\"3.5\" fill=\"#38bdf8\" opacity=\"0.55\"/>\n  </g>\n  <g id=\"harmonic-k3\" transform=\"translate(570, 240)\">\n    <circle cx=\"0\" cy=\"0\" r=\"110\" fill=\"url(#grad-circle-fourier)\" stroke=\"#c084fc\" stroke-width=\"2\" stroke-dasharray=\"3,3\"/>\n    <text x=\"0\" y=\"-132\" fill=\"#e9d5ff\" font-size=\"14\" font-weight=\"bold\" text-anchor=\"middle\">fréquence k = 3</text>\n    <circle cx=\"110\" cy=\"0\" r=\"6\" fill=\"#c084fc\"/>\n    <text x=\"132\" y=\"4\" fill=\"#f1f5f9\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">0</text>\n    <circle cx=\"42\" cy=\"-102\" r=\"6\" fill=\"#c084fc\"/>\n    <text x=\"50\" y=\"-118\" fill=\"#f1f5f9\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">1</text>\n    <circle cx=\"-78\" cy=\"-78\" r=\"6\" fill=\"#c084fc\"/>\n    <text x=\"-94\" y=\"-90\" fill=\"#f1f5f9\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">2</text>\n    <circle cx=\"-102\" cy=\"42\" r=\"6\" fill=\"#c084fc\"/>\n    <text x=\"-122\" y=\"54\" fill=\"#f1f5f9\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">3</text>\n    <circle cx=\"0\" cy=\"110\" r=\"3.5\" fill=\"#c084fc\" opacity=\"0.55\"/>\n    <circle cx=\"102\" cy=\"42\" r=\"3.5\" fill=\"#c084fc\" opacity=\"0.55\"/>\n    <circle cx=\"78\" cy=\"-78\" r=\"3.5\" fill=\"#c084fc\" opacity=\"0.55\"/>\n    <circle cx=\"-42\" cy=\"-102\" r=\"3.5\" fill=\"#c084fc\" opacity=\"0.55\"/>\n    <circle cx=\"-110\" cy=\"0\" r=\"3.5\" fill=\"#c084fc\" opacity=\"0.55\"/>\n    <circle cx=\"-42\" cy=\"102\" r=\"3.5\" fill=\"#c084fc\" opacity=\"0.55\"/>\n    <circle cx=\"78\" cy=\"78\" r=\"3.5\" fill=\"#c084fc\" opacity=\"0.55\"/>\n    <circle cx=\"102\" cy=\"-42\" r=\"3.5\" fill=\"#c084fc\" opacity=\"0.55\"/>\n    <circle cx=\"0\" cy=\"-110\" r=\"3.5\" fill=\"#c084fc\" opacity=\"0.55\"/>\n    <circle cx=\"-102\" cy=\"-42\" r=\"3.5\" fill=\"#c084fc\" opacity=\"0.55\"/>\n    <circle cx=\"-78\" cy=\"78\" r=\"3.5\" fill=\"#c084fc\" opacity=\"0.55\"/>\n    <circle cx=\"42\" cy=\"102\" r=\"3.5\" fill=\"#c084fc\" opacity=\"0.55\"/>\n  </g>\n  <text x=\"400\" y=\"386\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">Avec k = 1, les voisins x et x + 1 sont côte à côte. Avec k = 3, ils sont éloignés,</text>\n  <text x=\"400\" y=\"404\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">mais passer de x à x + 1 est toujours la même rotation : l'arrangement reste régulier.</text>\n  <text x=\"400\" y=\"422\" fill=\"#cbd5e1\" font-size=\"11\" text-anchor=\"middle\">Illustration construite à la main, pas une visualisation de poids appris.</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Fréquence k = 1",
+            "explanation": "Les nombres de 0 à p - 1 font un seul tour du cercle : deux nombres voisins sont côte à côte.",
+            "highlight": [
+              "harmonic-k1"
+            ]
+          },
+          {
+            "title": "2. Fréquence k = 3",
+            "explanation": "Les mêmes nombres font trois tours : deux nombres voisins sont éloignés sur le cercle. Chaque pas de x reste une rotation du même angle.",
+            "highlight": [
+              "harmonic-k3"
+            ]
+          },
+          {
+            "title": "3. Plusieurs fréquences ensemble",
+            "explanation": "Le réseau utilise quelques fréquences à la fois, et la couche de sortie additionne leurs contributions. Pour p = 113, le modèle principal de Nanda et al. en utilise cinq.",
+            "highlight": [
+              "harmonic-k1",
+              "harmonic-k3"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "On compare la part d'énergie spectrale portée par les 6 fréquences dominantes pour deux matrices de plongement construites à la main : du bruit gaussien, et une matrice de Fourier aux cinq fréquences clés de Nanda et al. avec un peu de bruit. Ce ne sont pas des poids appris : le code montre ce que la mesure détecte.",
+        "code": "# Mesurer la « structure de Fourier » d'une matrice d'embedding (une ligne par nombre 0..p-1).\n# ATTENTION : les deux matrices ci-dessous sont construites à la main, ce ne sont pas des poids appris.\nimport numpy as np\n\nP, D = 113, 64\nKEY_FREQS = [14, 35, 41, 42, 52]\nrng = np.random.default_rng(0)\n\ndef top_energy_share(W, n_top=6):\n    \"\"\"Part de l'énergie portée par les n_top fréquences dominantes (hors fréquence nulle).\"\"\"\n    W = W - W.mean(axis=0, keepdims=True)\n    energy = (np.abs(np.fft.rfft(W, axis=0)) ** 2).sum(axis=1)[1:]   # une valeur par fréquence k = 1..P//2\n    return np.sort(energy)[::-1][:n_top].sum() / energy.sum()\n\n# 1) Embedding sans structure : bruit gaussien.\nW_random = rng.normal(size=(P, D))\n\n# 2) Embedding « de Fourier » : cos et sin aux cinq fréquences clés, mélangés dans D dimensions, plus un peu de bruit.\nx = np.arange(P)\nbasis = np.stack([f(2 * np.pi * k * x / P) for k in KEY_FREQS for f in (np.cos, np.sin)], axis=1)   # (P, 10)\nW_fourier = basis @ rng.normal(size=(10, D)) + 0.3 * rng.normal(size=(P, D))\n\nprint(f\"bruit gaussien           : {top_energy_share(W_random):.2f} de l'énergie sur les 6 fréquences dominantes\")\nprint(f\"construction de Fourier  : {top_energy_share(W_fourier):.2f} de l'énergie sur les 6 fréquences dominantes\")\nprint(f\"(si l'énergie était répartie également : {6 / (P // 2):.2f})\")\n\n# Les cinq fréquences retrouvées par la mesure :\nenergy = (np.abs(np.fft.rfft(W_fourier - W_fourier.mean(axis=0), axis=0)) ** 2).sum(axis=1)[1:]\nprint(\"fréquences dominantes retrouvées :\", sorted((np.argsort(energy)[::-1][:5] + 1).tolist()))",
+        "output": "bruit gaussien           : 0.13 de l'énergie sur les 6 fréquences dominantes\nconstruction de Fourier  : 0.99 de l'énergie sur les 6 fréquences dominantes\n(si l'énergie était répartie également : 0.11)\nfréquences dominantes retrouvées : [14, 35, 41, 42, 52]",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Que montrent les ablations de Nanda et al. sur les fréquences ?",
+          "options": [
+            "Retirer les fréquences clés des logits dégrade nettement les prédictions, alors que retirer toutes les autres fréquences ne les dégrade pas",
+            "Retirer n'importe quelle fréquence dégrade autant les prédictions",
+            "Retirer les fréquences clés n'a aucun effet, seule la mémorisation compte",
+            "Retirer toutes les fréquences autres que les fréquences clés fait tomber la précision au niveau du hasard"
+          ],
+          "correctIndex": 0,
+          "explanation": "C'est ce qui indique que le circuit de Fourier porte la solution : les fréquences clés sont nécessaires, et les autres composantes ne le sont pas pour le résultat final. Retirer les composantes qui ne sont pas clés a même légèrement amélioré la performance."
+        },
+        {
+          "question": "Que désigne une « fréquence clé » k dans ces travaux ?",
+          "options": [
+            "Le nombre de tours que fait le nombre x sur un cercle quand x va de 0 à p - 1, de sorte que x est placé à l'angle 2πkx/p",
+            "Le numéro de l'époque où le circuit apparaît",
+            "Le nombre de neurones qui calculent la somme",
+            "Le numéro de la couche qui contient le circuit"
+          ],
+          "correctIndex": 0,
+          "explanation": "Dans le modèle principal pour p = 113, les fréquences clés sont 14, 35, 41, 42 et 52. Ces entiers ne désignent ni une époque, ni une couche, ni un nombre de neurones, et ils changent d'une graine à l'autre."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Transformée de Fourier discrète",
+          "definition": "Décomposition d'une suite finie de valeurs en ondes sinusoïdales de fréquences entières, chacune faisant k tours sur la longueur de la suite."
+        },
+        {
+          "term": "Ablation",
+          "definition": "Expérience où l'on retire ou remplace une composante du réseau (neurone, direction, fréquence) pour mesurer ce qu'elle apporte."
+        },
+        {
+          "term": "Représentation creuse",
+          "definition": "Représentation dont presque toutes les composantes sont nulles ou négligeables dans une base donnée, ici la base de Fourier."
+        },
+        {
+          "term": "Rang d'une matrice",
+          "definition": "Nombre de directions indépendantes que la matrice utilise. Une matrice de rang 10 est entièrement décrite par 10 directions."
+        },
+        {
+          "term": "t-SNE",
+          "definition": "Méthode de visualisation qui projette des vecteurs de grande dimension sur un plan en essayant de préserver leurs voisinages."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Lire une ablation",
+          "prompt": "Retirer les cinq fréquences clés des logits fait tomber les prédictions sous le hasard ; retirer toutes les autres fréquences ne les dégrade pas. Que peut-on conclure, et que ne peut-on pas conclure ?",
+          "solution": "On conclut que ces fréquences portent la solution générale dans ce modèle : elles ont un rôle causal, et la matrice qui relie le MLP aux logits est approximativement de rang 10, un cosinus et un sinus par fréquence. On ne peut pas en déduire que tout réseau qui groque utilise des fréquences de Fourier, ni que les grands modèles de langage se décrivent ainsi : l’analyse porte sur un montage, une couche et une opération. Les fréquences clés dépendent en plus de l’initialisation."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Nanda et al. (2023), Progress measures for grokking via mechanistic interpretability (ICLR 2023)",
+          "href": "https://arxiv.org/abs/2301.05217"
+        },
+        {
+          "label": "Zhong et al. (2023), The Clock and the Pizza : Two Stories in Mechanistic Explanation of Neural Networks",
+          "href": "https://arxiv.org/abs/2306.17844"
+        }
+      ]
+    },
+    {
+      "id": "limites",
+      "title": "Limites et portée : ce que le grokking dit des grands modèles",
+      "keyTakeaways": [
+        "Le grokking net a été décrit sur de petites tâches algorithmiques. Des travaux ultérieurs l'ont aussi induit sur d'autres tâches, dans des conditions choisies (Omnigrok, Liu et al., 2022 ; Wang et al., 2024), mais rien ne permet d'affirmer qu'il explique les capacités des grands modèles de langage.",
+        "L'interprétabilité mécanistique de Nanda et al. est une étude de cas : petit modèle, tâche simple, beaucoup d'analyse manuelle. Les auteurs signalent eux-mêmes que ces méthodes ne se transposent pas telles quelles à des modèles plus grands.",
+        "Plusieurs explications du grokking coexistent (zone Goldilocks, mécanisme LU, efficacité des circuits) ; aucune n'est considérée comme définitive.",
+        "Prudence pratique : le grokking ne justifie pas de prolonger indéfiniment un entraînement dont la validation stagne. En revanche, il rappelle que les courbes globales de perte peuvent masquer des changements internes."
+      ],
+      "theory": "### Ce qui est solidement établi\n\n- Sur de petits jeux de données algorithmiques, une généralisation tardive existe et se reproduit (Power et al., 2022 ; Nanda et al., 2023, et d'autres travaux cités dans ce cours).\n- Sur l'addition modulaire avec un petit transformer, on sait décrire un algorithme que le réseau finit par utiliser, et on a des mesures qui évoluent avant le saut visible (Nanda et al., 2023).\n\n### Ce qui a été montré ailleurs, avec des réserves\n\n- **Omnigrok** (Liu, Michaud et Tegmark, 2022) induit du grokking sur des tâches d'images, de langage et de molécules, en réduisant le jeu d'entraînement et en augmentant l'échelle d'initialisation des poids. Cela montre que le phénomène n'est pas propre à l'arithmétique modulaire, pas qu'il se produit spontanément dans les entraînements usuels.\n- **Wang et al. (2024)** montrent que des transformers apprennent à raisonner sur des faits stockés dans leurs paramètres (composition et comparaison) seulement après un entraînement prolongé bien au-delà du surapprentissage. La généralisation dépend du type de raisonnement : elle échoue sur la composition hors distribution et réussit sur la comparaison. L'étude concerne des modèles entraînés pour l'occasion, pas les grands modèles du commerce.\n- **Varma et al. (2023)** décrivent, au-delà du grokking, le *ungrokking* (la précision de test retombe) et le *semi-grokking* (la généralisation reste partielle), prédits par l'idée d'efficacité des circuits.\n\n### Ce qui est une extrapolation\n\nBeaucoup de résumés vont plus loin : le grokking expliquerait l'apparition de capacités de raisonnement dans les grands modèles de langage, ou suggérerait que « la compression produit la compréhension ». **Ce cours ne retient pas ces affirmations**, faute de sources primaires qui les établissent :\n\n- les grands modèles sont entraînés sur des corpus énormes, vus en général au plus quelques fois ; la situation « petit jeu de données répété longtemps » n'y correspond pas directement ;\n- l'article de Nanda et al. motive son travail par les capacités qui « émergent » avec l'échelle des modèles, mais il présente son étude comme une preuve de concept sur un cas simple ;\n- qu'un circuit soit « plus compact » ne dit pas que le réseau « comprend » au sens humain.\n\n### Limites que les auteurs signalent\n\nNanda et al. (2023) notent que leur analyse « a demandé beaucoup d'efforts manuels », que leurs mesures de progression sont propres à une tâche, et qu'ils n'ont pas de notion générale de criticité pour prédire quand la transition aura lieu.\n\n### Ce que l'on peut retenir en pratique\n\n| Idée parfois avancée | Ce qui est étayé |\n| :--- | :--- |\n| « Il faut entraîner beaucoup plus longtemps quand la perte stagne » | Faux en général. Le grokking a été décrit avec de petits jeux de données et de la régularisation, il ne justifie pas de prolonger un entraînement ordinaire |\n| « Le weight decay ne sert qu'à éviter le surapprentissage » | Incomplet. Dans ces expériences, il est associé à la formation de la solution générale ; le mécanisme exact reste débattu |\n| « Un réseau n'apprend que des corrélations » | Trop général. Sur l'addition modulaire, des réseaux entraînés finissent par utiliser un algorithme que l'on peut décrire, mais cela ne dit rien de tous les réseaux |\n| « La courbe de perte raconte tout » | Pas toujours. Des mesures internes peuvent progresser pendant un plateau apparent, si l'on sait quoi mesurer |",
+      "analogy": {
+        "title": "Deux cartes du même terrain",
+        "text": "Les courbes de perte sont une carte à grande échelle : elles montrent le relief général. Les mesures de circuit sont une carte à petite échelle d'un coin précis. L'une ne remplace pas l'autre, et la seconde n'existe que pour les endroits que l'on a déjà explorés.\n\n**Limite de l'analogie :** les deux cartes décrivent le même terrain. Ici, la carte détaillée n'existe que pour un seul « coin » (l'addition modulaire), et rien ne dit qu'on pourra la dessiner pour les autres."
+      },
+      "example": {
+        "title": "Une règle de prudence pour lire un entraînement",
+        "text": "Votre validation stagne. Prolonger l'entraînement n'est raisonnable que si plusieurs conditions sont réunies : jeu de données petit et bien défini, perte d'entraînement déjà quasi nulle, régularisation en place, et coût de calcul acceptable. Dans les autres cas, la lecture standard (surapprentissage, arrêt) reste la plus probable.\n\nCe cadre est **une règle de prudence tirée des expériences décrites**, pas un résultat démontré."
+      },
+      "diagram": {
+        "title": "Deux regards sur le même entraînement",
+        "description": "Synthèse : ce qu'affichent les courbes de perte et de précision, et ce que l'on peut mesurer dans les poids quand on connaît le circuit à chercher.",
+        "svg": "<svg viewBox=\"0 0 800 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Deux regards sur le même entraînement : les courbes de perte et de précision, et les mesures internes\">\n  <defs>\n    <linearGradient id=\"grad-bg-6\" x1=\"0%\" y1=\"0%\" x2=\"100%\" y2=\"100%\">\n      <stop offset=\"0%\" stop-color=\"#070b14\"/>\n      <stop offset=\"100%\" stop-color=\"#111827\"/>\n    </linearGradient>\n  </defs>\n\n  <rect width=\"800\" height=\"440\" rx=\"16\" fill=\"url(#grad-bg-6)\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n\n  <g id=\"card-macro\" transform=\"translate(50, 50)\">\n    <rect width=\"340\" height=\"340\" rx=\"14\" fill=\"#0f172a\" stroke=\"#475569\" stroke-width=\"1.5\"/>\n    <text x=\"170\" y=\"32\" fill=\"#7dd3fc\" font-size=\"14\" font-weight=\"bold\" text-anchor=\"middle\">Vue extérieure</text>\n    <text x=\"170\" y=\"50\" fill=\"#cbd5e1\" font-size=\"11\" text-anchor=\"middle\">ce qu'affichent les courbes d'entraînement</text>\n\n    <rect x=\"25\" y=\"65\" width=\"290\" height=\"125\" rx=\"8\" fill=\"#050811\" stroke=\"#1e293b\"/>\n    <path d=\"M 35,80 Q 70,160 120,170 L 305,170\" fill=\"none\" stroke=\"#38bdf8\" stroke-width=\"2.5\"/>\n    <path d=\"M 35,180 L 235,180 Q 255,175 265,115 L 305,85\" fill=\"none\" stroke=\"#34d399\" stroke-width=\"2.5\"/>\n    <text x=\"150\" y=\"130\" fill=\"#fda4af\" font-size=\"11\" font-weight=\"bold\" text-anchor=\"middle\">long plateau</text>\n\n    <text x=\"30\" y=\"222\" fill=\"#e2e8f0\" font-size=\"12\">Perte d'entraînement : presque nulle</text>\n    <text x=\"30\" y=\"244\" fill=\"#e2e8f0\" font-size=\"12\">Précision de test : basse, puis un saut</text>\n    <text x=\"30\" y=\"276\" fill=\"#fda4af\" font-size=\"12\" font-weight=\"bold\">Tentation : arrêter l'entraînement</text>\n    <text x=\"30\" y=\"296\" fill=\"#cbd5e1\" font-size=\"11\">(raisonnable dans la plupart des cas)</text>\n  </g>\n\n  <g id=\"card-micro\" transform=\"translate(410, 50)\">\n    <rect width=\"340\" height=\"340\" rx=\"14\" fill=\"#0f172a\" stroke=\"#10b981\" stroke-width=\"1.5\"/>\n    <text x=\"170\" y=\"32\" fill=\"#6ee7b7\" font-size=\"14\" font-weight=\"bold\" text-anchor=\"middle\">Vue intérieure</text>\n    <text x=\"170\" y=\"50\" fill=\"#cbd5e1\" font-size=\"11\" text-anchor=\"middle\">ce que l'on peut mesurer dans les poids</text>\n\n    <g transform=\"translate(170, 125)\">\n      <circle cx=\"0\" cy=\"0\" r=\"48\" fill=\"#1e1b4b\" stroke=\"#a855f7\" stroke-width=\"2\"/>\n      <line x1=\"0\" y1=\"0\" x2=\"35\" y2=\"-25\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n      <line x1=\"0\" y1=\"0\" x2=\"25\" y2=\"35\" stroke=\"#10b981\" stroke-width=\"2\"/>\n      <circle cx=\"35\" cy=\"-25\" r=\"4\" fill=\"#38bdf8\"/>\n      <circle cx=\"25\" cy=\"35\" r=\"4\" fill=\"#10b981\"/>\n    </g>\n\n    <text x=\"30\" y=\"222\" fill=\"#e2e8f0\" font-size=\"12\">Énergie des fréquences clés</text>\n    <text x=\"30\" y=\"242\" fill=\"#e2e8f0\" font-size=\"12\">Norme des poids</text>\n    <text x=\"30\" y=\"262\" fill=\"#e2e8f0\" font-size=\"12\">Perte restreinte et perte exclue</text>\n    <text x=\"30\" y=\"294\" fill=\"#6ee7b7\" font-size=\"12\" font-weight=\"bold\">Ces mesures évoluent avant le saut</text>\n    <text x=\"30\" y=\"314\" fill=\"#cbd5e1\" font-size=\"11\">(montré sur l'addition modulaire seulement)</text>\n  </g>\n\n  <text x=\"400\" y=\"420\" fill=\"#cbd5e1\" font-size=\"11\" text-anchor=\"middle\">Schéma de synthèse, sans échelle.</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. La vue extérieure",
+            "explanation": "Les courbes de perte et de précision montrent un long plateau puis un saut. C'est la vue habituelle pendant un entraînement.",
+            "highlight": [
+              "card-macro"
+            ]
+          },
+          {
+            "title": "2. La vue intérieure",
+            "explanation": "Dans le cas étudié par Nanda et al., des mesures sur les poids (énergie des fréquences clés, norme, perte restreinte) évoluent avant le saut. Cela suppose d'avoir compris le circuit au préalable.",
+            "highlight": [
+              "card-micro"
+            ]
+          },
+          {
+            "title": "3. Les deux ensemble",
+            "explanation": "Les deux vues sont complémentaires : la première est disponible partout, la seconde seulement là où l'on sait quoi mesurer.",
+            "highlight": [
+              "card-macro",
+              "card-micro"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Laquelle de ces affirmations est la mieux étayée par les travaux cités dans le cours ?",
+          "options": [
+            "Le grokking est net sur de petites tâches algorithmiques, et des variantes ont été induites sur d'autres tâches dans des conditions choisies",
+            "Il est établi que les grands modèles de langage groquent pendant leur préentraînement",
+            "Il est démontré que le weight decay est l'unique cause du grokking",
+            "Le grokking prouve que les réseaux de neurones comprennent comme les humains"
+          ],
+          "correctIndex": 0,
+          "explanation": "Omnigrok et Wang et al. étendent le phénomène à d'autres tâches, mais dans des montages choisis. Aucune des sources citées n'établit le grokking pendant le préentraînement des grands modèles de langage, et aucune ne démontre une cause unique."
+        },
+        {
+          "question": "Quelle limite Nanda et al. signalent-ils eux-mêmes ?",
+          "options": [
+            "Petit modèle, tâche simple, beaucoup d'analyse manuelle, et pas de moyen général de prédire quand la transition aura lieu",
+            "Leurs résultats ne se reproduisent pas d'une graine à l'autre",
+            "Ils n'ont pas pu identifier de circuit dans leur modèle",
+            "Leur méthode n'a besoin d'aucune connaissance préalable de l'algorithme"
+          ],
+          "correctIndex": 0,
+          "explanation": "Les résultats se retrouvent sur d'autres graines (avec des ensembles de fréquences différents), et c'est justement l'identification du circuit qui permet de définir les mesures de progression. La difficulté est de généraliser la méthode, pas de la reproduire."
+        },
+        {
+          "question": "Quelle conclusion pratique est prudente ?",
+          "options": [
+            "Une validation qui stagne ne prouve pas toujours qu'il n'y a plus rien à apprendre, mais le grokking ne justifie pas de prolonger sans limite un entraînement ordinaire",
+            "Il faut toujours multiplier par mille la durée d'un entraînement dont la validation stagne",
+            "Il faut supprimer le weight decay pour laisser le modèle apprendre librement",
+            "Il faut arrêter dès que la perte d'entraînement est nulle, puisque la suite est inutile"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le grokking est un phénomène décrit dans un régime précis. Dans la plupart des entraînements, une validation qui se dégrade durablement signale un surapprentissage réel, et prolonger a un coût en calcul."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Interprétabilité mécanistique",
+          "definition": "Approche qui cherche à décomposer un réseau en composants et en circuits dont on peut décrire l'effet, un peu comme on rétro-conçoit un programme."
+        },
+        {
+          "term": "Omnigrok",
+          "definition": "Travail de Liu, Michaud et Tegmark (2022) qui induit du grokking sur d'autres tâches et l'explique par le mécanisme LU, lié à la norme des poids."
+        },
+        {
+          "term": "Ungrokking / semi-grokking",
+          "definition": "Variantes décrites par Varma et al. (2023) : la précision de test retombe après avoir été élevée (ungrokking), ou la généralisation reste partielle (semi-grokking)."
+        },
+        {
+          "term": "Preuve de concept",
+          "definition": "Étude sur un cas simple destinée à montrer qu'une approche est possible, sans garantir qu'elle se transpose à des cas plus complexes."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Portée du grokking",
+          "prompt": "Que peut-on raisonnablement conclure du grokking pour les grands modèles de langage, et quelle erreur faut-il éviter ?",
+          "solution": "Le grokking net est établi sur de petites tâches algorithmiques. Des travaux l’ont induit ailleurs dans des conditions choisies, sans prouver qu’il explique les grands modèles. Il ne faut pas prolonger indéfiniment un entraînement dont la validation stagne : les courbes globales peuvent masquer des changements internes."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Wang et al. (2024), Grokked Transformers are Implicit Reasoners",
+          "href": "https://arxiv.org/abs/2405.15071"
+        },
+        {
+          "label": "Nakkiran et al. (2019), Deep Double Descent : Where Bigger Models and More Data Hurt",
+          "href": "https://arxiv.org/abs/1912.02292"
+        },
+        {
+          "label": "Origine du mot « grok » : Heinlein, Stranger in a Strange Land (1961), résumé encyclopédique",
+          "href": "https://en.wikipedia.org/wiki/Grok"
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "label": "Power et al. (2022), Grokking : Generalization Beyond Overfitting on Small Algorithmic Datasets",
+      "href": "https://arxiv.org/abs/2201.02177"
+    },
+    {
+      "label": "Nanda et al. (2023), Progress measures for grokking via mechanistic interpretability (ICLR 2023)",
+      "href": "https://arxiv.org/abs/2301.05217"
+    },
+    {
+      "label": "Liu et al. (2022), Towards Understanding Grokking : An Effective Theory of Representation Learning",
+      "href": "https://arxiv.org/abs/2205.10343"
+    },
+    {
+      "label": "Liu, Michaud, Tegmark (2022), Omnigrok : Grokking Beyond Algorithmic Data",
+      "href": "https://arxiv.org/abs/2210.01117"
+    },
+    {
+      "label": "Varma et al. (2023), Explaining grokking through circuit efficiency",
+      "href": "https://arxiv.org/abs/2309.02390"
+    },
+    {
+      "label": "Zhong et al. (2023), The Clock and the Pizza : Two Stories in Mechanistic Explanation of Neural Networks",
+      "href": "https://arxiv.org/abs/2306.17844"
+    },
+    {
+      "label": "Wang et al. (2024), Grokked Transformers are Implicit Reasoners",
+      "href": "https://arxiv.org/abs/2405.15071"
+    },
+    {
+      "label": "Nakkiran et al. (2019), Deep Double Descent : Where Bigger Models and More Data Hurt",
+      "href": "https://arxiv.org/abs/1912.02292"
+    },
+    {
+      "label": "Loshchilov et Hutter (2017), Decoupled Weight Decay Regularization",
+      "href": "https://arxiv.org/abs/1711.05101"
+    },
+    {
+      "label": "Origine du mot « grok » : Heinlein, Stranger in a Strange Land (1961), résumé encyclopédique",
+      "href": "https://en.wikipedia.org/wiki/Grok"
+    }
+  ],
+  "related": [
+    {
+      "to": "/cours/deep-learning-pratique",
+      "title": "Cours : le deep learning en pratique",
+      "description": "Lire les courbes d'apprentissage, repérer le surapprentissage et utiliser l'arrêt anticipé : le cadre usuel dont le grokking est une exception."
+    },
+    {
+      "to": "/cours/bases-mathematiques-ia",
+      "title": "Cours : les bases mathématiques de l'IA",
+      "description": "Gradient, dérivées et optimisation, utiles pour la descente de gradient et le weight decay."
+    },
+    {
+      "to": "/simulateur-ia",
+      "title": "Simulateur d'entraînement",
+      "description": "Entraîner un petit réseau dans le navigateur et observer l'effet de la régularisation et de l'arrêt précoce."
+    },
+    {
+      "to": "/types-ia/llm",
+      "title": "Les modèles de langage (LLM)",
+      "description": "Le cadre des grands modèles, auxquels les résultats du grokking ne se transposent pas directement."
+    }
+  ]
+}

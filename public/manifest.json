@@ -1,0 +1,17 @@
+{
+  "name": "Explorons l'IA - Comprendre l'intelligence artificielle",
+  "short_name": "Explorons l'IA",
+  "description": "Site pédagogique francophone pour comprendre l'intelligence artificielle : bases, cours, outils et éthique.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0f0f23",
+  "theme_color": "#7c3aed",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "favicon.ico", "sizes": "16x16", "type": "image/x-icon" }
+  ],
+  "categories": ["education"],
+  "lang": "fr",
+  "dir": "ltr"
+}

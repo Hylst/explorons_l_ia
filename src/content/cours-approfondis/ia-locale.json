@@ -1,0 +1,1023 @@
+{
+  "slug": "ia-locale",
+  "title": "IA locale pour les professionnels : matériel, coûts et passage à l'échelle",
+  "subtitle": "Choisir une machine, un modèle et un moteur, puis calculer ce que le service coûte vraiment",
+  "level": "Intermédiaire",
+  "tags": [
+    "IA locale",
+    "VRAM",
+    "VLLM",
+    "SGLang",
+    "Quantification",
+    "Infrastructure"
+  ],
+  "summary": "Faire tourner un modèle de langage sur sa propre machine demande de choisir du matériel, un modèle, une quantification et un moteur, puis de mesurer ce que le service consomme réellement. Ce cours montre comment lire une fiche technique, estimer la VRAM et le cache KV, comprendre le débit et calculer un coût total avec des hypothèses explicites, sans confondre un plafond théorique avec une mesure.",
+  "introduction": "### Pourquoi ce sujet\n\nUn modèle de langage peut être appelé par une interface distante ou exécuté sur une machine que vous contrôlez. La seconde option est souvent présentée comme une réponse simple à trois problèmes : la confidentialité, le coût et la dépendance à un fournisseur. En pratique, elle déplace le problème plutôt qu'elle ne le supprime. Il faut acheter ou louer une machine, choisir un modèle compatible, installer un moteur, régler la mémoire, surveiller la latence et assumer la maintenance. Le travail ne disparaît pas : il change de propriétaire.\n\nCe cours s'adresse à des professionnels qui envisagent un service local, pas nécessairement à des spécialistes du calcul GPU. Il part de questions concrètes. Combien de mémoire faut-il pour un modèle et un contexte donnés ? Pourquoi une carte dont la capacité semble suffisante refuse-t-elle de charger un lot plus grand ? Pourquoi le débit chute-t-il quand plusieurs utilisateurs arrivent ? Et comment comparer le coût d'un serveur à celui d'une API sans comparer deux choses différentes ?\n\n### D'où viennent les idées\n\nLes documents de vLLM et de SGLang décrivent des moteurs de service conçus pour l'inférence sur GPU. Les dépôts de KTransformers et de LMCache montrent deux façons de déplacer une partie du travail ou de la mémoire hors de la carte graphique. L'article de Kwon et al. sur PagedAttention explique la gestion du cache KV par blocs. Les fiches de NVIDIA et d'Apple donnent des ordres de grandeur matériels, et la note de version de Qwen2.5-Coder sert d'exemple de famille de modèles ouverts. Aucun de ces documents ne fournit un prix ou un débit qui vaudrait pour toutes les charges de travail.\n\n### Ce qu'il faut savoir avant\n\n- savoir ce qu'est un modèle de langage ;\n- avoir des notions de mémoire et de GPU ;\n- connaître les bases d'un serveur Linux ;\n- aucune expérience de production n'est requise.\n\n### Ce que vous saurez expliquer à la fin\n\n- pourquoi une fiche technique ne se résume pas à un nombre de cœurs ou de téraflops ;\n- comment estimer la mémoire des poids, du cache KV et du contexte ;\n- ce que font réellement vLLM, SGLang, llama.cpp, Ollama, KTransformers et LMCache ;\n- comment un lot, un cache de préfixe ou une file d'attente modifient le débit et la latence ;\n- comment construire un coût par million de tokens avec des hypothèses visibles et une analyse de sensibilité.",
+  "prerequisites": [
+    "Savoir ce qu'est un LLM",
+    "Notions de mémoire et de GPU",
+    "Connaître les bases d'un serveur Linux",
+    "Aucune expérience de production requise"
+  ],
+  "checkedOn": "2026-10-26",
+  "cover": {
+    "src": "pics/cours/ia-locale.webp",
+    "alt": "Serveur compact dans une enceinte de verre, avec des flux de données lumineux contenus localement."
+  },
+  "modules": [
+    {
+      "id": "pourquoi",
+      "title": "Pourquoi l'IA locale",
+      "keyTakeaways": [
+        "L'IA locale signifie que les poids et le calcul restent sur une machine que vous contrôlez ; cela ne veut pas dire que le modèle est open source, ni que la machine est forcément hors ligne.",
+        "La confidentialité se joue sur le trajet complet des données, pas seulement sur le lieu d'exécution : journaux, sauvegardes, supervision, mises à jour et caches de préfixe peuvent sortir du périmètre.",
+        "Le coût local est surtout fixe et opérationnel, tandis qu'une API facture à l'usage ; la comparaison dépend du taux d'utilisation, du débit réel et du travail d'exploitation.",
+        "L'IA locale est pertinente quand une contrainte de données, de réseau, de personnalisation ou de licence l'impose, ou quand la charge est assez stable pour amortir la machine.",
+        "Elle déplace aussi la responsabilité : qualité du modèle, sécurité, mises à jour, capacité et astreinte deviennent des sujets internes."
+      ],
+      "theory": "### Ce que veut dire « local »\n\nUn modèle de langage local est un modèle dont les poids sont chargés et exécutés sur une machine que vous administrez. Les requêtes peuvent venir d'un navigateur, d'une application interne ou d'un autre service. Le mot local décrit donc le lieu du calcul, pas la licence du modèle, ni la présence d'une connexion réseau. Un modèle aux poids ouverts peut être exécuté localement, mais un modèle propriétaire peut aussi être installé sur votre matériel dans le cadre d'un contrat. Inversement, un modèle aux poids ouverts peut être appelé par une API distante sans que vous possédiez la machine.\n\nCette distinction évite deux confusions fréquentes. La première consiste à croire que local rime avec open source : le fichier de poids peut être disponible sans que les données d'entraînement, le code ou la recette de fabrication le soient. La seconde consiste à croire que local rime avec hors ligne : un serveur local peut télécharger des mises à jour, envoyer des métriques, consulter un registre de modèles ou appeler un service de licences. Le périmètre réel dépend de la politique réseau et de la configuration, pas du mot employé sur la brochure.\n\n### Ce que la confidentialité recouvre\n\nL'argument le plus solide en faveur d'un déploiement local est souvent la maîtrise du trajet des données. Si une requête contient des extraits de contrats, des données de santé ou des secrets industriels, le fait de ne pas l'envoyer à un fournisseur tiers réduit le nombre d'acteurs qui peuvent la lire. Mais cette réduction n'est pas automatique. Le serveur peut journaliser les prompts, le moteur peut conserver un cache de préfixe, le système peut produire des vidages mémoire, la supervision peut collecter des traces, et les sauvegardes peuvent être stockées ailleurs. Un cache de préfixe partagé entre utilisateurs est particulièrement sensible : il accélère les requêtes qui commencent par le même texte, mais il peut aussi faire fuiter un fragment de prompt si l'isolation n'est pas correcte.\n\nUne démarche sérieuse commence donc par une cartographie. Quelles données entrent ? Où sont-elles écrites ? Combien de temps sont-elles conservées ? Qui peut les lire ? Quels sous-traitants interviennent pour le matériel, le système, le réseau ou la maintenance ? Le déploiement local permet de répondre à ces questions avec vos propres outils, à condition de les poser. Il ne dispense ni de chiffrement, ni de contrôle d'accès, ni de politique de rétention.\n\n### Souveraineté et dépendances\n\nLa souveraineté est souvent invoquée comme un argument politique. Dans un projet technique, elle se traduit par des questions plus précises : qui peut modifier le modèle, qui peut couper le service, qui détient les sauvegardes, et quel droit s'applique aux données et au code ? Un modèle exécuté localement réduit la dépendance à une API distante, mais il crée ou conserve d'autres dépendances : le fournisseur du matériel, le pilote graphique, le moteur d'inférence, le format de quantification, le tokenizer, le template de conversation et la licence du modèle. Une panne de pilote ou une mise à jour incompatible peut immobiliser le service aussi sûrement qu'une panne d'API.\n\nLa souveraineté n'est donc pas un état binaire. C'est un continuum de contrôle et de dépendances. Un modèle aux poids ouverts, exécuté sur un serveur que vous possédez, avec un moteur que vous pouvez reconstruire et des données stockées dans votre infrastructure, offre davantage de contrôle qu'un service distant. Il ne rend pas le projet indépendant de tous ses fournisseurs. La bonne question n'est pas « est-ce souverain ? » mais « quelles dépendances suis-je prêt à assumer, et lesquelles dois-je pouvoir remplacer ? ».\n\n### Le coût n'est pas automatiquement plus faible\n\nL'argument du coût mérite le même examen. Une API facture généralement à l'usage : pas de requête, pas de facture, et le prix inclut l'exploitation, la capacité et les mises à jour. Un serveur local transforme une partie de cette dépense en investissement initial, en électricité, en refroidissement, en réseau, en stockage et en temps d'ingénierie. Le coût par token dépend alors fortement du taux d'utilisation. Une machine qui tourne à pleine charge amortit mieux son prix qu'une machine qui répond à quelques requêtes par jour, mais elle doit aussi être renouvelée, surveillée et réparée.\n\nUn calcul honnête compare donc des scénarios complets, avec la même qualité de modèle, la même latence cible et le même volume. Il ne compare pas le prix d'une carte graphique au prix d'un million de tokens sans compter le serveur, l'énergie, les licences, les sauvegardes et le travail humain. Le module consacré au coût détaille cette construction. Avant d'y arriver, retenez que le local n'est pas une optimisation automatique : c'est un changement de structure de coûts.\n\n### Les limites techniques\n\nUn déploiement local hérite des limites du modèle choisi. La qualité sur une tâche donnée peut être inférieure à celle d'un modèle frontalier, le contexte utile peut être plus court que la fenêtre annoncée, et le débit dépend du matériel et du logiciel. Il faut aussi gérer les versions : un modèle mis à jour peut changer de comportement, un moteur peut modifier ses paramètres par défaut, un format de quantification peut ne plus être supporté. Sans jeu d'évaluation et sans versionnage, ces changements deviennent invisibles jusqu'à l'incident.\n\nLa sécurité est un autre transfert de responsabilité. Un service exposé doit authentifier les utilisateurs, limiter les débits, journaliser les erreurs, protéger les secrets et traiter les sorties du modèle avec prudence. L'injection de prompt, les outils trop permissifs et l'exfiltration de données ne disparaissent pas parce que le modèle est chez vous. Ils changent de surface d'attaque.\n\n### Quand choisir le local\n\nLe local est un bon candidat lorsque des données ne peuvent pas sortir d'un périmètre défini, lorsque le service doit fonctionner hors ligne ou avec une latence réseau très faible, lorsque la charge est stable et suffisante pour amortir la machine, ou lorsqu'un modèle spécialisé et une personnalisation profonde justifient l'investissement. Il peut aussi être imposé par une licence ou par un contrat qui interdit le recours à un fournisseur externe.\n\nL'API reste souvent préférable pour un prototype, un volume faible ou irrégulier, un besoin de qualité frontalière ou une équipe sans compétence d'exploitation. Le choix n'est pas une question de principe. C'est une décision d'ingénierie qui se prend par scénarios, avec des mesures et une date de réexamen. Un pilote local peut d'ailleurs coexister avec une API : le routeur envoie les requêtes sensibles ou fréquentes vers la machine locale, et les cas difficiles vers le service distant. Cette architecture hybride est souvent plus réaliste qu'un remplacement total.\n\n### Ce qu'il faut retenir\n\nL'IA locale est un levier de contrôle, pas une garantie de confidentialité, de souveraineté ou d'économie. Elle déplace le calcul, la mémoire, la sécurité et la maintenance dans votre périmètre. Elle mérite donc une évaluation aussi rigoureuse qu'un service distant : modèle, matériel, moteur, mémoire, débit, coût et exploitation. Les modules suivants examinent chacun de ces points avec des hypothèses explicites et des calculs reproductibles.",
+      "diagram": {
+        "title": "Le trajet d'une requête, de l'utilisateur au modèle",
+        "description": "Schéma illustratif : une requête peut passer par un fournisseur distant ou rester dans une machine locale, avec des compromis différents. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox='0 0 800 420' xmlns='http://www.w3.org/2000/svg' role='img' aria-label='Données, réseau, fournisseur distant et machine locale, avec les compromis associés'><defs><marker id='il-pourquoi-arrow' markerWidth='8' markerHeight='8' refX='7' refY='4' orient='auto'><path d='M0,0 L8,4 L0,8 Z' fill='#64748b'/></marker></defs><rect width='800' height='420' rx='16' fill='#070b14' stroke='#1e293b' stroke-width='1.5'/><text x='400' y='34' fill='#f8fafc' font-size='15' font-weight='bold' text-anchor='middle'>Deux trajets, deux jeux de compromis</text><text x='400' y='56' fill='#94a3b8' font-size='12' text-anchor='middle'>Schéma illustratif, sans mesure</text><g id=\"donnees\"><rect x='40' y='150' width='160' height='80' rx='12' fill='#0f172a' stroke='#38bdf8' stroke-width='2'/><text x='120' y='182' fill='#e0f2fe' font-size='13' text-anchor='middle'>Données</text><text x='120' y='204' fill='#bae6fd' font-size='11' text-anchor='middle'>prompts, documents</text></g><g id=\"reseau\"><rect x='230' y='150' width='160' height='80' rx='12' fill='#111827' stroke='#818cf8' stroke-width='2'/><text x='310' y='182' fill='#e0e7ff' font-size='13' text-anchor='middle'>Réseau</text><text x='310' y='204' fill='#c7d2fe' font-size='11' text-anchor='middle'>TLS, journaux</text></g><g id=\"fournisseur\"><rect x='420' y='150' width='160' height='80' rx='12' fill='#111827' stroke='#f472b6' stroke-width='2'/><text x='500' y='182' fill='#fce7f3' font-size='13' text-anchor='middle'>Fournisseur</text><text x='500' y='204' fill='#fbcfe8' font-size='11' text-anchor='middle'>API distante</text></g><g id=\"local\"><rect x='610' y='150' width='150' height='80' rx='12' fill='#0f172a' stroke='#34d399' stroke-width='2'/><text x='685' y='182' fill='#d1fae5' font-size='13' text-anchor='middle'>Machine locale</text><text x='685' y='204' fill='#a7f3d0' font-size='11' text-anchor='middle'>poids et calcul</text></g><g stroke='#64748b' stroke-width='2' marker-end='url(#il-pourquoi-arrow)'><line x1='200' y1='175' x2='225' y2='175'/><line x1='390' y1='175' x2='415' y2='175'/><line x1='580' y1='175' x2='605' y2='175'/></g><g id=\"compromis\"><rect x='230' y='286' width='340' height='72' rx='10' fill='#0b1220' stroke='#fbbf24' stroke-width='1.5'/><text x='400' y='312' fill='#fef3c7' font-size='12' text-anchor='middle'>compromis : contrôle, coût fixe, exploitation</text><text x='400' y='334' fill='#fde68a' font-size='11' text-anchor='middle'>à comparer avec l'usage variable d'une API</text></g><line x1='685' y1='230' x2='570' y2='286' stroke='#64748b' stroke-width='2' marker-end='url(#il-pourquoi-arrow)'/></svg>",
+        "steps": [
+          {
+            "title": "1. La donnée quitte son point de départ",
+            "explanation": "Un prompt peut contenir des informations sensibles. Le premier enjeu est de savoir s'il reste dans un périmètre contrôlé ou s'il traverse un réseau tiers.",
+            "highlight": [
+              "donnees",
+              "reseau"
+            ]
+          },
+          {
+            "title": "2. Le fournisseur ou la machine locale",
+            "explanation": "Une API distante mutualise la capacité et facture à l'usage. Une machine locale immobilise du matériel et déplace l'exploitation dans votre équipe.",
+            "highlight": [
+              "fournisseur",
+              "local"
+            ]
+          },
+          {
+            "title": "3. Les compromis ne disparaissent pas",
+            "explanation": "Contrôle, coût, latence, qualité et maintenance restent des choix. Le bon montage dépend du volume, de la sensibilité et des compétences disponibles.",
+            "highlight": [
+              "compromis"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Que signifie exactement « IA locale » dans ce cours ?",
+          "options": [
+            "Le modèle est forcément open source",
+            "Les poids et le calcul sont exécutés sur une machine que vous contrôlez",
+            "Le serveur n'a aucune connexion réseau",
+            "Le modèle a été entraîné sur vos données"
+          ],
+          "correctIndex": 1,
+          "explanation": "Local décrit le lieu du calcul. La licence, la connectivité et l'origine des données sont des questions séparées."
+        },
+        {
+          "question": "Pourquoi un serveur local ne garantit-il pas à lui seul la confidentialité ?",
+          "options": [
+            "Parce que les modèles locaux lisent les disques durs",
+            "Parce que les journaux, caches, sauvegardes et outils de supervision peuvent conserver ou transmettre des données",
+            "Parce que le chiffrement est interdit en local",
+            "Parce qu'une API distante est toujours plus sûre"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le lieu d'exécution n'est qu'un maillon. La confidentialité dépend de toute la chaîne de collecte, de stockage et d'accès."
+        },
+        {
+          "question": "Quel cas justifie le mieux une évaluation du déploiement local ?",
+          "options": [
+            "Un prototype de deux jours avec dix requêtes",
+            "Des données qui ne peuvent pas sortir d'un périmètre défini et une charge stable",
+            "Un besoin de la meilleure qualité possible sans aucune contrainte",
+            "Une équipe qui ne veut pas gérer de serveur"
+          ],
+          "correctIndex": 1,
+          "explanation": "Une contrainte de données forte et une charge suffisante pour amortir la machine sont deux arguments solides. Le prototype et l'absence de compétences plaident plutôt pour une API."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "IA locale",
+          "definition": "Exécution des poids et du calcul d'un modèle sur une machine administrée par l'organisation qui l'utilise."
+        },
+        {
+          "term": "Poids ouverts",
+          "definition": "Fichiers de paramètres publiés et téléchargeables. Cette ouverture ne dit rien, à elle seule, sur la licence, les données d'entraînement ou le code."
+        },
+        {
+          "term": "Périmètre de données",
+          "definition": "Ensemble des systèmes, réseaux et personnes autorisés à traiter une donnée pendant son cycle de vie."
+        },
+        {
+          "term": "Cache de préfixe",
+          "definition": "Réutilisation du calcul et de la mémoire associés à un début de prompt identique, pour accélérer les requêtes suivantes."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Local ne veut pas dire étanche",
+          "prompt": "Une entreprise justifie l'hébergement local d'un modèle par la confidentialité, mais prévoit d'envoyer les journaux de prompts, les traces de supervision et les sauvegardes vers un service cloud. Expliquez pourquoi l'argument ne suffit pas, puis indiquez trois questions à poser avant de conclure.",
+          "solution": "Le calcul reste sur la machine, mais les journaux, les traces et les sauvegardes peuvent contenir les prompts et sortir du périmètre. La confidentialité dépend donc du trajet complet des données, pas seulement du lieu d'exécution. Il faut demander quelles données sont écrites, où elles le sont, combien de temps elles sont conservées et qui peut les lire. Il faut aussi vérifier les caches de préfixe, les vidages mémoire, les accès de maintenance et les sous-traitants. Sans ces réponses, le local réduit le nombre d'acteurs, mais ne garantit pas l'étanchéité."
+        }
+      ],
+      "sources": [
+        {
+          "label": "vLLM, documentation, consultée le 21 octobre 2026.",
+          "href": "https://docs.vllm.ai/"
+        },
+        {
+          "label": "LMCache, dépôt GitHub, consulté le 21 octobre 2026.",
+          "href": "https://github.com/LMCache/LMCache"
+        }
+      ]
+    },
+    {
+      "id": "materiel",
+      "title": "Lire une fiche technique sans se tromper",
+      "keyTakeaways": [
+        "La capacité de mémoire détermine ce qui tient, la bande passante influence la vitesse de décodage, et la puissance de calcul sert surtout au préremplissage et à l'entraînement.",
+        "Un chiffre de téraflops ne prédit pas le débit en tokens par seconde : le décodage d'un modèle est souvent limité par la lecture des poids en mémoire.",
+        "La mémoire unifiée offre une grande capacité, mais elle est partagée avec le processeur et les autres composants ; les performances dépendent du logiciel et du modèle.",
+        "Le prix d'une carte ne suffit pas : serveur, alimentation, refroidissement, stockage, garantie et taux d'utilisation complètent le coût.",
+        "La seule mesure qui compte est celle de votre modèle, avec votre contexte, votre lot et votre moteur, sur la machine que vous envisagez."
+      ],
+      "theory": "### Trois ressources, pas une\n\nUne fiche technique mélange plusieurs nombres qui ne mesurent pas la même chose. La capacité de mémoire, exprimée en gigaoctets, indique combien de poids, de cache KV et d'espaces de travail peuvent résider sur la carte. La bande passante mémoire, exprimée en gigaoctets par seconde, indique à quelle vitesse ces données peuvent être lues et écrites. La puissance de calcul, exprimée en téraflops ou en opérations par seconde, indique combien d'opérations arithmétiques peuvent être exécutées dans un temps donné. Un modèle d'inférence utilise ces trois ressources à des degrés différents selon la phase : le préremplissage du prompt est gourmand en calcul, tandis que la génération token par token est souvent limitée par la mémoire.\n\nCette distinction explique pourquoi deux cartes peuvent avoir des performances très différentes sur un même modèle. Une carte avec beaucoup de mémoire peut charger un grand modèle mais le décoder lentement si sa bande passante est faible. Une carte rapide en calcul peut exceller sur le préremplissage et décevoir sur la génération. Une carte avec peu de mémoire peut être obligée de réduire le contexte, le lot ou la quantification, ce qui change à son tour le débit. Il n'y a pas de classement universel : il y a des compromis adaptés à une charge.\n\n### Ce que disent les fiches constructeur\n\nPrenons deux exemples datés. La fiche de la NVIDIA RTX 6000 Ada consultée en octobre 2026 indique 48 Go de mémoire GDDR6 avec code correcteur d'erreurs et une puissance maximale de 300 W. La fiche technique associée annonce une bande passante de 960 Go/s. La fiche de l'Apple Mac Studio consultée à la même date décrit une machine équipée d'une puce M5 Ultra, avec jusqu'à 512 Go de mémoire unifiée et une bande passante de 1,2 To/s, dont la puissance continue maximale est de 480 W. Ces nombres sont des caractéristiques de produit, pas des débits de tokens. Ils décrivent une enveloppe dans laquelle un modèle peut ou non tenir, et une vitesse théorique de circulation des données.\n\nLes prix, eux, ne figurent pas dans ces fiches de manière stable. Un tarif public change avec le canal de distribution, la région, la TVA, la garantie et le reste de la configuration. Il faut donc demander un devis daté et comparer des configurations complètes. Un prix de carte graphique seul ne dit rien du coût du serveur qui l'accueille. Le module sur le coût total revient sur cette construction.\n\n### Capacité et bande passante\n\nLa capacité répond à une question simple : le modèle et son cache KV tiennent-ils en mémoire ? Les poids occupent un espace proportionnel au nombre de paramètres et à la taille de chaque paramètre. Un modèle de 8 milliards de paramètres stocké en 16 bits occupe environ 16 Go, sans compter les optimiseurs, les activations et les marges. En 4 bits, l'ordre de grandeur des poids tombe autour de 4 Go, mais des échelles, des zéros et des métadonnées s'ajoutent selon le format. Le cache KV, lui, dépend des couches, des têtes, de la dimension de tête, du contexte et du lot. Il peut devenir plus gros que les poids sur une longue conversation ou un gros lot.\n\nLa bande passante répond à une autre question : à quelle vitesse peut-on lire ces octets pour produire le token suivant ? Pendant le décodage, le modèle doit parcourir ses poids et son cache pour calculer chaque token. Si la mémoire est le goulot d'étranglement, le débit maximal est approximativement la bande passante divisée par le nombre d'octets lus par token, corrigé par l'efficacité réelle du noyau. Cette formule est un plafond, pas une promesse. Elle ignore les latences, les synchronisations, les accès irréguliers et le travail du processeur hôte.\n\n### Pourquoi le décodage est souvent limité par la mémoire\n\nPendant la génération, chaque nouveau token dépend du précédent. Le modèle ne peut pas lancer tous les tokens futurs en parallèle, même si la carte possède des milliers de cœurs. Il exécute une passe avant par token, lit les poids et le cache, puis choisit le token suivant. La carte peut être très rapide en calcul, mais elle attend les données. C'est pourquoi un modèle plus petit, avec une bande passante égale, produit souvent plus de tokens par seconde qu'un modèle plus gros : il y a moins d'octets à lire par token.\n\nLe lot change la donne. Si plusieurs requêtes sont décodées en même temps, les poids peuvent être lus une fois et réutilisés pour plusieurs tokens, ce qui augmente le débit total. En contrepartie, le cache KV de chaque requête occupe de la mémoire et la latence par requête peut augmenter. Le module sur le débit détaille ce compromis. Retenez ici que la bande passante seule ne suffit pas : il faut aussi savoir quel lot, quel contexte et quel cache sont réellement servis.\n\n### La mémoire unifiée\n\nUne machine à mémoire unifiée, comme le Mac Studio, ne sépare pas la mémoire du processeur et celle du GPU de la même manière qu'une carte discrète. Le processeur graphique peut accéder à une grande capacité, ce qui permet de charger des modèles qui ne tiendraient pas sur une carte de 48 Go. Cette capacité est un avantage réel pour l'expérimentation et pour certains modèles de grande taille. Elle ne signifie pas que la mémoire est gratuite ni que la bande passante est équivalente à celle d'une carte dédiée : elle est partagée avec les autres composants, et le logiciel doit savoir l'exploiter.\n\nLes performances dépendent fortement du moteur et du format de quantification. Un modèle au format GGUF exécuté par llama.cpp n'utilise pas les mêmes noyaux qu'un modèle servi par vLLM sur CUDA. Comparer deux machines avec des moteurs différents ne mesure pas seulement le matériel. Il faut comparer des configurations complètes, avec le même modèle, la même quantification, le même contexte et la même charge.\n\n### Un calcul de plafond, avec ses hypothèses\n\nPrenons un modèle de 8 milliards de paramètres stocké en 16 bits, soit environ 16 Go de poids. Supposons une bande passante de 960 Go/s, celle de la carte citée plus haut, et une efficacité de 60 % pour tenir compte des accès réels. En lot de 1, sans cache KV significatif, le plafond de décodage s'écrit $D \\approx \\frac{B \\times e}{N \\times b}$, où $B$ est la bande passante, $e$ l'efficacité, $N$ le nombre de paramètres et $b$ le nombre d'octets par paramètre. Le calcul donne 36 tokens/s. Ce nombre n'est pas une mesure du modèle : il suppose que seule la lecture des poids limite le débit et que le cache tient dans la mémoire restante.\n\nAvec les mêmes hypothèses sur une machine à 1,2 To/s, le calcul donnerait 45 tokens/s. La différence illustre l'effet de la bande passante, mais elle ne prouve pas qu'une machine est plus rapide sur votre charge. Le cache KV, le préremplissage, le moteur, la quantification et le lot peuvent changer le résultat. Le code ci-dessous reproduit le premier calcul. Modifiez les hypothèses plutôt que de recopier le résultat.\n\n### Lire une fiche sans se tromper\n\nUne lecture utile d'une fiche technique suit un ordre. Vérifiez d'abord la capacité et le type de mémoire, puis la bande passante, puis la puissance et le refroidissement, puis les interfaces et le support logiciel. Cherchez ensuite les détails qui changent l'usage : mémoire avec ou sans code correcteur d'erreurs, nombre de cartes, possibilité de NVLink ou de tensor parallel, formats de quantification supportés, système d'exploitation, pilotes, garantie. Enfin, demandez une mesure sur votre modèle. Un tableau de spécifications n'est pas un banc d'essai.\n\nLa puissance électrique mérite une attention particulière. La puissance maximale d'une carte n'est pas la consommation moyenne d'un serveur. Il faut ajouter le processeur, la mémoire, les disques, les ventilateurs, les alimentations et les pertes. Pour un calcul de coût, utilisez une puissance moyenne mesurée ou une hypothèse explicite, pas le maximum de la fiche. Le module sur le coût montre comment intégrer cette valeur.\n\n### Ce qu'il faut retenir\n\nUne fiche technique donne des bornes, pas une réponse. La capacité indique ce qui peut tenir, la bande passante indique la vitesse de lecture, et le calcul indique la capacité de traitement. Le débit réel dépend du modèle, du contexte, du lot, du moteur et de la mémoire disponible. Avant d'acheter, mesurez sur votre charge et comparez des configurations complètes, avec des prix datés.",
+      "diagram": {
+        "title": "Quatre nombres à ne pas confondre",
+        "description": "Schéma illustratif : capacité, bande passante, calcul et prix répondent à quatre questions différentes. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox='0 0 800 420' xmlns='http://www.w3.org/2000/svg' role='img' aria-label='Capacité de mémoire, bande passante, puissance de calcul et prix, quatre critères distincts'><defs><marker id='il-materiel-arrow' markerWidth='8' markerHeight='8' refX='7' refY='4' orient='auto'><path d='M0,0 L8,4 L0,8 Z' fill='#64748b'/></marker></defs><rect width='800' height='420' rx='16' fill='#070b14' stroke='#1e293b' stroke-width='1.5'/><text x='400' y='34' fill='#f8fafc' font-size='15' font-weight='bold' text-anchor='middle'>Lire une fiche technique</text><text x='400' y='56' fill='#94a3b8' font-size='12' text-anchor='middle'>Schéma illustratif, sans mesure</text><g id=\"vram\"><rect x='50' y='100' width='320' height='90' rx='12' fill='#0f172a' stroke='#38bdf8' stroke-width='2'/><text x='210' y='130' fill='#e0f2fe' font-size='13' text-anchor='middle'>Capacité de mémoire</text><text x='210' y='152' fill='#bae6fd' font-size='11' text-anchor='middle'>poids, cache KV, espace de travail</text><text x='210' y='172' fill='#7dd3fc' font-size='11' text-anchor='middle'>ce qui tient</text></g><g id=\"bande\"><rect x='430' y='100' width='320' height='90' rx='12' fill='#0f172a' stroke='#34d399' stroke-width='2'/><text x='590' y='130' fill='#d1fae5' font-size='13' text-anchor='middle'>Bande passante</text><text x='590' y='152' fill='#a7f3d0' font-size='11' text-anchor='middle'>octets lus par seconde</text><text x='590' y='172' fill='#6ee7b7' font-size='11' text-anchor='middle'>vitesse de décodage</text></g><g id=\"calcul\"><rect x='50' y='240' width='320' height='90' rx='12' fill='#111827' stroke='#818cf8' stroke-width='2'/><text x='210' y='270' fill='#e0e7ff' font-size='13' text-anchor='middle'>Puissance de calcul</text><text x='210' y='292' fill='#c7d2fe' font-size='11' text-anchor='middle'>opérations arithmétiques</text><text x='210' y='312' fill='#a5b4fc' font-size='11' text-anchor='middle'>préremplissage, entraînement</text></g><g id=\"prix\"><rect x='430' y='240' width='320' height='90' rx='12' fill='#111827' stroke='#fbbf24' stroke-width='2'/><text x='590' y='270' fill='#fef3c7' font-size='13' text-anchor='middle'>Prix complet</text><text x='590' y='292' fill='#fde68a' font-size='11' text-anchor='middle'>serveur, énergie, garantie</text><text x='590' y='312' fill='#fcd34d' font-size='11' text-anchor='middle'>coût d'usage</text></g><g stroke='#64748b' stroke-width='2' marker-end='url(#il-materiel-arrow)'><line x1='370' y1='145' x2='425' y2='145'/><line x1='210' y1='190' x2='210' y2='235'/><line x1='590' y1='190' x2='590' y2='235'/><line x1='370' y1='285' x2='425' y2='285'/></g></svg>",
+        "steps": [
+          {
+            "title": "1. La capacité fixe la limite",
+            "explanation": "Avant de parler de vitesse, il faut savoir si les poids, le cache KV et l'espace de travail tiennent dans la mémoire disponible.",
+            "highlight": [
+              "vram"
+            ]
+          },
+          {
+            "title": "2. La bande passante fixe le rythme",
+            "explanation": "Pendant le décodage, la carte lit les poids et le cache pour chaque token. Une bande passante plus élevée déplace la limite, sans garantir le débit final.",
+            "highlight": [
+              "bande"
+            ]
+          },
+          {
+            "title": "3. Le calcul sert surtout au préremplissage",
+            "explanation": "Le traitement initial du prompt est parallèle et gourmand en calcul. C'est là que les unités matricielles et la puissance brute comptent le plus.",
+            "highlight": [
+              "calcul"
+            ]
+          },
+          {
+            "title": "4. Le prix n'est pas une spécification",
+            "explanation": "Un prix de carte ne décrit ni la consommation, ni le refroidissement, ni la durée de vie. Le coût se compare sur une configuration complète et une charge réelle.",
+            "highlight": [
+              "prix"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "code": "bandwidth_gb_s = 960\nweights_gb = 8e9 * 2 / 1e9\nefficiency = 0.6\ntokens_per_s = bandwidth_gb_s * efficiency / weights_gb\nprint(f'{tokens_per_s:.1f} tokens/s')",
+        "explanation": "Hypothèses : 8 milliards de paramètres en 16 bits, bande passante de 960 Go/s, efficacité de 60 %, lot de 1, cache KV négligeable. Le résultat est un plafond de décodage, pas une mesure.",
+        "output": "36.0 tokens/s",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Quelle ressource limite le plus souvent la génération token par token ?",
+          "options": [
+            "La bande passante mémoire",
+            "La puissance du processeur central",
+            "La taille du disque système",
+            "Le nombre de ventilateurs"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le décodage lit les poids et le cache à chaque token. Quand le lot est petit, la bande passante mémoire est souvent le facteur limitant."
+        },
+        {
+          "question": "Pourquoi la mémoire unifiée peut-elle convenir à de grands modèles ?",
+          "options": [
+            "Parce qu'elle supprime le besoin de bande passante",
+            "Parce que le GPU peut accéder à une capacité plus grande que celle d'une carte discrète",
+            "Parce qu'elle rend les modèles plus précis",
+            "Parce qu'elle interdit la quantification"
+          ],
+          "correctIndex": 1,
+          "explanation": "La capacité est l'avantage principal. La bande passante reste partagée et les performances dépendent du moteur et du format de quantification."
+        },
+        {
+          "question": "Que faut-il ajouter au prix d'une carte graphique pour estimer un coût complet ?",
+          "options": [
+            "Rien, le prix de la carte suffit",
+            "Le serveur, l'énergie, le refroidissement, le stockage, la garantie et le travail d'exploitation",
+            "Uniquement le prix du logiciel",
+            "La vitesse de la connexion internet du bureau"
+          ],
+          "correctIndex": 1,
+          "explanation": "Une carte ne fonctionne pas seule. Le coût utile inclut l'enveloppe matérielle, l'énergie, les périphériques et les personnes qui maintiennent le service."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Bande passante mémoire",
+          "definition": "Quantité de données que la mémoire peut transférer par unité de temps. Elle influence fortement la vitesse de décodage d'un modèle."
+        },
+        {
+          "term": "Mémoire unifiée",
+          "definition": "Mémoire partagée entre le processeur et le processeur graphique, ce qui permet au GPU d’accéder à une capacité plus grande."
+        },
+        {
+          "term": "Préremplissage",
+          "definition": "Traitement initial du prompt avant la génération. Il est parallèle et généralement plus gourmand en calcul que le décodage."
+        },
+        {
+          "term": "Téraflops",
+          "definition": "Unité de puissance de calcul théorique. Elle ne dit pas, à elle seule, combien de tokens un modèle produira par seconde."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Du théorique au débit",
+          "prompt": "Un modèle de 14 milliards de paramètres est stocké en 16 bits. Avec une bande passante de 960 Go/s et une efficacité de 60 %, calculez le plafond de décodage en tokens par seconde avec la formule du module. Recalculez-le en 4 bits, puis expliquez pourquoi ce chiffre reste une borne.",
+          "solution": "Les poids occupent 14 milliards × 2 octets = 28 Go. Le plafond vaut 960 × 0,6 / 28 ≈ 20,6 tokens par seconde. En 4 bits, les poids tombent à 7 Go et le calcul donne 960 × 0,6 / 7 ≈ 82,3 tokens par seconde. Ces valeurs supposent que seule la lecture des poids limite le débit, en lot de 1 et sans cache KV significatif. Le cache, le préremplissage, les noyaux, la précision et l'efficacité réelle peuvent réduire le résultat. Il faut mesurer sur la machine et la charge visées."
+        }
+      ],
+      "sources": [
+        {
+          "label": "NVIDIA, RTX 6000 Ada, fiche produit, consultée le 21 octobre 2026.",
+          "href": "https://www.nvidia.com/en-us/design-visualization/rtx-6000/"
+        },
+        {
+          "label": "Apple, Mac Studio, spécifications, consultées le 21 octobre 2026.",
+          "href": "https://www.apple.com/mac-studio/specs/"
+        }
+      ]
+    },
+    {
+      "id": "modeles",
+      "title": "Choisir un modèle et une quantification",
+      "keyTakeaways": [
+        "La taille du modèle et la quantification déterminent l'empreinte des poids, mais le cache KV, le contexte et le lot ajoutent une mémoire séparée.",
+        "Une quantification 4 bits réduit fortement la mémoire des poids, sans garantir une qualité identique : il faut évaluer sur vos tâches, pas seulement sur une mesure générale.",
+        "La longueur de contexte annoncée n'est pas gratuite : le cache KV croît avec le nombre de tokens et le nombre de requêtes simultanées.",
+        "Le tokenizer, le template de conversation et la licence comptent autant que le nombre de paramètres pour un usage professionnel.",
+        "Commencez par le plus petit modèle qui réussit votre évaluation, puis augmentez la taille seulement si le gain est mesuré."
+      ],
+      "theory": "### Trois choix liés\n\nChoisir un modèle ne se réduit pas à choisir un nombre de paramètres. Il faut aussi choisir une quantification, une longueur de contexte et un format de service. Ces choix sont liés. Un modèle plus grand peut être quantifié plus agressivement pour tenir sur la même carte, mais la quantification peut dégrader certaines tâches. Un contexte plus long peut être utile pour analyser un document, mais il consomme de la mémoire et ralentit le préremplissage. Un modèle plus petit peut être plus rapide, mais il peut échouer sur des raisonnements longs ou sur un vocabulaire spécialisé.\n\nLa note de version de Qwen2.5-Coder, publiée en septembre 2024, annonce une famille de modèles de code de 1,5, 7 et 32 milliards de paramètres, un contexte allant jusqu'à 128 000 tokens et une licence Apache 2.0. Ces éléments donnent un cadre, pas une garantie de qualité sur votre tâche. La même famille peut avoir des variantes de base et instruct, des templates différents et des comportements différents. Le nom du modèle ne suffit pas : il faut lire la fiche, le template et la licence.\n\n### La mémoire des poids\n\nLa mémoire occupée par les poids suit une formule simple : $M = N \\times b$, où $N$ est le nombre de paramètres et $b$ le nombre d'octets par paramètre. En 16 bits, chaque paramètre occupe 2 octets. En 8 bits, 1 octet. En 4 bits, un demi-octet en théorie, auquel s'ajoutent les échelles, les zéros et les métadonnées du format. Un modèle de 7 milliards de paramètres occupe donc environ 14 Go en 16 bits, 7 Go en 8 bits et 3,5 Go en 4 bits pour les poids bruts. Ces ordres de grandeur aident à filtrer les modèles compatibles avec une machine, mais ils ne suffisent pas à prédire si le service tiendra.\n\nIl faut ajouter les activations, les espaces de travail du moteur, les graphiques CUDA éventuels, la fragmentation et une marge de sécurité. Le cache KV vient s'ajouter pour chaque requête active. Un modèle qui tient tout juste en mémoire au repos peut échouer dès que le contexte s'allonge ou que le lot augmente. La bonne pratique consiste à budgéter la mémoire avant le lancement, puis à surveiller l'utilisation réelle.\n\n### Ce que fait la quantification\n\nLa quantification réduit la précision des nombres stockés. Les poids passent de 16 bits à 8 bits, 4 bits ou moins, ce qui réduit la mémoire et souvent la bande passante nécessaire. Les formats modernes utilisent des groupes de poids avec une échelle et parfois un zéro, afin de limiter la perte. Les méthodes diffèrent : certaines quantifient après entraînement, d'autres pendant, et certaines conservent certaines couches en plus haute précision. Le résultat dépend du modèle, du format, de l'outil et de la tâche.\n\nUne quantification agressive n'est pas un simple changement de taille de fichier. Elle peut modifier la distribution des sorties, dégrader le respect d'un format, augmenter les répétitions ou réduire la qualité sur un raisonnement long. Les mesures automatiques de perplexité ne suffisent pas à décider pour un usage professionnel. Il faut un jeu d'évaluation avec vos prompts, vos documents et vos critères, comparer les versions à température et template identiques, et relire les cas limites.\n\n### Le budget de VRAM\n\nUn budget de VRAM se construit par couches : poids, cache KV, activations et espace de travail, marge. Prenons un modèle de 7 milliards de paramètres en 4 bits. Les poids bruts représentent environ 3,5 Go. Ajoutons 15 % pour les métadonnées et les tampons, puis 2 Go de marge pour les activations, la fragmentation et les imprévus. Le total atteint environ 6 Go, hors cache KV. Ce calcul est une hypothèse de travail : il ne dit pas que le modèle tiendra avec un contexte de 32 000 tokens et huit requêtes simultanées.\n\nLe cache KV se calcule à partir de l'architecture. Pour une estimation, il faut connaître le nombre de couches, le nombre de têtes KV, la dimension de tête, la longueur de contexte, le lot et la précision du cache. Le module sur la mémoire détaille ce calcul. Retenez ici que la quantification des poids ne réduit pas automatiquement le cache KV. Si le moteur conserve le cache en 16 bits, il peut devenir le poste dominant sur une longue conversation.\n\n### La longueur de contexte\n\nUne fenêtre de contexte de 128 000 tokens est une capacité maximale, pas une invitation à l'utiliser en permanence. Plus le contexte est long, plus le préremplissage coûte du calcul et plus le cache KV occupe de mémoire. Sur un serveur partagé, quelques requêtes très longues peuvent affamer les autres. Il faut fixer une longueur maximale par requête, surveiller la distribution des longueurs et prévoir une stratégie pour les documents plus grands : découpage, recherche documentaire ou résumé.\n\nLe contexte long ne remplace pas toujours une bonne récupération documentaire. Il peut être utile pour une analyse qui doit tenir compte de l'ensemble d'un texte, mais il coûte plus cher à chaque requête et peut diluer l'attention du modèle. Le choix dépend de la tâche. Une question factuelle sur un corpus de mille documents n'a pas besoin du même contexte qu'une relecture de contrat.\n\n### Tokenizer, template et licence\n\nLe tokenizer transforme le texte en tokens. Deux modèles peuvent découper la même phrase différemment, ce qui change le coût, la longueur utile et parfois la qualité. Le français, les accents, le code et les identifiants techniques ne se tokenisent pas de la même manière dans tous les vocabulaires. Le template de conversation, lui, définit les rôles et les délimiteurs attendus par le modèle. Utiliser un template inadapté peut dégrader les réponses sans provoquer d'erreur visible.\n\nLa licence est un autre critère. Un modèle Apache 2.0 peut être utilisé et redistribué dans un cadre défini, tandis qu'une licence sur mesure peut imposer des restrictions d'usage, de seuil ou de redistribution. Exécuter le modèle localement ne supprime pas ces obligations. Pour un service professionnel, faites relire la licence et conservez la version exacte du modèle, du tokenizer et du template.\n\n### Choisir par évaluation\n\nUne méthode simple consiste à partir d'un jeu de tâches représentatives, avec des réponses attendues ou des critères de qualité. Évaluez d'abord un petit modèle, puis un modèle plus grand ou moins quantifié. Comparez la qualité, la latence, la mémoire et le coût. Si le petit modèle atteint le seuil, ne prenez pas le grand par principe. Si le grand modèle échoue aussi, le problème vient peut-être des données, du prompt ou du découpage, pas de la taille.\n\nConservez les prompts, les paramètres d'échantillonnage et les versions. Un modèle peut changer de comportement après une mise à jour ou un changement de quantification. Sans traces, la comparaison devient une impression. Le choix final doit être réexaminé lorsque la charge, les données ou les exigences changent.",
+      "diagram": {
+        "title": "Le budget de mémoire d'un modèle",
+        "description": "Schéma illustratif : les poids, le cache KV, le contexte et la marge de sécurité se partagent la mémoire disponible. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox='0 0 800 420' xmlns='http://www.w3.org/2000/svg' role='img' aria-label='Poids, cache KV, quantification et contexte dans un budget de mémoire'><defs><marker id='il-modeles-arrow' markerWidth='8' markerHeight='8' refX='7' refY='4' orient='auto'><path d='M0,0 L8,4 L0,8 Z' fill='#64748b'/></marker></defs><rect width='800' height='420' rx='16' fill='#070b14' stroke='#1e293b' stroke-width='1.5'/><text x='400' y='34' fill='#f8fafc' font-size='15' font-weight='bold' text-anchor='middle'>Ce qui occupe la mémoire</text><text x='400' y='56' fill='#94a3b8' font-size='12' text-anchor='middle'>Schéma illustratif, sans mesure</text><g id=\"poids\"><rect x='50' y='100' width='320' height='90' rx='12' fill='#0f172a' stroke='#38bdf8' stroke-width='2'/><text x='210' y='130' fill='#e0f2fe' font-size='13' text-anchor='middle'>Poids du modèle</text><text x='210' y='152' fill='#bae6fd' font-size='11' text-anchor='middle'>paramètres × octets par paramètre</text><text x='210' y='172' fill='#7dd3fc' font-size='11' text-anchor='middle'>réduits par la quantification</text></g><g id=\"kv\"><rect x='430' y='100' width='320' height='90' rx='12' fill='#0f172a' stroke='#34d399' stroke-width='2'/><text x='590' y='130' fill='#d1fae5' font-size='13' text-anchor='middle'>Cache KV</text><text x='590' y='152' fill='#a7f3d0' font-size='11' text-anchor='middle'>couches, têtes, contexte, lot</text><text x='590' y='172' fill='#6ee7b7' font-size='11' text-anchor='middle'>croît avec la conversation</text></g><g id=\"quantification\"><rect x='50' y='240' width='320' height='90' rx='12' fill='#111827' stroke='#818cf8' stroke-width='2'/><text x='210' y='270' fill='#e0e7ff' font-size='13' text-anchor='middle'>Quantification</text><text x='210' y='292' fill='#c7d2fe' font-size='11' text-anchor='middle'>16, 8 ou 4 bits</text><text x='210' y='312' fill='#a5b4fc' font-size='11' text-anchor='middle'>mémoire contre fidélité</text></g><g id=\"contexte\"><rect x='430' y='240' width='320' height='90' rx='12' fill='#111827' stroke='#fbbf24' stroke-width='2'/><text x='590' y='270' fill='#fef3c7' font-size='13' text-anchor='middle'>Contexte et lot</text><text x='590' y='292' fill='#fde68a' font-size='11' text-anchor='middle'>longueur et simultanéité</text><text x='590' y='312' fill='#fcd34d' font-size='11' text-anchor='middle'>mémoire et latence</text></g><g stroke='#64748b' stroke-width='2' marker-end='url(#il-modeles-arrow)'><line x1='370' y1='145' x2='425' y2='145'/><line x1='210' y1='190' x2='210' y2='235'/><line x1='590' y1='190' x2='590' y2='235'/><line x1='370' y1='285' x2='425' y2='285'/></g></svg>",
+        "steps": [
+          {
+            "title": "1. Les poids",
+            "explanation": "Le nombre de paramètres et la taille de chaque paramètre donnent l'empreinte de base. La quantification réduit cette empreinte, avec un risque de perte de qualité.",
+            "highlight": [
+              "poids",
+              "quantification"
+            ]
+          },
+          {
+            "title": "2. Le cache KV",
+            "explanation": "Chaque token traité laisse des clés et des valeurs en mémoire. Le cache croît avec la longueur de la conversation et le nombre de requêtes simultanées.",
+            "highlight": [
+              "kv"
+            ]
+          },
+          {
+            "title": "3. Le contexte et le lot",
+            "explanation": "Une longueur de contexte élevée et un lot important augmentent la mémoire nécessaire et peuvent dégrader la latence des autres requêtes.",
+            "highlight": [
+              "contexte"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "code": "params = 7e9\nbytes_per_param = 0.5\nweights = params * bytes_per_param / 1e9\noverhead = 0.15\nmargin = 2\nprint(f'{weights * (1 + overhead) + margin:.1f} Go')",
+        "explanation": "Hypothèses : 7 milliards de paramètres en 4 bits, 15 % de surcoût pour les métadonnées et les tampons, 2 Go de marge. Le résultat est hors cache KV et hors activations détaillées.",
+        "output": "6.0 Go",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Que réduit principalement une quantification 4 bits des poids ?",
+          "options": [
+            "La mémoire occupée par les poids",
+            "La taille du tokenizer",
+            "Le nombre de couches du modèle",
+            "La licence du modèle"
+          ],
+          "correctIndex": 0,
+          "explanation": "La quantification réduit la précision de stockage des poids. Elle ne supprime pas le cache KV ni les activations, et elle peut modifier la qualité."
+        },
+        {
+          "question": "Pourquoi un modèle qui tient au repos peut-il échouer en production ?",
+          "options": [
+            "Parce que le disque dur ralentit",
+            "Parce que le cache KV et les activations augmentent avec le contexte et le lot",
+            "Parce que le modèle perd des paramètres",
+            "Parce que la licence expire"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le budget de mémoire doit inclure les requêtes actives. Un contexte long ou un lot plus grand peut dépasser la mémoire disponible."
+        },
+        {
+          "question": "Quel élément faut-il vérifier en plus du nombre de paramètres ?",
+          "options": [
+            "Le tokenizer, le template, la licence et la quantification",
+            "La couleur du serveur",
+            "Le nombre de ports USB",
+            "La marque du clavier"
+          ],
+          "correctIndex": 0,
+          "explanation": "Ces éléments changent le coût, le comportement et les obligations juridiques. Un modèle mal utilisé peut décevoir même s’il est puissant."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Quantification",
+          "definition": "Réduction de la précision des nombres stockés ou calculés, souvent pour diminuer la mémoire et accélérer l'inférence."
+        },
+        {
+          "term": "Cache KV",
+          "definition": "Mémoire des clés et des valeurs d'attention pour les tokens déjà traités, réutilisée lors de la génération."
+        },
+        {
+          "term": "Fenêtre de contexte",
+          "definition": "Nombre maximal de tokens que le modèle peut prendre en compte dans une requête, incluant le prompt et la réponse."
+        },
+        {
+          "term": "Template de conversation",
+          "definition": "Format des rôles et des délimiteurs attendu par un modèle instruct. Un mauvais template peut dégrader les réponses."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Budgéter la VRAM",
+          "prompt": "Un modèle de 13 milliards de paramètres est envisagé en 4 bits. Appliquez la méthode du module : poids bruts, 15 % pour les métadonnées et les tampons, puis 2 Go de marge. Quel total obtenez-vous ? Une carte de 12 Go suffit-elle pour un contexte de 32 000 tokens et plusieurs requêtes simultanées ?",
+          "solution": "Les poids bruts valent 13 milliards × 0,5 octet = 6,5 Go. Avec 15 % de surcoût, on obtient 7,475 Go, puis 9,475 Go avec la marge de 2 Go, hors cache KV. Il reste donc environ 2,5 Go sur une carte de 12 Go. Ce n'est pas une garantie : le cache KV croît avec la longueur de contexte et le nombre de requêtes, et les activations et la fragmentation s'y ajoutent. Il faut mesurer avec le contexte et le lot prévus, ou réduire l'un des deux."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Qwen, Qwen2.5-Coder, 2024.",
+          "href": "https://qwenlm.github.io/blog/qwen2.5-coder/"
+        },
+        {
+          "label": "vLLM, documentation, consultée le 21 octobre 2026.",
+          "href": "https://docs.vllm.ai/"
+        }
+      ]
+    },
+    {
+      "id": "moteurs",
+      "title": "vLLM, SGLang, llama.cpp et Ollama",
+      "keyTakeaways": [
+        "Un moteur d'inférence gère la tokenisation, l'ordonnancement des requêtes, le cache KV et l'API ; le choix dépend de la charge et du matériel, pas d'un classement abstrait.",
+        "vLLM et SGLang visent le service sur GPU avec batching continu et gestion fine du cache ; ils demandent plus d'infrastructure qu'un simple lanceur local.",
+        "llama.cpp et Ollama privilégient la simplicité et les formats locaux, avec un compromis sur le débit à forte concurrence.",
+        "KTransformers explore l'exécution hybride CPU et GPU, notamment pour les modèles à experts, mais ce n'est pas un moteur universel.",
+        "Comparez les moteurs avec le même modèle, la même quantification, le même contexte et la même charge ; sinon vous mesurez surtout les différences de configuration."
+      ],
+      "theory": "### Quatre responsabilités\n\nUn moteur d'inférence n'est pas seulement une bibliothèque qui exécute une multiplication de matrices. Il tokenise les requêtes, les ordonne, réserve la mémoire du cache KV, appelle le modèle, échantillonne les tokens et expose une API. Il décide aussi quand une requête entre dans un lot, quand elle en sort et ce qui se passe lorsqu'il n'y a plus assez de mémoire. Ces décisions ont un effet direct sur le débit et la latence. Deux moteurs qui utilisent le même modèle peuvent donc produire des résultats très différents sur la même machine.\n\nLe paysage est varié. vLLM et SGLang sont conçus pour le service sur GPU et mettent l'accent sur le batching continu, la gestion du cache et les API compatibles avec les formats courants. llama.cpp vise l'exécution locale, avec une prise en charge de CPU, de GPU et de la mémoire unifiée, souvent au format GGUF. Ollama ajoute une couche de packaging et de gestion de modèles au-dessus de moteurs locaux. KTransformers explore une exécution hybride entre processeur et GPU, avec un intérêt particulier pour les modèles à mélange d'experts. LMCache, traité plus loin, se concentre sur la réutilisation du cache KV.\n\n### vLLM\n\nLa documentation de vLLM décrit un moteur de service pensé pour l'inférence à haut débit. Son fonctionnement repose sur le batching continu : de nouvelles requêtes peuvent rejoindre un lot en cours, et les requêtes terminées libèrent leur place sans attendre la fin des autres. Le moteur gère le cache KV par blocs, une idée popularisée par PagedAttention. Il expose une API compatible avec le format OpenAI et prend en charge le parallélisme sur plusieurs GPU. Ces fonctions sont utiles lorsque plusieurs utilisateurs partagent un serveur et que la charge varie.\n\nvLLM n'est pas un programme magique qui rendrait un modèle rapide sur n'importe quelle machine. Il demande un GPU compatible, une version de pilote adaptée et une configuration de mémoire prudente. Le paramètre de longueur maximale de modèle, la fraction de mémoire GPU allouée au moteur et le nombre de requêtes simultanées doivent être réglés. Un réglage trop optimiste provoque des erreurs de mémoire ou des préemptions fréquentes, qui dégradent la latence.\n\n### SGLang\n\nSGLang propose un moteur et un langage de programmation pour les charges de génération structurée. Sa documentation met en avant RadixAttention, une gestion du cache de préfixe qui réutilise les calculs communs à plusieurs requêtes. Cette idée est utile lorsque beaucoup de prompts partagent un même début : instruction système, schéma, documents de référence ou historique. Le moteur expose aussi une API compatible avec le format OpenAI et prend en charge la génération contrainte par des grammaires ou des schémas.\n\nComme vLLM, SGLang suppose une infrastructure de service et une configuration adaptée. Le cache de préfixe améliore le débit lorsque les préfixes se répètent, mais il consomme de la mémoire et pose des questions d'isolation entre utilisateurs. Un cache partagé entre locataires peut accélérer des requêtes qui ne devraient pas partager d'information. Il faut donc le concevoir avec la même attention que les autres caches.\n\n### llama.cpp\n\nllama.cpp est un moteur léger, écrit pour exécuter des modèles locaux sur différentes plateformes. Il prend en charge le format GGUF, l'offload partiel ou total vers le GPU, le CPU et la mémoire unifiée. Il est souvent utilisé sur un poste de travail, un petit serveur ou un appareil sans GPU dédié. Sa simplicité d'installation et sa compatibilité avec de nombreux modèles en font un outil pratique pour prototyper et pour des charges modestes.\n\nSes compromis sont différents de ceux d'un moteur de service GPU. Le batching et la gestion de la concurrence sont moins poussés que dans vLLM ou SGLang, et le débit peut chuter lorsque de nombreuses requêtes arrivent en même temps. En contrepartie, il peut fonctionner sur du matériel varié et ne dépend pas d'un écosystème CUDA. Le bon choix dépend du nombre d'utilisateurs et de la latence attendue.\n\n### Ollama\n\nOllama simplifie l'installation et la gestion de modèles locaux. Il fournit un démon, un registre de modèles, une interface en ligne de commande et une API locale. Il est souvent utilisé pour découvrir un modèle ou pour intégrer une génération simple dans une application de bureau. Cette simplicité a un prix : les réglages fins de mémoire, de lot et de cache sont moins exposés que dans un moteur de service, et le comportement dépend des moteurs sous-jacents.\n\nPour un prototype, Ollama peut suffire. Pour un service partagé avec des exigences de débit et de supervision, il faut vérifier ce que la couche expose réellement : métriques, files d'attente, contrôle du cache, authentification, limites. Une API locale pratique n'est pas nécessairement une plateforme de production.\n\n### KTransformers\n\nKTransformers est un projet qui explore l'exécution de grands modèles sur du matériel limité, notamment en combinant processeur et GPU et en déchargeant une partie des poids ou des experts. Le dépôt présente des configurations pour des modèles à mélange d'experts et des formats quantifiés. Cette approche peut intéresser une équipe qui veut faire tenir un modèle volumineux sur une machine modeste, au prix d'une complexité de configuration et d'une latence plus variable.\n\nIl ne faut pas le présenter comme un remplacement général de vLLM ou de SGLang. Les performances dépendent du modèle, du matériel, du format et du chemin d'exécution. Une configuration qui fonctionne pour un modèle à experts peut être inadaptée à un modèle dense. L'évaluation doit porter sur la charge réelle, avec une mesure de la latence et de la mémoire.\n\n### Lancer vLLM\n\nLe lancement de vLLM tient en une commande, mais les paramètres méritent d'être compris. La commande suivante sert de point de départ, pas de configuration universelle. Elle demande un modèle accessible, un GPU compatible et une version de vLLM installée. La longueur maximale de modèle limite la mémoire du cache KV, et la fraction de mémoire GPU indique au moteur combien de mémoire il peut réserver. Une valeur trop élevée peut empêcher le système de fonctionner correctement ; une valeur trop basse peut réduire le nombre de requêtes simultanées.\n\nLe nom du modèle et les options doivent être vérifiés dans la documentation de la version installée. Les paramètres changent parfois d'une version à l'autre. Une commande copiée sans contrôle peut échouer ou produire un service qui ne correspond pas à la charge attendue.\n\n### Comparer les moteurs\n\nUne comparaison utile fixe le modèle, la quantification, la longueur de contexte, le lot, le matériel et la charge. Elle mesure le temps jusqu'au premier token, le temps entre les tokens, le débit total, la mémoire et le taux d'erreur. Elle vérifie aussi les fonctions dont le service a besoin : API compatible, génération contrainte, cache de préfixe, parallélisme, métriques, authentification. Un moteur plus rapide sur un banc d'essai peut être inadapté s'il lui manque une fonction critique.\n\nLes chiffres publiés par les projets sont utiles pour comprendre les ordres de grandeur, mais ils ne remplacent pas une mesure sur votre configuration. Les versions, les pilotes et les modèles changent. La bonne pratique est de construire un petit banc d'essai reproductible et de le rejouer après chaque mise à jour.",
+      "diagram": {
+        "title": "Quatre moteurs, quatre profils",
+        "description": "Schéma illustratif : vLLM, SGLang, llama.cpp et Ollama ne visent pas les mêmes charges ni le même matériel. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox='0 0 800 420' xmlns='http://www.w3.org/2000/svg' role='img' aria-label='vLLM, SGLang, llama.cpp et Ollama avec leurs profils de service'><defs><marker id='il-moteurs-arrow' markerWidth='8' markerHeight='8' refX='7' refY='4' orient='auto'><path d='M0,0 L8,4 L0,8 Z' fill='#64748b'/></marker></defs><rect width='800' height='420' rx='16' fill='#070b14' stroke='#1e293b' stroke-width='1.5'/><text x='400' y='34' fill='#f8fafc' font-size='15' font-weight='bold' text-anchor='middle'>Choisir un moteur selon la charge</text><text x='400' y='56' fill='#94a3b8' font-size='12' text-anchor='middle'>Schéma illustratif, sans mesure</text><g id=\"vllm\"><rect x='50' y='100' width='320' height='90' rx='12' fill='#0f172a' stroke='#38bdf8' stroke-width='2'/><text x='210' y='130' fill='#e0f2fe' font-size='13' text-anchor='middle'>vLLM</text><text x='210' y='152' fill='#bae6fd' font-size='11' text-anchor='middle'>service GPU, batching continu</text><text x='210' y='172' fill='#7dd3fc' font-size='11' text-anchor='middle'>cache KV par blocs</text></g><g id=\"sglang\"><rect x='430' y='100' width='320' height='90' rx='12' fill='#0f172a' stroke='#34d399' stroke-width='2'/><text x='590' y='130' fill='#d1fae5' font-size='13' text-anchor='middle'>SGLang</text><text x='590' y='152' fill='#a7f3d0' font-size='11' text-anchor='middle'>cache de préfixe, sorties contraintes</text><text x='590' y='172' fill='#6ee7b7' font-size='11' text-anchor='middle'>service GPU</text></g><g id=\"llama\"><rect x='50' y='240' width='320' height='90' rx='12' fill='#111827' stroke='#818cf8' stroke-width='2'/><text x='210' y='270' fill='#e0e7ff' font-size='13' text-anchor='middle'>llama.cpp</text><text x='210' y='292' fill='#c7d2fe' font-size='11' text-anchor='middle'>GGUF, CPU et GPU, mémoire unifiée</text><text x='210' y='312' fill='#a5b4fc' font-size='11' text-anchor='middle'>poste local, charge modeste</text></g><g id=\"ollama\"><rect x='430' y='240' width='320' height='90' rx='12' fill='#111827' stroke='#fbbf24' stroke-width='2'/><text x='590' y='270' fill='#fef3c7' font-size='13' text-anchor='middle'>Ollama</text><text x='590' y='292' fill='#fde68a' font-size='11' text-anchor='middle'>installation et registre simplifiés</text><text x='590' y='312' fill='#fcd34d' font-size='11' text-anchor='middle'>prototype, poste de travail</text></g><g stroke='#64748b' stroke-width='2' marker-end='url(#il-moteurs-arrow)'><line x1='370' y1='145' x2='425' y2='145'/><line x1='210' y1='190' x2='210' y2='235'/><line x1='590' y1='190' x2='590' y2='235'/><line x1='370' y1='285' x2='425' y2='285'/></g></svg>",
+        "steps": [
+          {
+            "title": "1. Le service partagé",
+            "explanation": "vLLM et SGLang visent plusieurs utilisateurs simultanés. Le batching continu et la gestion du cache sont au centre de leur conception.",
+            "highlight": [
+              "vllm",
+              "sglang"
+            ]
+          },
+          {
+            "title": "2. Le poste local",
+            "explanation": "llama.cpp et Ollama privilégient l'installation simple et la compatibilité avec du matériel varié, quitte à limiter le débit à forte concurrence.",
+            "highlight": [
+              "llama",
+              "ollama"
+            ]
+          },
+          {
+            "title": "3. La fonction décisive",
+            "explanation": "Le choix final dépend des fonctions nécessaires : API, cache de préfixe, génération contrainte, parallélisme, métriques et isolation.",
+            "highlight": [
+              "vllm",
+              "sglang",
+              "llama",
+              "ollama"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "bash",
+        "code": "vllm serve Qwen/Qwen2.5-Coder-7B-Instruct --max-model-len 8192 --gpu-memory-utilization 0.90",
+        "explanation": "Exemple de lancement, à adapter à la version installée et à la mémoire disponible. La longueur maximale limite le cache KV, et la fraction de mémoire GPU indique la part que le moteur peut réserver."
+      },
+      "quiz": [
+        {
+          "question": "Quel moteur est le plus adapté à un service GPU partagé avec beaucoup de requêtes simultanées ?",
+          "options": [
+            "Un moteur conçu pour le batching continu et la gestion du cache, comme vLLM ou SGLang",
+            "Un simple script qui charge le modèle à chaque requête",
+            "Un tableur",
+            "Un moteur qui interdit le cache KV"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le batching continu et la gestion du cache permettent de servir plusieurs requêtes sans attendre la fin de chacune. Tous les moteurs ne les implémentent pas au même niveau."
+        },
+        {
+          "question": "Quel est l'intérêt principal d'un cache de préfixe ?",
+          "options": [
+            "Réutiliser le calcul d'un début de prompt commun",
+            "Supprimer la tokenisation",
+            "Réduire la taille des poids",
+            "Éviter toute configuration"
+          ],
+          "correctIndex": 0,
+          "explanation": "Si plusieurs requêtes partagent le même début, le moteur peut réutiliser les calculs et le cache. Cela accélère le service, mais pose des questions d’isolation."
+        },
+        {
+          "question": "Pourquoi faut-il comparer les moteurs à configuration égale ?",
+          "options": [
+            "Parce que les différences de modèle, de quantification ou de contexte peuvent expliquer le résultat",
+            "Parce que tous les moteurs sont identiques",
+            "Parce que la météo influence les GPU",
+            "Parce que les licences sont les mêmes"
+          ],
+          "correctIndex": 0,
+          "explanation": "Un écart de débit peut venir du modèle, de la quantification, du contexte ou du lot. Sans contrôle, la comparaison ne dit pas quel moteur est meilleur."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Batching continu",
+          "definition": "Technique qui permet d'ajouter et de retirer des requêtes d'un lot en cours, sans attendre que toutes les requêtes présentes soient terminées."
+        },
+        {
+          "term": "PagedAttention",
+          "definition": "Gestion du cache KV par blocs de taille fixe, avec une table de correspondance, pour réduire la fragmentation et faciliter le partage."
+        },
+        {
+          "term": "RadixAttention",
+          "definition": "Gestion du cache de préfixe sous forme d’arbre de préfixes partagés, décrite par SGLang pour réutiliser les calculs communs."
+        },
+        {
+          "term": "GGUF",
+          "definition": "Format de fichier de modèles quantifiés utilisé notamment par llama.cpp, avec des métadonnées et différents types de quantification."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Choisir un moteur pour une charge",
+          "prompt": "Un service doit servir une vingtaine d'utilisateurs simultanés derrière une même instruction système de 2 000 tokens. Deux options sont proposées : Ollama pour sa simplicité, ou vLLM. Argumentez le choix en vous appuyant sur le batching, le cache de préfixe et les fonctions d'exploitation, puis indiquez le risque propre au cache de préfixe.",
+          "solution": "Avec une vingtaine d'utilisateurs simultanés, le batching continu de vLLM permet à de nouvelles requêtes de rejoindre un lot en cours et de mieux remplir le GPU. L'instruction système commune peut aussi être réutilisée par un cache de préfixe, ce qui évite de recalculer les mêmes tokens. Ollama reste simple à installer, mais expose moins les réglages de lot, de cache et de supervision, et son débit peut chuter à forte concurrence. Le risque du cache de préfixe est l'isolation : un cache partagé entre utilisateurs doit être cloisonné par tenant et par version de prompt."
+        }
+      ],
+      "sources": [
+        {
+          "label": "vLLM, documentation, consultée le 21 octobre 2026.",
+          "href": "https://docs.vllm.ai/"
+        },
+        {
+          "label": "SGLang, documentation, consultée le 21 octobre 2026.",
+          "href": "https://docs.sglang.io/"
+        }
+      ]
+    },
+    {
+      "id": "memoire",
+      "title": "Cache KV et gestion de la mémoire",
+      "keyTakeaways": [
+        "Le cache KV conserve les clés et les valeurs des tokens déjà traités pour éviter de recalculer ces projections à chaque nouveau token.",
+        "Sa taille augmente avec le nombre de couches, de têtes KV, la dimension de tête, le contexte, le lot et la précision du cache.",
+        "PagedAttention stocke le cache par blocs et réduit la fragmentation, mais il ne supprime pas la mémoire nécessaire.",
+        "Le cache de préfixe et l'offloading peuvent améliorer l'utilisation de la mémoire, au prix de questions d'isolation, de latence et de bande passante.",
+        "Un service stable budgète la mémoire avant le lancement, limite la longueur de contexte et surveille les préemptions et les erreurs de mémoire."
+      ],
+      "theory": "### Pourquoi un cache KV\n\nDans un Transformer, l'attention compare chaque nouveau token aux tokens précédents. Pour cela, elle calcule des clés et des valeurs pour chaque token. Sans cache, le modèle recalculerait ces clés et ces valeurs à chaque pas de génération, ce qui coûterait du calcul et du temps. Le cache KV conserve ces tenseurs pour la suite de la conversation. Il transforme une partie du calcul en mémoire : on stocke les clés et les valeurs déjà calculées, puis on les relit pour produire le token suivant. L'attention reste calculée à chaque nouveau token ; le cache évite de recalculer les projections de clés et de valeurs déjà obtenues.\n\nCe cache est spécifique à une requête. Il contient les clés et les valeurs associées aux tokens du prompt et à ceux déjà générés. Deux conversations différentes ont deux caches différents, même si elles partagent le même modèle. Le cache est donc un état dynamique, qui grossit à chaque token et se libère à la fin de la requête. Sa gestion est au cœur de la mémoire d'un serveur d'inférence.\n\n### La taille du cache\n\nLa taille du cache KV dépend de l'architecture du modèle et de la charge. Une formule d'estimation courante s'écrit $M_{KV} = 2 \\times L \\times H \\times d \\times T \\times B \\times b$, où $L$ est le nombre de couches, $H$ le nombre de têtes KV, $d$ la dimension de tête, $T$ la longueur de contexte, $B$ le lot et $b$ le nombre d'octets par valeur. Le facteur 2 vient du fait que le cache stocke à la fois les clés et les valeurs. Si le modèle utilise plusieurs têtes d'attention mais peu de têtes KV, la formule utilise le nombre de têtes KV, pas le nombre de têtes d'attention. C'est un détail important pour les architectures à attention groupée.\n\nPrenons une configuration de travail de 28 couches, 4 têtes KV, une dimension de tête de 128, un cache en 16 bits, un contexte de 4 096 tokens et un lot de 1. Le calcul donne environ 0,235 Go. Ce chiffre n'est pas une fiche officielle du modèle : c'est une hypothèse pour comprendre l'ordre de grandeur. Au même rythme, un contexte de 32 768 tokens demande environ 1,879 Go, et un lot de 8 à cette longueur demande environ 15,032 Go. Le cache peut donc devenir le poste dominant, surtout lorsque les conversations sont longues.\n\n### PagedAttention\n\nPagedAttention, décrit par Kwon et al. en 2023, organise le cache KV en blocs de taille fixe. Une table de pages associe les blocs logiques d'une requête à des blocs physiques en mémoire. Les blocs n'ont pas besoin d'être contigus, ce qui réduit la fragmentation externe et facilite l'allocation à mesure que la requête grandit. La méthode permet aussi de partager des blocs entre des requêtes qui ont un préfixe commun, avec un mécanisme de copie sur écriture lorsque les contenus divergent.\n\nPagedAttention ne réduit pas magiquement la quantité de cache nécessaire. Il change la manière de la réserver et de la réutiliser. Un serveur qui manque de mémoire continuera de manquer de mémoire, même avec une gestion par blocs. L'intérêt est de mieux utiliser la mémoire disponible, de limiter les gaspillages et de permettre des lots plus grands. Il faut tout de même fixer des limites et surveiller l'occupation.\n\n### Cache de préfixe\n\nLe cache de préfixe exploite une autre forme de répétition. Si plusieurs requêtes commencent par le même texte, le moteur peut réutiliser les calculs et le cache des tokens communs. C'est utile pour une instruction système longue, un schéma JSON, un document de référence ou un historique partagé. SGLang met en avant RadixAttention, qui organise ces préfixes dans une structure arborescente. vLLM propose également des mécanismes de cache de préfixe selon les versions.\n\nLe gain dépend du taux de répétition et de la politique d'éviction. Un cache trop petit ne retient pas les préfixes utiles ; un cache trop grand consomme de la mémoire qui pourrait servir aux requêtes en cours. Il faut aussi traiter l'isolation. Un cache partagé entre utilisateurs peut accélérer des requêtes qui ne devraient pas partager d'information. Les clés de cache doivent être associées à un tenant, à une version de prompt et à des droits d'accès. La performance ne doit pas primer sur la confidentialité.\n\n### Offloading et réutilisation\n\nLMCache est un projet qui vise à réutiliser le cache KV au-delà d'une seule instance, en le stockant dans différents niveaux de mémoire, y compris la mémoire du processeur ou le disque. L'idée est de conserver des préfixes ou des contextes coûteux pour les réutiliser plus tard, plutôt que de les recalculer. Le dépôt décrit des intégrations avec des moteurs de service et plusieurs backends de stockage. Cette approche peut réduire le temps de préremplissage sur des charges répétitives, mais elle ajoute de la latence de lecture et de la complexité.\n\nKTransformers explore une autre forme de déplacement : exécuter une partie du modèle sur le processeur et une autre sur le GPU, ou décharger certains experts. Ces techniques déplacent le goulot d'étranglement vers le bus et la mémoire du processeur. Elles peuvent rendre possible un modèle qui ne tiendrait pas autrement, mais elles ne promettent pas le même débit qu'une exécution entièrement sur GPU. Il faut mesurer le compromis sur la charge réelle.\n\n### Planifier la mémoire\n\nUn lancement prudent commence par une limite de longueur de contexte. Toutes les requêtes n'ont pas besoin de la fenêtre maximale. Fixer une limite par modèle ou par route réduit le cache KV et protège les autres utilisateurs. Ensuite, réglez la fraction de mémoire GPU que le moteur peut utiliser, en laissant de la place au système, aux autres processus et aux pics. Surveillez l'occupation du cache, les préemptions et les erreurs de mémoire. Une préemption signifie que le moteur a dû retirer une requête du lot pour libérer de la mémoire : elle peut augmenter fortement la latence.\n\nLe lot et le contexte interagissent. Un lot plus grand augmente le débit total mais consomme plus de cache. Un contexte plus long augmente le cache par requête. Un cache de préfixe peut réduire le recalcul mais occupe de la mémoire. Il n'y a pas de réglage universel : il faut choisir une politique en fonction de la latence cible et de la mémoire disponible.\n\n### Surveiller\n\nLes métriques utiles sont l'occupation du cache KV, le nombre de blocs libres, les préemptions, les rejets, le temps jusqu'au premier token et le temps entre les tokens. Une mémoire pleine n'est pas toujours un problème si le service reste dans sa latence cible. À l'inverse, une mémoire apparemment libre peut cacher de la fragmentation ou une mauvaise configuration. Les journaux du moteur et les métriques du système complètent la vision.\n\nUn test de charge doit inclure des contextes longs et des lots variés. Un service qui fonctionne avec des prompts courts peut échouer dès qu'un utilisateur colle un document de plusieurs milliers de tokens. La mémoire est une ressource partagée : la question n'est pas seulement de savoir si une requête tient, mais si elle laisse assez de place aux autres.",
+      "diagram": {
+        "title": "Le cache KV, de la requête au bloc mémoire",
+        "description": "Schéma illustratif : le cache KV grandit avec la conversation, peut être paginé, réutilisé ou déchargé. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox='0 0 800 420' xmlns='http://www.w3.org/2000/svg' role='img' aria-label='Cache KV, pagination, réutilisation de préfixe et déchargement mémoire'><defs><marker id='il-memoire-arrow' markerWidth='8' markerHeight='8' refX='7' refY='4' orient='auto'><path d='M0,0 L8,4 L0,8 Z' fill='#64748b'/></marker></defs><rect width='800' height='420' rx='16' fill='#070b14' stroke='#1e293b' stroke-width='1.5'/><text x='400' y='34' fill='#f8fafc' font-size='15' font-weight='bold' text-anchor='middle'>Quatre leviers pour la mémoire</text><text x='400' y='56' fill='#94a3b8' font-size='12' text-anchor='middle'>Schéma illustratif, sans mesure</text><g id=\"cache\"><rect x='50' y='100' width='320' height='90' rx='12' fill='#0f172a' stroke='#38bdf8' stroke-width='2'/><text x='210' y='130' fill='#e0f2fe' font-size='13' text-anchor='middle'>Cache KV</text><text x='210' y='152' fill='#bae6fd' font-size='11' text-anchor='middle'>clés et valeurs des tokens</text><text x='210' y='172' fill='#7dd3fc' font-size='11' text-anchor='middle'>croît avec la conversation</text></g><g id=\"pagination\"><rect x='430' y='100' width='320' height='90' rx='12' fill='#0f172a' stroke='#34d399' stroke-width='2'/><text x='590' y='130' fill='#d1fae5' font-size='13' text-anchor='middle'>Pagination</text><text x='590' y='152' fill='#a7f3d0' font-size='11' text-anchor='middle'>blocs et table de pages</text><text x='590' y='172' fill='#6ee7b7' font-size='11' text-anchor='middle'>moins de fragmentation</text></g><g id=\"reuse\"><rect x='50' y='240' width='320' height='90' rx='12' fill='#111827' stroke='#818cf8' stroke-width='2'/><text x='210' y='270' fill='#e0e7ff' font-size='13' text-anchor='middle'>Cache de préfixe</text><text x='210' y='292' fill='#c7d2fe' font-size='11' text-anchor='middle'>débuts de prompt communs</text><text x='210' y='312' fill='#a5b4fc' font-size='11' text-anchor='middle'>isolation nécessaire</text></g><g id=\"offload\"><rect x='430' y='240' width='320' height='90' rx='12' fill='#111827' stroke='#fbbf24' stroke-width='2'/><text x='590' y='270' fill='#fef3c7' font-size='13' text-anchor='middle'>Déchargement</text><text x='590' y='292' fill='#fde68a' font-size='11' text-anchor='middle'>processeur, disque, autre instance</text><text x='590' y='312' fill='#fcd34d' font-size='11' text-anchor='middle'>latence et bande passante</text></g><g stroke='#64748b' stroke-width='2' marker-end='url(#il-memoire-arrow)'><line x1='370' y1='145' x2='425' y2='145'/><line x1='210' y1='190' x2='210' y2='235'/><line x1='590' y1='190' x2='590' y2='235'/><line x1='370' y1='285' x2='425' y2='285'/></g></svg>",
+        "steps": [
+          {
+            "title": "1. Le cache grandit",
+            "explanation": "Chaque token ajoute des clés et des valeurs. Une conversation longue ou un lot important augmente la mémoire nécessaire.",
+            "highlight": [
+              "cache"
+            ]
+          },
+          {
+            "title": "2. La pagination organise",
+            "explanation": "Les blocs de taille fixe et la table de pages réduisent la fragmentation. Ils ne suppriment pas la quantité de cache à stocker.",
+            "highlight": [
+              "pagination"
+            ]
+          },
+          {
+            "title": "3. La réutilisation accélère",
+            "explanation": "Un préfixe commun peut être réutilisé, mais le cache doit être isolé par utilisateur et par version de prompt pour éviter les fuites.",
+            "highlight": [
+              "reuse"
+            ]
+          },
+          {
+            "title": "4. Le déchargement déplace",
+            "explanation": "Stocker le cache hors de la mémoire GPU libère de la capacité, au prix d’une lecture plus lente et d’une bande passante supplémentaire.",
+            "highlight": [
+              "offload"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "code": "layers = 28\nkv_heads = 4\nhead_dim = 128\nbytes_per_value = 2\nfor context, batch in ((4096, 1), (32768, 1), (32768, 8)):\n    kv_bytes = 2 * layers * kv_heads * head_dim * context * batch * bytes_per_value\n    print(f'{context} tokens, lot {batch} : {kv_bytes / 1e9:.3f} Go')",
+        "explanation": "Hypothèses : 28 couches, 4 têtes KV, dimension de tête 128, cache en 16 bits. Ces valeurs servent à illustrer la croissance, pas à décrire un modèle précis.",
+        "output": "4096 tokens, lot 1 : 0.235 Go\n32768 tokens, lot 1 : 1.879 Go\n32768 tokens, lot 8 : 15.032 Go",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Pourquoi le cache KV augmente-t-il avec la longueur de la conversation ?",
+          "options": [
+            "Parce que chaque token ajoute des clés et des valeurs à conserver",
+            "Parce que le modèle change de taille",
+            "Parce que le disque se remplit",
+            "Parce que la licence l'exige"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le cache conserve les clés et les valeurs des tokens déjà traités. Plus la conversation est longue, plus il y a de tokens à stocker."
+        },
+        {
+          "question": "Que fait PagedAttention ?",
+          "options": [
+            "Il organise le cache KV en blocs et réduit la fragmentation",
+            "Il supprime le besoin de cache KV",
+            "Il augmente la précision des poids",
+            "Il remplace le tokenizer"
+          ],
+          "correctIndex": 0,
+          "explanation": "PagedAttention gère le cache par blocs avec une table de pages. Il améliore l'utilisation de la mémoire, sans annuler sa consommation."
+        },
+        {
+          "question": "Quel risque accompagne un cache de préfixe partagé entre utilisateurs ?",
+          "options": [
+            "Une fuite d'information si l'isolation est insuffisante",
+            "Une augmentation de la taille des poids",
+            "Une modification de la licence",
+            "Une baisse de la précision du tokenizer"
+          ],
+          "correctIndex": 0,
+          "explanation": "Un préfixe peut contenir des données sensibles. Le cache doit être cloisonné par tenant, par droits et par version de prompt."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Cache KV",
+          "definition": "Stockage des clés et des valeurs des tokens déjà traités, pour éviter de recalculer ces projections à chaque nouveau token."
+        },
+        {
+          "term": "PagedAttention",
+          "definition": "Méthode de gestion du cache KV par blocs de taille fixe, avec une table de pages, pour limiter la fragmentation."
+        },
+        {
+          "term": "Préemption",
+          "definition": "Retrait temporaire d'une requête du lot pour libérer de la mémoire. Elle peut augmenter la latence de cette requête."
+        },
+        {
+          "term": "Offloading",
+          "definition": "Déplacement d'une partie des poids ou du cache vers un autre niveau de mémoire, comme la mémoire du processeur ou le disque."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Un cache KV qui pèse",
+          "prompt": "Un modèle a 28 couches, 4 têtes KV et une dimension de tête de 128. Le cache est en 16 bits. Calculez sa taille pour 8 192 tokens et un lot de 4 avec la formule du module, puis expliquez pourquoi PagedAttention ne suffit pas à résoudre un manque de mémoire.",
+          "solution": "La formule 2 × L × H × d × T × B × b donne 2 × 28 × 4 × 128 × 8 192 × 4 × 2 octets, soit 1 879 048 192 octets, donc environ 1,88 Go. PagedAttention range ce cache en blocs, réduit la fragmentation et facilite le partage, mais il ne diminue pas le nombre de clés et de valeurs à conserver. Si la mémoire manque, il faut agir sur le contexte, le lot, la précision du cache ou la politique de préemption. Un cache de préfixe peut aussi aider, à condition d'être isolé."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Kwon et al., PagedAttention, 2023.",
+          "href": "https://arxiv.org/abs/2309.06180"
+        },
+        {
+          "label": "LMCache, dépôt GitHub, consulté le 21 octobre 2026.",
+          "href": "https://github.com/LMCache/LMCache"
+        }
+      ]
+    },
+    {
+      "id": "debit",
+      "title": "Débit, latence et compromis de serving",
+      "keyTakeaways": [
+        "Le débit mesure le travail total par unité de temps ; la latence mesure l'attente d'une requête. Les deux objectifs peuvent se contredire.",
+        "Le temps jusqu'au premier token dépend surtout du préremplissage et de la file d'attente ; le temps entre les tokens dépend de la génération et de la mémoire.",
+        "Un banc de charge doit reproduire la distribution des longueurs de prompt et de réponse, pas seulement une moyenne.",
+        "Le débit théorique d'un GPU est une borne, pas une prévision : la mémoire, les kernels, le batch et le réseau décident du résultat réel.",
+        "Dimensionnez avec une marge, mesurez les pics et testez la dégradation avant d’ouvrir le service aux utilisateurs."
+      ],
+      "theory": "### Deux familles de métriques\n\nLe débit et la latence ne mesurent pas la même chose. Le débit indique combien de tokens ou de requêtes le système traite par seconde. La latence indique combien de temps un utilisateur attend. Un service peut avoir un débit élevé et une mauvaise latence si les requêtes attendent longtemps dans une file. À l'inverse, un service peut répondre vite à une requête isolée et s'effondrer dès que plusieurs utilisateurs arrivent.\n\nPour une API de génération, on distingue souvent le temps jusqu'au premier token et le temps entre les tokens. Le premier dépend du préremplissage, de la longueur du prompt, de la file d'attente et du temps de démarrage. Le second dépend de la génération token par token, de la mémoire, du lot et du moteur. Une réponse peut commencer vite puis ralentir, ou commencer lentement puis générer rapidement. Il faut donc mesurer les deux, et pas seulement le temps total.\n\n### Débit, lot et concurrence\n\nLe batching continu permet de traiter plusieurs requêtes en parallèle. Lorsqu'un GPU traite un lot, une partie du calcul est partagée et son utilisation augmente. Le débit total peut donc progresser avec le nombre de requêtes simultanées. Mais chaque requête supplémentaire consomme du cache KV et de la mémoire. À un certain point, le moteur doit préempter, refuser ou attendre. Le débit peut alors plafonner, et la latence augmenter fortement.\n\nLa relation n'est pas linéaire. Un petit lot peut sous-utiliser le GPU. Un lot trop grand peut saturer la mémoire et provoquer des échanges coûteux. Le bon réglage dépend du modèle, de la longueur de contexte, de la quantification et du matériel. Il faut le trouver par la mesure, pas par une règle universelle.\n\n### Préremplissage et génération\n\nLe préremplissage traite le prompt en une passe parallèle. Il est souvent limité par le calcul et la bande passante mémoire. La génération produit un token à la fois et relit le cache KV à chaque étape. Elle est souvent limitée par la bande passante mémoire et par la taille du lot. Ces deux phases ont des profils différents. Un prompt très long peut dominer le temps jusqu'au premier token, tandis qu'une réponse longue peut dominer le temps total.\n\nCertains moteurs séparent le préremplissage et la génération sur des machines différentes, ou utilisent des optimisations spécifiques. Ces architectures peuvent améliorer le débit, mais elles ajoutent de la complexité et des transferts de cache. Pour un premier service, il est souvent plus simple de mesurer la configuration intégrée avant d'ajouter des étages.\n\n### Une borne de bande passante\n\nUne estimation utile consiste à comparer le débit de génération à la bande passante mémoire. Si chaque token généré impose de lire une partie des poids, le débit théorique maximal est proche de la bande passante divisée par le nombre d'octets lus par token. Pour un modèle dense de 7 milliards de paramètres en 4 bits, les poids occupent environ 3,5 Go. Avec une bande passante de 960 Go/s, la borne très simplifiée donne environ 274 tokens par seconde. Ce calcul ignore les couches, les activations, le cache, les kernels et l'efficacité réelle.\n\nIl ne faut pas présenter cette borne comme une performance attendue. Elle sert à vérifier qu'un chiffre annoncé n'est pas absurde et à comprendre pourquoi un modèle plus petit ou plus quantifié peut générer plus vite. Un modèle à experts active seulement une partie des paramètres par token, ce qui change le calcul. Un modèle dense lit une proportion plus importante de ses poids. Les architectures et les formats comptent.\n\n### Le rôle du matériel\n\nLa mémoire totale, la bande passante et la puissance disponible comptent autant que le nombre de cœurs. Un GPU avec beaucoup de mémoire peut garder un grand modèle et un grand cache KV, mais sa bande passante peut limiter la génération. Un accélérateur avec une mémoire unifiée peut offrir une grande capacité, avec des compromis de latence et de bande passante. Un processeur seul peut exécuter un petit modèle quantifié, mais le débit reste généralement plus faible qu'avec un GPU adapté.\n\nLes fiches constructeurs donnent des valeurs théoriques. Elles ne disent pas quel débit obtiendra un moteur donné avec un modèle donné. Il faut mesurer. Les pilotes, les versions de bibliothèques et les réglages de puissance peuvent changer sensiblement le résultat. Un serveur partagé ajoute aussi la contention entre processus.\n\n### Construire un banc de charge\n\nUn banc de charge utile définit des profils de requêtes. Par exemple, des questions courtes avec des réponses courtes, des documents longs avec des réponses moyennes, et des conversations multi-tours. Pour chaque profil, il fixe un nombre d'utilisateurs simultanés, une durée et un taux d'arrivée. Il mesure le temps jusqu'au premier token, le temps entre les tokens, le temps total, le débit, les erreurs et la mémoire. Il répète le test assez longtemps pour observer les pics et les fuites.\n\nLes moyennes cachent les queues de distribution. Une latence moyenne correcte peut cacher des requêtes très lentes. Il faut regarder les centiles élevés et le nombre de dépassements d'un seuil. Un service qui répond en moins de deux secondes dans 99 % des cas n'est pas le même qu'un service qui répond en moyenne en deux secondes. Le contrat de service doit être défini avant le test.\n\n### Dimensionner avec une marge\n\nLe dimensionnement commence par une hypothèse de charge : nombre d'utilisateurs actifs, requêtes par utilisateur, longueur des prompts, longueur des réponses et pics. Ces hypothèses doivent être explicites et révisées avec les mesures. Une marge de sécurité couvre les pics, les variations de longueur et les incidents. Elle ne doit pas servir à masquer un manque de capacité chronique.\n\nUn service peut être limité par le GPU, par la mémoire, par le réseau ou par la file d'attente. Il faut identifier le goulot avant d'ajouter des machines. Ajouter un GPU ne résout pas un goulot réseau ou une base de données lente. À l'inverse, optimiser le prompt peut réduire la charge sans changer le matériel. Le dimensionnement est un exercice global, pas un simple choix de carte.\n\n### Tester la dégradation\n\nUn service stable doit dégrader proprement. Lorsque la charge dépasse la capacité, il peut ralentir, mettre en file, refuser ou retourner une erreur explicite. Il ne doit pas perdre silencieusement des requêtes ni bloquer tout le système. Les limites de concurrence, les délais d'attente et les files doivent être configurés. Les utilisateurs doivent savoir ce qui se passe lorsqu'ils attendent.\n\nTestez aussi la panne d'un GPU, la saturation de la mémoire et la lenteur d'un backend. Un service qui fonctionne seulement à charge faible n'est pas validé. La dégradation contrôlée est une fonctionnalité, pas un détail.",
+      "diagram": {
+        "title": "Débit et latence ne vont pas toujours ensemble",
+        "description": "Schéma illustratif : à mesure que la concurrence augmente, le débit peut plafonner pendant que la latence s'allonge. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox='0 0 800 420' xmlns='http://www.w3.org/2000/svg' role='img' aria-label='Courbes illustratives de débit et de latence selon la concurrence'><defs><marker id='il-debit-arrow' markerWidth='8' markerHeight='8' refX='7' refY='4' orient='auto'><path d='M0,0 L8,4 L0,8 Z' fill='#64748b'/></marker></defs><rect width='800' height='420' rx='16' fill='#070b14' stroke='#1e293b' stroke-width='1.5'/><text x='400' y='34' fill='#f8fafc' font-size='15' font-weight='bold' text-anchor='middle'>Deux courbes à surveiller</text><text x='400' y='56' fill='#94a3b8' font-size='12' text-anchor='middle'>Schéma illustratif, sans mesure</text><g id=\"debit\"><rect x='50' y='100' width='320' height='90' rx='12' fill='#0f172a' stroke='#38bdf8' stroke-width='2'/><text x='210' y='130' fill='#e0f2fe' font-size='13' text-anchor='middle'>Débit</text><text x='210' y='152' fill='#bae6fd' font-size='11' text-anchor='middle'>tokens ou requêtes par seconde</text><text x='210' y='172' fill='#7dd3fc' font-size='11' text-anchor='middle'>plafonne avec la capacité</text></g><g id=\"latence\"><rect x='430' y='100' width='320' height='90' rx='12' fill='#0f172a' stroke='#34d399' stroke-width='2'/><text x='590' y='130' fill='#d1fae5' font-size='13' text-anchor='middle'>Latence</text><text x='590' y='152' fill='#a7f3d0' font-size='11' text-anchor='middle'>attente jusqu’au premier token</text><text x='590' y='172' fill='#6ee7b7' font-size='11' text-anchor='middle'>s’allonge avec la file</text></g><g id=\"concurrence\"><rect x='50' y='240' width='320' height='90' rx='12' fill='#111827' stroke='#818cf8' stroke-width='2'/><text x='210' y='270' fill='#e0e7ff' font-size='13' text-anchor='middle'>Concurrence</text><text x='210' y='292' fill='#c7d2fe' font-size='11' text-anchor='middle'>requêtes simultanées</text><text x='210' y='312' fill='#a5b4fc' font-size='11' text-anchor='middle'>lot et file d’attente</text></g><g id=\"marge\"><rect x='430' y='240' width='320' height='90' rx='12' fill='#111827' stroke='#fbbf24' stroke-width='2'/><text x='590' y='270' fill='#fef3c7' font-size='13' text-anchor='middle'>Marge</text><text x='590' y='292' fill='#fde68a' font-size='11' text-anchor='middle'>pics et dégradation</text><text x='590' y='312' fill='#fcd34d' font-size='11' text-anchor='middle'>à tester avant le service</text></g><g stroke='#64748b' stroke-width='2' marker-end='url(#il-debit-arrow)'><line x1='370' y1='145' x2='425' y2='145'/><line x1='210' y1='190' x2='210' y2='235'/><line x1='590' y1='190' x2='590' y2='235'/><line x1='370' y1='285' x2='425' y2='285'/></g></svg>",
+        "steps": [
+          {
+            "title": "1. Le débit monte",
+            "explanation": "Au début, ajouter des requêtes simultanées augmente l'utilisation du matériel et le débit total. Le gain dépend du modèle et du moteur.",
+            "highlight": [
+              "debit",
+              "concurrence"
+            ]
+          },
+          {
+            "title": "2. La latence se dégrade",
+            "explanation": "Quand la capacité est atteinte, les requêtes attendent. Le débit plafonne pendant que la latence s'allonge et que les files grossissent.",
+            "highlight": [
+              "latence",
+              "concurrence"
+            ]
+          },
+          {
+            "title": "3. La marge protège",
+            "explanation": "Une marge et des limites de concurrence permettent de dégrader proprement au lieu de saturer le service sans contrôle.",
+            "highlight": [
+              "marge"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Quelle métrique mesure l'attente avant le début de la réponse ?",
+          "options": [
+            "Le temps jusqu’au premier token",
+            "Le nombre de paramètres",
+            "La taille du disque",
+            "La licence du modèle"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le temps jusqu’au premier token inclut la file, le préremplissage et le début de la génération. Il ne mesure pas la durée totale de la réponse."
+        },
+        {
+          "question": "Pourquoi le débit peut-il plafonner quand la concurrence augmente ?",
+          "options": [
+            "Parce que la mémoire, la bande passante ou le calcul finissent par saturer",
+            "Parce que le modèle devient plus petit",
+            "Parce que le tokenizer change",
+            "Parce que la licence expire"
+          ],
+          "correctIndex": 0,
+          "explanation": "Au-delà d’un certain point, les ressources deviennent le goulot. Les requêtes supplémentaires attendent ou sont préemptées."
+        },
+        {
+          "question": "Pourquoi une moyenne de latence peut-elle tromper ?",
+          "options": [
+            "Parce qu’elle cache les requêtes très lentes dans la distribution",
+            "Parce qu’elle est toujours fausse",
+            "Parce qu’elle ignore le nombre de paramètres",
+            "Parce qu’elle ne mesure que le disque"
+          ],
+          "correctIndex": 0,
+          "explanation": "Quelques requêtes très lentes peuvent disparaître dans une moyenne. Il faut regarder les centiles et les seuils de dépassement."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Temps jusqu’au premier token",
+          "definition": "Délai entre l'envoi d'une requête et l'apparition du premier token de la réponse, incluant la file et le préremplissage."
+        },
+        {
+          "term": "Temps entre les tokens",
+          "definition": "Délai moyen ou distributionnel entre deux tokens successifs pendant la génération."
+        },
+        {
+          "term": "Préremplissage",
+          "definition": "Traitement initial du prompt par le modèle, avant la génération de la réponse token par token."
+        },
+        {
+          "term": "File d’attente",
+          "definition": "Requêtes en attente d'une ressource de calcul. Une file longue augmente la latence même si le débit reste stable."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Expliquer un écart de débit",
+          "prompt": "Un modèle dense de 7 milliards de paramètres en 4 bits est servi sur une carte de 960 Go/s. La borne simplifiée donne environ 274 tokens par seconde, mais la mesure réelle plafonne à 60. Proposez trois explications possibles et indiquez les métriques à relever pour trancher.",
+          "solution": "La borne suppose que chaque token ne coûte que la lecture des poids, sans autre limite. Un premier écart vient de l'efficacité réelle des noyaux et de la bande passante atteinte. Un deuxième vient du cache KV et des activations, qui ajoutent des lectures et limitent le lot. Un troisième vient du préremplissage, de la file d'attente et des préemptions, qui allongent le temps par requête. Pour trancher, relever le temps jusqu'au premier token, le temps entre les tokens, le débit total, l'occupation du cache et les préemptions."
+        }
+      ],
+      "sources": [
+        {
+          "label": "vLLM, documentation, consultée le 21 octobre 2026.",
+          "href": "https://docs.vllm.ai/"
+        },
+        {
+          "label": "SGLang, documentation, consultée le 21 octobre 2026.",
+          "href": "https://docs.sglang.io/"
+        }
+      ]
+    },
+    {
+      "id": "cout",
+      "title": "Coût total et calcul de rentabilité",
+      "keyTakeaways": [
+        "Le coût d'un service local dépend du matériel, de l'amortissement, de l'électricité, de l'exploitation et du temps d'ingénierie, pas seulement du prix de la carte.",
+        "Le coût par million de tokens se calcule avec une hypothèse de débit et de taux d'utilisation ; il change fortement avec ces hypothèses.",
+        "Un service utilisé à 100 % n'a pas le même coût unitaire qu'un service utilisé à 30 %.",
+        "Il faut comparer plusieurs options avec la même charge et les mêmes exigences de qualité, de confidentialité et de latence.",
+        "La décision doit rester réversible : commencez par une hypothèse simple, mesurez, puis engagez l'achat ou l'engagement pluriannuel."
+      ],
+      "theory": "### Ce que coûte un service local\n\nUn service d'IA local n'est pas gratuit. Il demande du matériel, de l'énergie, un local ou un hébergement, du refroidissement, de la maintenance, des mises à jour et du temps d'ingénierie. Le prix d'une carte graphique n'est qu'une ligne du budget. Une machine achetée pour un projet peut être amortie sur plusieurs années, mais elle vieillit, tombe en panne et doit être exploitée. Ces coûts doivent apparaître dans la comparaison avec une API.\n\nLe coût total de possession, souvent abrégé TCO, additionne les coûts d'acquisition et les coûts récurrents sur une période. Il peut inclure l'amortissement du matériel, l'électricité, le refroidissement, la colocation ou le cloud privé, les licences, le support, les pièces de rechange et le temps des équipes. Pour une petite charge, le temps d'ingénierie peut dépasser le coût du matériel. Pour une charge élevée, la capacité et l'énergie deviennent dominantes.\n\n### Une formule de coût par token\n\nUne estimation simple du coût par million de tokens de sortie se construit avec quatre hypothèses : la puissance électrique moyenne à la prise, refroidissement inclus, en kilowatts ; le prix du kilowattheure ; le débit de tokens de sortie par seconde ; et le taux d'utilisation. Le coût horaire d'énergie est la puissance multipliée par le prix du kilowattheure. Le nombre de tokens de sortie produits par heure est le débit multiplié par 3 600 secondes, puis par le taux d'utilisation. Le coût par million de tokens de sortie est ensuite le coût horaire divisé par le nombre de millions de tokens de sortie produits par heure. Les tokens d'entrée et le préremplissage ne sont pas comptés.\n\nPrenons une machine qui consomme 5 kW à la prise, refroidissement inclus, un prix de 0,25 EUR par kilowattheure, un débit de 40 tokens de sortie par seconde et un taux d'utilisation de 100 %. Le coût horaire est de 1,25 EUR. La machine produit 144 000 tokens de sortie par heure, soit 0,144 million. Le coût par million de tokens de sortie atteint environ 8,68 EUR pour l'énergie et le refroidissement compris, selon l'hypothèse. À 30 % d'utilisation, le même service produit moins de tokens de sortie par heure et le coût unitaire monte à environ 28,94 EUR. Ces chiffres ne sont pas un prix de marché : ce sont des ordres de grandeur pour une hypothèse précise.\n\n### Ce que le calcul oublie\n\nLe calcul précédent oublie l'amortissement du matériel, les pannes, la maintenance, les logiciels, la supervision, la sécurité et le temps humain. Il suppose aussi que toutes les ressources sont consacrées à la génération de tokens de sortie et que la puissance est constante. Le préremplissage et les tokens d'entrée sont exclus du calcul. En pratique, un serveur consomme aussi au repos, les rendements varient et le taux d'utilisation fluctue. Le débit dépend de la longueur des prompts et des réponses, du lot et du moteur. Un coût par token calculé avec un débit idéal est une borne basse.\n\nPour un budget complet, ajoutez l'amortissement annuel du matériel, les coûts de colocation ou d'hébergement, les licences et le support, puis divisez par le nombre de tokens réellement facturés ou utilisés. Le nombre de tokens utiles est souvent inférieur au nombre de tokens générés, à cause des essais, des erreurs et des réponses rejetées. La différence entre capacité et usage réel est un point central.\n\n### La comparaison avec une API\n\nUne API facture généralement à l'usage, avec des prix par million de tokens d'entrée et de sortie. Elle ne demande pas d'acheter une carte, mais elle peut poser des questions de confidentialité, de dépendance, de disponibilité et de coût à grande échelle. Un service local évite l'envoi de données à un tiers, mais il faut sécuriser la machine, gérer les accès et assumer la maintenance. Les deux options peuvent coexister : un service local pour les données sensibles, une API pour les pics ou les tâches non sensibles.\n\nLa comparaison doit inclure la qualité. Un modèle local moins cher peut nécessiter plus de corrections humaines, plus de réessais ou un modèle plus grand. Le coût par token n'est pas le coût par tâche réussie. Pour une tâche de classification courte, un petit modèle peut suffire. Pour une rédaction longue ou un raisonnement complexe, un modèle plus grand peut réduire le nombre d'itérations. Il faut comparer le coût complet par résultat acceptable.\n\n### L'énergie et la puissance\n\nLa puissance nominale d'une alimentation n'est pas la consommation réelle. Une machine peut consommer moins au repos et plus pendant les pics. Les GPU modernes ajustent leur fréquence et leur tension, et la consommation dépend de la charge. Pour estimer l'énergie, mesurez la puissance à la prise sur un cycle représentatif, ou utilisez les métriques du serveur avec une marge. N'utilisez pas la puissance maximale de l'alimentation comme consommation moyenne.\n\nLe refroidissement ajoute une consommation supplémentaire. Dans un centre de données, l'énergie peut inclure la climatisation, les pertes de distribution et la surcharge. Un chiffre de puissance par carte ne suffit pas à calculer la facture d'une baie. Pour un poste de travail, la consommation du reste de la machine compte aussi. Une estimation honnête précise le périmètre : carte seule, machine complète ou baie refroidie.\n\n### Le retour sur investissement\n\nLe retour sur investissement compare le coût total du service local à une alternative. Il ne se réduit pas à une division entre prix du matériel et prix de l'API. Il dépend du volume, de la durée d'amortissement, du taux d'utilisation, du coût de l'énergie et du temps humain. Un achat peut être justifié par la confidentialité, la latence, la souveraineté ou la prévisibilité budgétaire, même s'il est plus cher qu'une API sur le seul coût par token.\n\nIl faut aussi considérer le risque. Un engagement pluriannuel sur du matériel peut devenir défavorable si les modèles ou les prix évoluent vite. Une API peut augmenter ses prix ou modifier ses conditions. Un service local peut être limité par la capacité de l'équipe. La décision doit être réversible ou prévoir une sortie. Commencez par un pilote, mesurez la charge réelle et comparez avec des hypothèses explicites.\n\n### Présenter un budget\n\nUn budget lisible sépare les coûts non récurrents et les coûts récurrents. Les premiers incluent le matériel, l'installation, les licences perpétuelles et la formation. Les seconds incluent l'électricité, l'hébergement, la maintenance, les licences annuelles et le temps d'exploitation. Ajoutez une ligne pour les imprévus et une ligne pour le renouvellement. Indiquez la période et la devise. Un tableau sans période ni périmètre n'est pas un budget.\n\nPour chaque scénario, donnez le volume supposé, le taux d'utilisation, le débit, la qualité attendue et les coûts. Faites apparaître les hypothèses qui changent le résultat. Une analyse de sensibilité sur le taux d'utilisation et le débit est souvent plus utile qu'un chiffre unique. Elle montre à partir de quel volume le service local devient intéressant, ou pourquoi il ne le devient pas.",
+      "diagram": {
+        "title": "Du kilowattheure au coût par token",
+        "description": "Schéma illustratif : la puissance, le prix de l'énergie, le débit et le taux d'utilisation déterminent un coût unitaire. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox='0 0 800 420' xmlns='http://www.w3.org/2000/svg' role='img' aria-label='Puissance, énergie, débit, utilisation et coût par million de tokens'><defs><marker id='il-cout-arrow' markerWidth='8' markerHeight='8' refX='7' refY='4' orient='auto'><path d='M0,0 L8,4 L0,8 Z' fill='#64748b'/></marker></defs><rect width='800' height='420' rx='16' fill='#070b14' stroke='#1e293b' stroke-width='1.5'/><text x='400' y='34' fill='#f8fafc' font-size='15' font-weight='bold' text-anchor='middle'>Les quatre entrées du coût</text><text x='400' y='56' fill='#94a3b8' font-size='12' text-anchor='middle'>Schéma illustratif, sans mesure</text><g id=\"puissance\"><rect x='50' y='100' width='320' height='90' rx='12' fill='#0f172a' stroke='#38bdf8' stroke-width='2'/><text x='210' y='130' fill='#e0f2fe' font-size='13' text-anchor='middle'>Puissance</text><text x='210' y='152' fill='#bae6fd' font-size='11' text-anchor='middle'>kilowatts moyens</text><text x='210' y='172' fill='#7dd3fc' font-size='11' text-anchor='middle'>machine et refroidissement</text></g><g id=\"energie\"><rect x='430' y='100' width='320' height='90' rx='12' fill='#0f172a' stroke='#34d399' stroke-width='2'/><text x='590' y='130' fill='#d1fae5' font-size='13' text-anchor='middle'>Énergie</text><text x='590' y='152' fill='#a7f3d0' font-size='11' text-anchor='middle'>prix du kilowattheure</text><text x='590' y='172' fill='#6ee7b7' font-size='11' text-anchor='middle'>coût horaire</text></g><g id=\"debit\"><rect x='50' y='240' width='320' height='90' rx='12' fill='#111827' stroke='#818cf8' stroke-width='2'/><text x='210' y='270' fill='#e0e7ff' font-size='13' text-anchor='middle'>Débit</text><text x='210' y='292' fill='#c7d2fe' font-size='11' text-anchor='middle'>tokens par seconde</text><text x='210' y='312' fill='#a5b4fc' font-size='11' text-anchor='middle'>à mesurer sur la charge</text></g><g id=\"utilisation\"><rect x='430' y='240' width='320' height='90' rx='12' fill='#111827' stroke='#fbbf24' stroke-width='2'/><text x='590' y='270' fill='#fef3c7' font-size='13' text-anchor='middle'>Taux d’utilisation</text><text x='590' y='292' fill='#fde68a' font-size='11' text-anchor='middle'>part du temps actif</text><text x='590' y='312' fill='#fcd34d' font-size='11' text-anchor='middle'>détermine le coût unitaire</text></g><g stroke='#64748b' stroke-width='2' marker-end='url(#il-cout-arrow)'><line x1='370' y1='145' x2='425' y2='145'/><line x1='210' y1='190' x2='210' y2='235'/><line x1='590' y1='190' x2='590' y2='235'/><line x1='370' y1='285' x2='425' y2='285'/></g></svg>",
+        "steps": [
+          {
+            "title": "1. L’énergie horaire",
+            "explanation": "La puissance moyenne multipliée par le prix du kilowattheure donne un coût horaire. Elle doit inclure le périmètre choisi, pas seulement la carte.",
+            "highlight": [
+              "puissance",
+              "energie"
+            ]
+          },
+          {
+            "title": "2. Les tokens horaires",
+            "explanation": "Le débit et le taux d’utilisation déterminent le nombre de tokens réellement produits. Un débit théorique utilisé à faible taux change tout.",
+            "highlight": [
+              "debit",
+              "utilisation"
+            ]
+          },
+          {
+            "title": "3. Le coût unitaire",
+            "explanation": "Le coût horaire divisé par les tokens horaires donne le coût par token. Il faut ensuite ajouter l’amortissement et l’exploitation.",
+            "highlight": [
+              "energie",
+              "utilisation"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "code": "power_kw = 5\nprice_kwh = 0.25\noutput_tokens_per_s = 40\nfor utilization in (1.0, 0.3):\n    hourly = power_kw * price_kwh\n    output_tokens_per_hour = output_tokens_per_s * 3600 * utilization\n    cost_per_million = hourly / (output_tokens_per_hour / 1e6)\n    print(f'{utilization:.0%} : {cost_per_million:.4f} EUR par million de tokens de sortie')",
+        "explanation": "Hypothèses : 5 kW à la prise, refroidissement inclus ; 0,25 EUR par kilowattheure ; 40 tokens de sortie par seconde. Le calcul ne compte que les tokens de sortie : le préremplissage et les tokens d'entrée sont exclus. Il ignore l'amortissement, la maintenance et le temps humain.",
+        "output": "100% : 8.6806 EUR par million de tokens de sortie\n30% : 28.9352 EUR par million de tokens de sortie",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Quel facteur fait monter le coût par token lorsque le service est sous-utilisé ?",
+          "options": [
+            "Le taux d’utilisation plus faible",
+            "La taille du clavier",
+            "Le nombre de ports réseau",
+            "La couleur du boîtier"
+          ],
+          "correctIndex": 0,
+          "explanation": "Les coûts fixes ou horaires sont répartis sur moins de tokens. Le coût unitaire augmente quand la capacité est peu utilisée."
+        },
+        {
+          "question": "Que faut-il ajouter au calcul énergie et débit pour obtenir un budget plus complet ?",
+          "options": [
+            "L’amortissement, la maintenance, l’exploitation et le temps humain",
+            "Uniquement le prix du tokenizer",
+            "La licence du système d’exploitation uniquement",
+            "Rien, le calcul est complet"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le coût énergie par token est une partie du coût total. Un budget réaliste inclut les autres coûts du service."
+        },
+        {
+          "question": "Pourquoi un chiffre de puissance nominale ne suffit-il pas pour l’énergie ?",
+          "options": [
+            "Parce que la consommation réelle varie avec la charge et le refroidissement",
+            "Parce que les watts ne sont pas une unité",
+            "Parce que l’électricité est gratuite",
+            "Parce que le GPU ne consomme jamais"
+          ],
+          "correctIndex": 0,
+          "explanation": "La puissance nominale est une capacité maximale. La consommation moyenne dépend de l’usage, du matériel et du système de refroidissement."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Coût total de possession",
+          "definition": "Somme des coûts d'acquisition et des coûts récurrents d'un service sur une période, incluant matériel, énergie, exploitation et maintenance."
+        },
+        {
+          "term": "Amortissement",
+          "definition": "Répartition du coût d'un équipement sur sa durée d'utilisation prévue."
+        },
+        {
+          "term": "Coût par token",
+          "definition": "Coût unitaire obtenu en divisant un coût total par le nombre de tokens produits ou traités sur une période."
+        },
+        {
+          "term": "Taux d’utilisation",
+          "definition": "Part du temps ou de la capacité pendant laquelle le service traite réellement des requêtes."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Coût par million de tokens",
+          "prompt": "Une machine consomme 3 kW à la prise, refroidissement inclus, avec un prix de 0,20 EUR par kilowattheure. Elle produit 25 tokens de sortie par seconde avec un taux d'utilisation de 40 %. Calculez le coût par million de tokens de sortie, puis refaites le calcul à 80 % et citez deux postes que ce chiffre omet.",
+          "solution": "Le coût horaire vaut 3 × 0,20 = 0,60 EUR. À 40 %, la machine produit 25 × 3 600 × 0,4 = 36 000 tokens par heure, soit 0,036 million. Le coût atteint donc 0,60 / 0,036 ≈ 16,67 EUR par million de tokens de sortie. À 80 %, la production double et le coût tombe à environ 8,33 EUR. Ce calcul omet l'amortissement du matériel, la maintenance, l'exploitation, le temps humain et les tokens d'entrée. Il suppose aussi un débit et une puissance constants."
+        }
+      ],
+      "sources": [
+        {
+          "label": "NVIDIA, RTX 6000 Ada, fiche produit, consultée le 21 octobre 2026.",
+          "href": "https://www.nvidia.com/en-us/design-visualization/rtx-6000/"
+        },
+        {
+          "label": "Apple, Mac Studio, spécifications, consultées le 21 octobre 2026.",
+          "href": "https://www.apple.com/mac-studio/specs/"
+        }
+      ]
+    },
+    {
+      "id": "production",
+      "title": "Passer en production",
+      "keyTakeaways": [
+        "La production ajoute l'authentification, le contrôle d'accès, la supervision, les sauvegardes et la gestion des incidents au simple fait de servir un modèle.",
+        "Les données et le cache KV peuvent contenir des informations sensibles : ils doivent être cloisonnés, journalisés avec prudence et supprimés selon une politique claire.",
+        "Un déploiement progressif, avec des seuils de qualité et de latence, vaut mieux qu'un basculement complet et irréversible.",
+        "Les coûts et les performances doivent être observés en continu : un réglage valable au lancement peut devenir mauvais après un changement de modèle ou de charge.",
+        "Un plan de retour arrière et un propriétaire identifié sont nécessaires avant d'exposer le service aux utilisateurs."
+      ],
+      "theory": "### Du prototype au service\n\nUn prototype qui répond à une question dans un terminal n'est pas un service. La production ajoute des utilisateurs, des droits, des incidents, des mises à jour et des obligations. Il faut savoir qui peut appeler le modèle, avec quelles données, pendant combien de temps elles sont conservées et ce qui se passe en cas de panne. Le modèle lui-même n'est qu'un composant du système.\n\nLa première étape consiste à définir le service rendu. S'agit-il d'une assistance à la rédaction, d'une recherche documentaire, d'une classification ou d'une génération de code ? La réponse détermine les données autorisées, les contrôles nécessaires et les critères de qualité. Un service de classification peut fonctionner avec un petit modèle et une validation stricte. Un assistant conversationnel demande plus de prudence sur les prompts, les données et les sorties.\n\n### Authentification et droits\n\nUne API locale ne doit pas être exposée sans authentification. Les clés d'API, les jetons ou une authentification par proxy doivent identifier l'appelant et limiter ce qu'il peut faire. Les droits peuvent dépendre du service, du modèle, de la longueur de contexte ou du volume. Un utilisateur ne doit pas pouvoir consommer toute la capacité avec une seule requête. Les quotas et les limites de débit protègent le service et les autres utilisateurs.\n\nLe contrôle d'accès doit aussi couvrir les documents utilisés pour la récupération. Un modèle qui répond à partir d'une base documentaire peut révéler un document à un utilisateur qui n'y a pas droit si le filtre est appliqué après la récupération. Le filtrage doit être fait avant, avec les droits de l'utilisateur. Le modèle ne connaît pas les règles d'accès : c'est le système qui doit les appliquer.\n\n### Données et journalisation\n\nLes prompts peuvent contenir des données personnelles, des secrets industriels ou des informations clients. Les journaux peuvent les conserver plus longtemps que prévu. Il faut décider ce qui est journalisé, pendant combien de temps et qui peut y accéder. Les journaux utiles pour diagnostiquer une erreur ne sont pas nécessairement ceux qui contiennent le texte complet. La pseudonymisation, la troncature et la suppression après une durée définie réduisent le risque.\n\nLe cache KV est aussi une donnée. Un cache de préfixe partagé peut contenir des fragments de prompts ou de documents. Il doit être isolé par utilisateur ou par tenant, et purgé selon une politique. Les sauvegardes et les exports doivent suivre les mêmes règles que la base principale. Un cache oublié sur un disque peut devenir une fuite. La sécurité du service inclut la mémoire et les fichiers temporaires, pas seulement l'API.\n\n### Supervision et qualité\n\nUn service en production doit être observé. Les métriques techniques incluent la latence, le débit, les erreurs, l'occupation mémoire, les préemptions et la disponibilité. Les métriques de qualité incluent le taux de réponses rejetées, les corrections humaines, les signalements et les évaluations périodiques. Un service peut être techniquement disponible et produire des réponses dégradées. La supervision doit couvrir les deux dimensions.\n\nLes tableaux de bord ne suffisent pas. Il faut des alertes avec des seuils utiles et un propriétaire capable d'agir. Une alerte sur chaque erreur noie l'équipe ; une alerte sur une dérive de latence ou de taux d'échec aide à réagir. Les incidents doivent être documentés et suivis. Un modèle mis à jour sans évaluation peut dégrader la qualité sans provoquer d'erreur technique.\n\n### Déploiement et retour arrière\n\nUn déploiement progressif expose d'abord le service à un petit groupe ou à une petite part du trafic. Il compare les résultats avec la version précédente et surveille les erreurs. Si les seuils ne sont pas atteints, le retour arrière doit être possible rapidement. Cela suppose de conserver la version précédente du modèle, de la configuration et du template. Un déploiement qui dépend d'un téléchargement externe peut ne pas être réversible dans l'urgence.\n\nLes changements de modèle, de quantification, de moteur et de prompt doivent être versionnés. Un même nom de modèle peut correspondre à des fichiers différents selon le dépôt ou la date. Conservez les identifiants exacts, les empreintes et la configuration. Un test de non-régression doit couvrir les tâches critiques. Le retour arrière ne se limite pas au modèle : il inclut le moteur, le template et les paramètres.\n\n### Gestion des incidents\n\nUn plan d'incident définit qui prévient qui, comment le service est dégradé et comment les utilisateurs sont informés. En cas de saturation, le service peut réduire la longueur maximale, limiter la concurrence ou désactiver une fonction coûteuse. En cas de fuite de données, il faut pouvoir isoler l'instance, révoquer les accès et purger les caches. Ces décisions doivent être prises avant l'incident, pas pendant.\n\nLes dépendances externes comptent aussi. Un service local peut dépendre d'un gestionnaire de secrets, d'une base de données, d'un annuaire ou d'un système de fichiers partagé. Une panne de ces composants peut rendre le modèle inutilisable. Le plan de continuité doit couvrir ces dépendances. Un modèle local n'est pas isolé du reste de l'infrastructure.\n\n### Mises à jour et veille\n\nLes moteurs, les pilotes, les bibliothèques et les modèles évoluent. Une mise à jour peut améliorer les performances ou corriger une faille, mais aussi changer le comportement. Il faut un environnement de test, une procédure de validation et une fenêtre de déploiement. Les correctifs de sécurité ne doivent pas être retardés indéfiniment, mais ils ne doivent pas être appliqués sans vérification.\n\nLa veille doit suivre les avis de sécurité, les notes de version et les licences. Un modèle ou un moteur peut changer de conditions d'utilisation. Une équipe qui dépend d'un projet open source doit connaître son rythme de publication et sa gouvernance. La production n'est pas un état statique : c'est un processus de maintenance.\n\n### Coûts et capacité en continu\n\nLes coûts observés en production peuvent différer des prévisions. Le taux d'utilisation réel, la longueur des prompts, les réessais et les pics changent le coût par token. Les métriques doivent permettre de recalculer le coût avec les données réelles. Une décision d'achat ou de dimensionnement prise sur un pilote doit être revue après quelques semaines.\n\nLa capacité doit être testée à nouveau après chaque changement important. Un nouveau modèle plus grand, un contexte plus long ou une fonction de récupération peuvent augmenter la mémoire et la latence. Le dimensionnement n'est pas un exercice unique. Il suit la charge et les évolutions du service. Une marge de sécurité reste nécessaire, mais elle doit être justifiée par des mesures.\n\n### Un service responsable\n\nUn service d'IA local doit indiquer ce qu'il fait et ce qu'il ne fait pas. Il ne garantit pas l'exactitude des réponses, ne remplace pas une validation humaine et ne doit pas être utilisé seul pour des décisions à fort impact. Les utilisateurs doivent connaître les limites, les données envoyées et les recours possibles. La transparence ne se limite pas à une mention légale : elle doit être présente dans l'interface et dans les processus.\n\nLa responsabilité inclut la qualité, la sécurité et l'impact. Un service qui traite des candidatures, des crédits ou des diagnostics doit être encadré par des règles métier et juridiques. Le modèle peut aider, mais la décision reste dans un processus défini. La production est réussie lorsque le service est utile, observable, réversible et maintenable, pas seulement lorsqu'il répond.",
+      "diagram": {
+        "title": "Les couches d’un service local en production",
+        "description": "Schéma illustratif : l'utilisateur, l'accès, le service, le moteur et la supervision forment des couches distinctes. Aucune architecture réelle n'est représentée.",
+        "svg": "<svg viewBox='0 0 800 420' xmlns='http://www.w3.org/2000/svg' role='img' aria-label='Couches d’un service IA local, de l’utilisateur à la supervision'><defs><marker id='il-production-arrow' markerWidth='8' markerHeight='8' refX='7' refY='4' orient='auto'><path d='M0,0 L8,4 L0,8 Z' fill='#64748b'/></marker></defs><rect width='800' height='420' rx='16' fill='#070b14' stroke='#1e293b' stroke-width='1.5'/><text x='400' y='34' fill='#f8fafc' font-size='15' font-weight='bold' text-anchor='middle'>Cinq couches à ne pas oublier</text><text x='400' y='56' fill='#94a3b8' font-size='12' text-anchor='middle'>Schéma illustratif, sans architecture réelle</text><g id=\"acces\"><rect x='50' y='100' width='320' height='90' rx='12' fill='#0f172a' stroke='#38bdf8' stroke-width='2'/><text x='210' y='130' fill='#e0f2fe' font-size='13' text-anchor='middle'>Accès</text><text x='210' y='152' fill='#bae6fd' font-size='11' text-anchor='middle'>authentification, quotas, droits</text><text x='210' y='172' fill='#7dd3fc' font-size='11' text-anchor='middle'>avant le modèle</text></g><g id=\"service\"><rect x='430' y='100' width='320' height='90' rx='12' fill='#0f172a' stroke='#34d399' stroke-width='2'/><text x='590' y='130' fill='#d1fae5' font-size='13' text-anchor='middle'>Service</text><text x='590' y='152' fill='#a7f3d0' font-size='11' text-anchor='middle'>orchestration, prompts, outils</text><text x='590' y='172' fill='#6ee7b7' font-size='11' text-anchor='middle'>règles métier</text></g><g id=\"moteur\"><rect x='50' y='240' width='320' height='90' rx='12' fill='#111827' stroke='#818cf8' stroke-width='2'/><text x='210' y='270' fill='#e0e7ff' font-size='13' text-anchor='middle'>Moteur et modèle</text><text x='210' y='292' fill='#c7d2fe' font-size='11' text-anchor='middle'>vLLM, SGLang, llama.cpp, Ollama</text><text x='210' y='312' fill='#a5b4fc' font-size='11' text-anchor='middle'>poids, cache KV</text></g><g id=\"supervision\"><rect x='430' y='240' width='320' height='90' rx='12' fill='#111827' stroke='#fbbf24' stroke-width='2'/><text x='590' y='270' fill='#fef3c7' font-size='13' text-anchor='middle'>Supervision</text><text x='590' y='292' fill='#fde68a' font-size='11' text-anchor='middle'>latence, erreurs, qualité</text><text x='590' y='312' fill='#fcd34d' font-size='11' text-anchor='middle'>alertes et incidents</text></g><g stroke='#64748b' stroke-width='2' marker-end='url(#il-production-arrow)'><line x1='370' y1='145' x2='425' y2='145'/><line x1='210' y1='190' x2='210' y2='235'/><line x1='590' y1='190' x2='590' y2='235'/><line x1='370' y1='285' x2='425' y2='285'/></g></svg>",
+        "steps": [
+          {
+            "title": "1. Contrôler l’accès",
+            "explanation": "L'authentification, les quotas et les droits doivent être appliqués avant que la requête atteigne le modèle. Le modèle ne connaît pas les règles d'accès aux documents.",
+            "highlight": [
+              "acces",
+              "service"
+            ]
+          },
+          {
+            "title": "2. Servir et isoler",
+            "explanation": "Le service orchestre le prompt, les outils et le moteur. Les données et le cache doivent être cloisonnés par utilisateur ou par tenant.",
+            "highlight": [
+              "service",
+              "moteur"
+            ]
+          },
+          {
+            "title": "3. Observer et revenir",
+            "explanation": "La supervision suit la latence, les erreurs et la qualité. Un plan de retour arrière conserve la version précédente du modèle et de la configuration.",
+            "highlight": [
+              "supervision",
+              "moteur"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Pourquoi le cache KV doit-il être cloisonné en production ?",
+          "options": [
+            "Parce qu’il peut contenir des fragments de prompts ou de documents sensibles",
+            "Parce qu’il modifie la licence",
+            "Parce qu’il augmente le nombre de paramètres",
+            "Parce qu’il remplace l’authentification"
+          ],
+          "correctIndex": 0,
+          "explanation": "Un cache partagé peut exposer des données à un autre utilisateur. Il doit être isolé et purgé selon une politique."
+        },
+        {
+          "question": "À quoi sert un déploiement progressif ?",
+          "options": [
+            "À exposer le service à une petite part du trafic avant le basculement complet",
+            "À supprimer la supervision",
+            "À éviter les sauvegardes",
+            "À augmenter la longueur de contexte sans mesure"
+          ],
+          "correctIndex": 0,
+          "explanation": "Un déploiement progressif limite l’impact d’une régression et permet un retour arrière avant que tous les utilisateurs soient touchés."
+        },
+        {
+          "question": "Que doit contenir un plan de retour arrière ?",
+          "options": [
+            "La version précédente du modèle, du moteur, du template et de la configuration",
+            "Uniquement le nom du modèle",
+            "Un lien vers un forum",
+            "Rien, il suffit de redémarrer"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le comportement dépend de l’ensemble de la configuration. Conserver seulement un nom de modèle ne suffit pas à revenir à l’état précédent."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Déploiement progressif",
+          "definition": "Mise en service par étapes, sur une partie du trafic, avec surveillance et possibilité de retour arrière."
+        },
+        {
+          "term": "Retour arrière",
+          "definition": "Restauration d'une version précédente du service, du modèle ou de la configuration après un incident ou une régression."
+        },
+        {
+          "term": "Isolation",
+          "definition": "Cloisonnement des données, des caches et des accès entre utilisateurs ou locataires d'un même service."
+        },
+        {
+          "term": "Observabilité",
+          "definition": "Capacité à comprendre l'état d'un service à partir de ses métriques, de ses journaux et de ses traces."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Prototype et production",
+          "prompt": "Quelles responsabilités apparaissent quand on passe d’un modèle local qui répond dans un terminal à un service exposé à des utilisateurs ?",
+          "solution": "Il faut ajouter l’authentification, le contrôle d’accès, la supervision, les sauvegardes, la gestion des incidents et une politique de conservation des données et du cache KV. Le déploiement doit être progressif, avec des seuils de qualité et de latence et un retour arrière possible."
+        }
+      ],
+      "sources": [
+        {
+          "label": "vLLM, documentation, consultée le 21 octobre 2026.",
+          "href": "https://docs.vllm.ai/"
+        },
+        {
+          "label": "LMCache, dépôt GitHub, consulté le 21 octobre 2026.",
+          "href": "https://github.com/LMCache/LMCache"
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "label": "vLLM, documentation, consultée le 21 octobre 2026.",
+      "href": "https://docs.vllm.ai/"
+    },
+    {
+      "label": "SGLang, documentation, consultée le 21 octobre 2026.",
+      "href": "https://docs.sglang.io/"
+    },
+    {
+      "label": "KTransformers, dépôt GitHub, consulté le 21 octobre 2026.",
+      "href": "https://github.com/kvcache-ai/ktransformers"
+    },
+    {
+      "label": "LMCache, dépôt GitHub, consulté le 21 octobre 2026.",
+      "href": "https://github.com/LMCache/LMCache"
+    },
+    {
+      "label": "NVIDIA, RTX 6000 Ada, fiche produit, consultée le 21 octobre 2026.",
+      "href": "https://www.nvidia.com/en-us/design-visualization/rtx-6000/"
+    },
+    {
+      "label": "Apple, Mac Studio, spécifications, consultées le 21 octobre 2026.",
+      "href": "https://www.apple.com/mac-studio/specs/"
+    },
+    {
+      "label": "Qwen, Qwen2.5-Coder, 2024.",
+      "href": "https://qwenlm.github.io/blog/qwen2.5-coder/"
+    },
+    {
+      "label": "Kwon et al., PagedAttention, 2023.",
+      "href": "https://arxiv.org/abs/2309.06180"
+    }
+  ],
+  "related": [
+    {
+      "to": "/cours/ia-environnement",
+      "title": "Cours : l'IA et son environnement",
+      "description": "Le cadre matériel, énergétique et économique dans lequel s'inscrit un service d'IA."
+    },
+    {
+      "to": "/calculateur-couts-ia",
+      "title": "Calculateur de coûts d’API IA",
+      "description": "Comparer le coût d'un service par API avec celui d'un modèle servi localement."
+    },
+    {
+      "to": "/comparateur-modeles-ia",
+      "title": "Comparateur de modèles IA",
+      "description": "Mettre en regard les modèles, leurs contextes et leurs usages avant de choisir."
+    }
+  ]
+}

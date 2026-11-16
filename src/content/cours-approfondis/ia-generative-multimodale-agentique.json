@@ -1,0 +1,1162 @@
+{
+  "slug": "ia-generative-multimodale-agentique",
+  "title": "IA générative, multimodale et agentique : du neurone aux systèmes multi-agents",
+  "subtitle": "Des neurones aux agents : attention, tokens, embeddings, RAG, multimodal, LoRA, DPO, MCP et coordination multi-agents.",
+  "level": "Intermédiaire",
+  "tags": [
+    "IA générative",
+    "Multimodal",
+    "Agents",
+    "MCP",
+    "RAG",
+    "Systèmes multi-agents"
+  ],
+  "summary": "Un modèle de langage découpe le texte en tokens, projette des vecteurs, calcule des attentions, récupère parfois des documents, accepte d’autres modalités et peut être placé dans une boucle avec des outils. Ce cours relie ces briques, du neurone au Transformer jusqu’aux systèmes multi-agents, en distinguant ce qui est calculé, ce qui est appris et ce qui relève de l’ingénierie. Les cours consacrés au RAG, à MCP et aux boucles agentiques sont résumés ici et approfondis séparément.",
+  "introduction": "Un modèle de langage ne se réduit pas à une réponse. Derrière une phrase générée, il y a une chaîne de traitements : découpage en tokens, projection dans un espace vectoriel, calcul d’attention dans des couches empilées, puis prédiction du token suivant. Cette chaîne explique à la fois la fluidité du texte et ses limites. Un modèle ne consulte pas une base de données par lui-même, ne vérifie pas ses affirmations et n’agit pas sur le monde sans un programme qui l’entoure.\n\nLes usages récents ajoutent deux couches. La première est multimodale : le modèle ne traite plus seulement du texte, mais aussi des images, du son ou de la vidéo, avec des encodeurs et un espace de représentations partagé. La seconde est agentique : le modèle est placé dans une boucle, reçoit des outils et un état, et peut enchaîner des actions. Ces couches ne changent pas la nature du modèle : elles changent ce que le système peut faire et ce qu’il faut contrôler.\n\nCe cours propose un parcours en neuf modules. Il part du neurone et du Transformer, puis suit le trajet d’un texte dans un tokenizer et dans un pipeline RAG. Il décrit ensuite les modèles multimodaux, l’adaptation des poids avec LoRA et DPO, les boucles d’agents, le protocole MCP, la coordination de plusieurs agents et la sélection d'une architecture. Les cours approfondis consacrés au RAG, à MCP et aux boucles agentiques restent la référence pour ces sujets ; les modules correspondants les résument et renvoient vers eux.\n\nLe contenu est volontairement prudent. Aucun modèle n’est appelé, aucune performance n’est mesurée et les schémas sont illustratifs. Le code se limite à trois démonstrations locales : un tokenizer jouet, une similarité cosinus et une boucle d’agent à politique fixe. Chaque sortie affichée a été obtenue en exécutant le script. Les affirmations sur les architectures sont rattachées aux publications et aux documentations citées en fin de cours.",
+  "prerequisites": [
+    "Savoir ce qu’est un LLM",
+    "Notions de vectorisation et de recherche",
+    "Savoir lire un script Python simple",
+    "Aucune expérience de framework d’agents requise"
+  ],
+  "checkedOn": "2026-10-26",
+  "cover": {
+    "src": "pics/cours/ia-generative-multimodale-agentique.webp",
+    "alt": "Noyau de verre facetté entouré de quatre supports abstraits, document, image, son et action, puis de plusieurs agents reliés, sur fond bleu nuit."
+  },
+  "modules": [
+    {
+      "id": "neurone-transformer",
+      "title": "Du neurone au Transformer",
+      "keyTakeaways": [
+        "Le neurone reste une somme pondérée suivie d’une non-linéarité ; le Transformer organise ces calculs en couches.",
+        "L’auto-attention compare les positions entre elles et mélange des valeurs ; elle supprime la dépendance séquentielle des RNN.",
+        "Les connexions résiduelles, la normalisation et le feed-forward stabilisent et enrichissent le bloc.",
+        "L’apprentissage en contexte ne modifie pas les poids : il exploite des exemples dans le prompt.",
+        "Un Transformer prédit des tokens ; il ne garantit ni vérité ni action."
+      ],
+      "theory": "### Le neurone, brique de base\n\nUn neurone artificiel reçoit un vecteur de nombres, le multiplie par des poids, ajoute un biais, puis applique une fonction non linéaire. On écrit souvent $y = f(w \\cdot x + b)$. Pris seul, ce calcul est simple. Mis en couche, puis empilé, il permet de représenter des fonctions complexes. C’est le principe du réseau de neurones : chaque couche transforme une représentation en une autre, et l’entraînement ajuste les poids pour réduire une perte.\n\nUn modèle de langage contemporain conserve ce principe, mais change d’échelle et d’architecture. Les couches ne sont plus seulement des multiplications de matrices : elles combinent des mécanismes d’attention, des réseaux feed-forward, des connexions résiduelles et des normalisations. Le neurone reste la brique de calcul ; le Transformer est l’organisation qui rend ces calculs parallélisables sur de longues séquences.\n\n### Pourquoi les modèles séquentiels ne suffisent pas\n\nAvant le Transformer, les réseaux récurrents traitaient une séquence token par token. À chaque pas, ils mettaient à jour un état caché qui résumait le passé. Cette forme a un avantage : elle respecte naturellement l’ordre. Elle a une limite : le calcul du pas suivant dépend du pas précédent, ce qui réduit le parallélisme, et l’information doit passer par un état de taille fixe. Vaswani et al. (2017) motivent explicitement l’attention par la volonté de supprimer cette dépendance séquentielle.\n\nLe Transformer ne lit pas la séquence comme une boucle. Dans l’encodeur, il compare toutes les positions entre elles en parallèle ; dans un décodeur autorégressif, un masque causal empêche chaque position de voir les suivantes. C’est ce changement qui permet d’utiliser efficacement des accélérateurs matériels et d’entraîner des modèles sur de grands corpus.\n\n### L’attention, en une équation\n\nPour chaque token, le modèle fabrique trois vecteurs : une requête (query), une clé (key) et une valeur (value). La requête d’une position est comparée aux clés des autres positions. Les scores obtenus sont normalisés par un softmax, puis utilisés pour mélanger les valeurs. La sortie de l’attention s’écrit :\n\n$$\\mathrm{softmax}\\left(\\frac{QK^\\top}{\\sqrt{d_k}}\\right)V$$\n\nIci, $Q$, $K$ et $V$ sont des matrices qui rassemblent les requêtes, les clés et les valeurs de la séquence, et $d_k$ est la dimension des clés. Le facteur $\\sqrt{d_k}$ évite que les scores grandissent trop avec la dimension. Le résultat est une nouvelle représentation de chaque token, construite à partir des tokens jugés pertinents.\n\nL’attention multi-têtes répète ce calcul plusieurs fois avec des projections différentes. Chaque tête peut se spécialiser sur un type de relation : proximité, coréférence, ponctuation, etc. Les sorties sont concaténées puis projetées. Attention : le modèle n’a pas de notion native de l’ordre. On ajoute donc un encodage positionnel aux embeddings d’entrée, sinon une phrase et son mélange seraient traités de la même façon.\n\n### Le bloc Transformer\n\nUn bloc combine deux sous-couches : l’attention multi-têtes et un réseau feed-forward appliqué à chaque position. Chaque sous-couche est entourée d’une connexion résiduelle et d’une normalisation. Les connexions résiduelles facilitent la circulation du gradient ; la normalisation stabilise les activations. On empile ces blocs pour former un encodeur, un décodeur, ou les deux.\n\nLe papier de 2017 décrit une architecture encodeur-décodeur pour la traduction. Deux familles d’usage en découlent. BERT (Devlin et al., 2018) utilise un encodeur bidirectionnel et apprend en masquant des tokens ; il produit des représentations contextuelles. Les modèles de la famille GPT (Brown et al., 2020) utilisent un décodeur autorégressif et apprennent à prédire le token suivant. Les deux reposent sur le même bloc d’attention, mais pas sur la même tâche.\n\n### De la prédiction à l’usage\n\nUn modèle autorégressif calcule une distribution sur le prochain token, en choisit un, l’ajoute à la séquence, puis recommence. C’est ce mécanisme qui produit un texte. Brown et al. (2020) montrent qu’un grand modèle peut accomplir une tâche à partir de quelques exemples placés dans le prompt, sans mettre à jour ses poids. C’est l’apprentissage en contexte, souvent appelé few-shot. Il ne faut pas le confondre avec un fine-tuning : rien n’est mémorisé de façon durable, et le comportement dépend du prompt et de la sélection des exemples.\n\nCette capacité a une contrepartie. Le modèle ne consulte pas une base de données, n’exécute pas d’action et ne vérifie pas ses affirmations. Il produit une suite probable de tokens, pas une preuve. Les modules suivants décomposent ce qui se passe avant et après cette prédiction : la tokenisation, la récupération de documents, l’adaptation des poids, puis la boucle qui donne au modèle des outils.\n\n### Ce que le schéma ne montre pas\n\nUn schéma du Transformer montre un flux de tenseurs, pas une compréhension. Les représentations intermédiaires ne sont pas des phrases lisibles, et l’attention n’est pas une explication causale. Une carte d’attention peut aider à inspecter un comportement, mais elle ne prouve pas pourquoi le modèle a répondu. Il faut donc éviter deux erreurs symétriques : croire que le modèle raisonne comme un humain, et croire qu’il ne fait que recopier. Il calcule des régularités statistiques avec une architecture précise.",
+      "diagram": {
+        "title": "Du texte à la distribution du token suivant",
+        "description": "Schéma illustratif : le texte est découpé en tokens, projeté en embeddings, comparé par auto-attention, transformé par un réseau feed-forward, puis converti en distribution sur le token suivant. Aucune mesure n’est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 300\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Texte, embeddings, auto-attention, feed-forward et distribution du token suivant\">\n  <defs>\n    <marker id=\"nt-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"300\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Un flux de tenseurs, pas une compréhension</text>\n  <text x=\"410\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"nt-tokens\">\n    <rect x=\"24\" y=\"100\" width=\"136\" height=\"104\" rx=\"10\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"92\" y=\"128\" fill=\"#e0f2fe\" font-size=\"13\" text-anchor=\"middle\">Texte</text>\n    <text x=\"92\" y=\"150\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">découpage</text>\n    <text x=\"92\" y=\"170\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">tokens</text>\n  </g>\n\n  <g id=\"nt-embed\">\n    <rect x=\"180\" y=\"100\" width=\"136\" height=\"104\" rx=\"10\" fill=\"#111827\" stroke=\"#a78bfa\" stroke-width=\"2\"/>\n    <text x=\"248\" y=\"128\" fill=\"#ede9fe\" font-size=\"13\" text-anchor=\"middle\">Embeddings</text>\n    <text x=\"248\" y=\"150\" fill=\"#ddd6fe\" font-size=\"11\" text-anchor=\"middle\">vecteurs</text>\n    <text x=\"248\" y=\"170\" fill=\"#c4b5fd\" font-size=\"11\" text-anchor=\"middle\">+ position</text>\n  </g>\n\n  <g id=\"nt-attention\">\n    <rect x=\"336\" y=\"100\" width=\"136\" height=\"104\" rx=\"10\" fill=\"#101a10\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"404\" y=\"128\" fill=\"#d1fae5\" font-size=\"13\" text-anchor=\"middle\">Auto-attention</text>\n    <text x=\"404\" y=\"150\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">requêtes, clés</text>\n    <text x=\"404\" y=\"170\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">valeurs</text>\n  </g>\n\n  <g id=\"nt-ffn\">\n    <rect x=\"492\" y=\"100\" width=\"136\" height=\"104\" rx=\"10\" fill=\"#1c1408\" stroke=\"#f59e0b\" stroke-width=\"2\"/>\n    <text x=\"560\" y=\"128\" fill=\"#fef3c7\" font-size=\"13\" text-anchor=\"middle\">Feed-forward</text>\n    <text x=\"560\" y=\"150\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">résidu</text>\n    <text x=\"560\" y=\"170\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">normalisation</text>\n  </g>\n\n  <g id=\"nt-output\">\n    <rect x=\"648\" y=\"100\" width=\"148\" height=\"104\" rx=\"10\" fill=\"#1f1020\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"722\" y=\"128\" fill=\"#fce7f3\" font-size=\"13\" text-anchor=\"middle\">Distribution</text>\n    <text x=\"722\" y=\"150\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">probabilités</text>\n    <text x=\"722\" y=\"170\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">token suivant</text>\n  </g>\n\n  <g stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#nt-arrow)\">\n    <line x1=\"160\" y1=\"152\" x2=\"176\" y2=\"152\"/>\n    <line x1=\"316\" y1=\"152\" x2=\"332\" y2=\"152\"/>\n    <line x1=\"472\" y1=\"152\" x2=\"488\" y2=\"152\"/>\n    <line x1=\"628\" y1=\"152\" x2=\"644\" y2=\"152\"/>\n  </g>\n\n  <text x=\"410\" y=\"258\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">Le même bloc est empilé plusieurs fois ; le schéma montre une seule couche.</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Découper et projeter",
+            "explanation": "Le texte est découpé en tokens, puis chaque token devient un vecteur. Un encodage positionnel ajoute l’ordre de la séquence.",
+            "highlight": [
+              "nt-tokens",
+              "nt-embed"
+            ]
+          },
+          {
+            "title": "2. Comparer les positions",
+            "explanation": "L’auto-attention calcule des scores entre requêtes et clés, puis mélange les valeurs. Chaque position peut ainsi s’appuyer sur les autres.",
+            "highlight": [
+              "nt-attention"
+            ]
+          },
+          {
+            "title": "3. Transformer et prédire",
+            "explanation": "Le feed-forward transforme chaque position, les connexions résiduelles stabilisent le flux, et la couche de sortie produit une distribution sur le token suivant.",
+            "highlight": [
+              "nt-ffn",
+              "nt-output"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Que calcule l’auto-attention ?",
+          "options": [
+            "Une note de qualité globale du texte",
+            "Une base de données de faits vérifiés",
+            "Des poids entre positions, utilisés pour mélanger des valeurs"
+          ],
+          "correctIndex": 2,
+          "explanation": "L’auto-attention compare une requête aux clés des positions, normalise les scores, puis combine les valeurs. Elle ne vérifie pas la vérité du texte."
+        },
+        {
+          "question": "Quelle différence principale sépare le Transformer d’un RNN ?",
+          "options": [
+            "Le Transformer traite les positions en parallèle, sans dépendance séquentielle",
+            "Le Transformer n’a pas de couches",
+            "Le Transformer ne peut pas générer de texte"
+          ],
+          "correctIndex": 0,
+          "explanation": "L’attention compare les positions entre elles sans les parcourir une par une. Les RNN mettent à jour un état à chaque pas, ce qui crée une dépendance séquentielle."
+        },
+        {
+          "question": "Que signifie l’apprentissage en contexte (few-shot) ?",
+          "options": [
+            "Le modèle met à jour ses poids après chaque exemple",
+            "Le modèle utilise des exemples dans le prompt, sans modifier ses poids",
+            "Le modèle est réentraîné sur une base de données locale"
+          ],
+          "correctIndex": 1,
+          "explanation": "Les exemples font partie de l’entrée. Le modèle s’en sert pour produire sa réponse, mais aucun gradient n’est calculé et rien n’est mémorisé durablement."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Token",
+          "definition": "Unité de texte produite par un tokenizer et lue par le modèle."
+        },
+        {
+          "term": "Embedding",
+          "definition": "Vecteur de nombres qui représente un token, un texte ou un autre objet dans un espace appris."
+        },
+        {
+          "term": "Auto-attention",
+          "definition": "Mécanisme qui compare les positions d’une séquence et mélange leurs valeurs selon des scores."
+        },
+        {
+          "term": "Transformer",
+          "definition": "Architecture organisée en blocs d’attention et de feed-forward, avec connexions résiduelles et normalisations."
+        },
+        {
+          "term": "Apprentissage en contexte",
+          "definition": "Capacité à utiliser des exemples présents dans le prompt sans mettre à jour les poids du modèle."
+        }
+      ],
+      "example": {
+        "title": "Du tenseur image au jeton de texte",
+        "text": "**Exemple de calcul.** Une image 224 × 224 × 3 contient 150 528 valeurs. Un texte de 40 tokens produit 40 vecteurs de dimension 768. Un encodeur visuel transforme l'image en une grille de représentations, puis un projecteur aligne ces représentations sur l'espace du texte. Le modèle ne compare donc pas directement des pixels et des mots : il compare des vecteurs. La qualité de l'alignement dépend des paires image-texte vues à l'entraînement et du domaine. Une image de radiographie peut mal s'aligner si le modèle a surtout vu des photographies naturelles."
+      },
+      "exercises": [
+        {
+          "title": "Deux mécanismes du bloc Transformer",
+          "prompt": "Expliquez le rôle du facteur 1/racine(dk) dans l’attention et celui de l’encodage positionnel. Pourquoi ces deux éléments sont-ils nécessaires au fonctionnement du bloc décrit dans le module ?",
+          "solution": "Les scores d’attention sont obtenus en comparant la requête d’une position aux clés des autres, puis normalisés par un softmax. Sans le facteur 1/racine(dk), ces scores grandissent avec la dimension des clés et le softmax devient très tranché, ce qui déstabilise l’apprentissage. L’encodage positionnel répond à un autre problème : l’attention compare toutes les positions en parallèle et n’a pas de notion native de l’ordre. Sans lui, une phrase et son mélange seraient traités de la même façon. Les connexions résiduelles et la normalisation complètent le dispositif pour stabiliser les activations et la circulation du gradient."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Vaswani et al., Attention Is All You Need, 2017.",
+          "href": "https://arxiv.org/abs/1706.03762"
+        },
+        {
+          "label": "Devlin et al., BERT : Pre-training of Deep Bidirectional Transformers for Language Understanding, 2018.",
+          "href": "https://arxiv.org/abs/1810.04805"
+        }
+      ]
+    },
+    {
+      "id": "tokenisation",
+      "title": "Tokenisation et modèles de langage",
+      "keyTakeaways": [
+        "Un token n’est pas un mot : c’est une unité apprise par le tokenizer.",
+        "La tokenisation par sous-mots cherche un compromis entre un vocabulaire raisonnable et des séquences courtes.",
+        "Le tokenizer fait partie du modèle : les identifiants doivent correspondre à son vocabulaire.",
+        "La fenêtre de contexte, la longueur et le coût se comptent en tokens, pas en caractères.",
+        "Un tokenizer jouet montre le mécanisme des fusions, mais ne remplace pas un tokenizer de production."
+      ],
+      "theory": "### Un token n’est pas un mot\n\nUn modèle de langage ne lit pas des caractères ni des mots : il lit des tokens, c’est-à-dire des unités produites par un tokenizer. Un token peut être un mot fréquent, une partie de mot, un signe de ponctuation ou un octet. La phrase « Les rétractations sont complexes » peut être découpée en quelques tokens seulement, tandis qu’un nom rare sera fragmenté en plusieurs morceaux. Cette découpe n’est pas un détail cosmétique : elle détermine ce que le modèle voit, la longueur de la séquence et le coût de l’appel.\n\nLe vocabulaire est l’ensemble des tokens connus. Il est fixé avant l’entraînement. Un tokenizer possède aussi des règles : normalisation Unicode, gestion des espaces, tokens spéciaux de début et de fin, parfois un token d’incertitude. Deux modèles peuvent utiliser des vocabulaires différents pour la même langue. Un texte identique n’aura donc pas le même nombre de tokens partout.\n\n### Pourquoi des sous-mots\n\nUn vocabulaire de mots entiers serait immense et laisserait de côté les mots rares, les fautes de frappe, les noms propres et les langues peu représentées. Un vocabulaire de caractères serait petit, mais produirait des séquences très longues, donc plus coûteuses à traiter. La tokenisation par sous-mots cherche un compromis : les unités fréquentes restent entières, les unités rares sont découpées en morceaux réutilisables.\n\nDeux algorithmes classiques illustrent cette idée. Le byte-pair encoding (BPE) part de caractères ou d’octets et fusionne répétitivement la paire la plus fréquente. WordPiece, utilisé par BERT, sélectionne des unités selon un critère de vraisemblance. SentencePiece est une bibliothèque de tokenisation qui implémente notamment le BPE et un modèle unigramme sur du texte brut, espaces compris, ce qui évite un prétraitement par mots. Ces méthodes ne comprennent pas le sens : elles optimisent des statistiques de fréquence et de couverture.\n\n### Le tokenizer fait partie du modèle\n\nUn tokenizer n’est pas interchangeable à la légère. Les identifiants produits doivent correspondre aux lignes de la matrice d’embeddings du modèle. Si l’on change le vocabulaire sans réentraîner le modèle, les identifiants ne veulent plus rien dire. C’est pourquoi un modèle est toujours accompagné de son tokenizer, et pourquoi les bibliothèques demandent de charger les deux ensemble.\n\nLes tokens spéciaux structurent l’échange. Un token de début indique le commencement, un token de fin permet d’arrêter la génération, et les modèles conversationnels utilisent des marqueurs de rôle. Ces marqueurs sont souvent ajoutés par un template de chat. Un template mal appliqué peut modifier le comportement du modèle, même si le texte visible semble identique.\n\nUn autre point pratique concerne les octets inconnus. Certains tokenizers travaillent directement sur des octets et disposent d’un repli pour représenter n’importe quelle suite Unicode, même si elle n’apparaît pas dans le vocabulaire. D’autres utilisent un token spécial pour l’inconnu et perdent de l’information. Cette différence compte pour les langues, les emojis et les textes bruités. Elle explique pourquoi un même message peut être traité proprement par un modèle et mal par un autre, sans que le contenu visible ait changé.\n\n### Ce que le tokenizer ne dit pas\n\nUn token fréquent n’est pas forcément important, et un token rare n’est pas forcément difficile. La fréquence dans le vocabulaire ne mesure pas la difficulté sémantique. De même, un texte court en caractères peut être long en tokens, et inversement. La fenêtre de contexte d’un modèle est exprimée en tokens : elle compte l’instruction, les exemples, les documents récupérés, l’historique et la réponse en cours de génération. Un prompt qui « tient » en caractères peut donc dépasser la fenêtre. Un même contenu peut aussi consommer plus ou moins de tokens selon le tokenizer et la langue, ce qui change la place disponible et le coût.\n\nLa tokenisation explique aussi certaines erreurs. Un modèle peut mal manipuler un mot découpé en morceaux, ou produire un token qui ne correspond pas à la frontière attendue. Les langues qui utilisent peu d’espaces, les alphabets non latins et les suites de chiffres sont souvent fragmentés de façon différente. Ce n’est pas une preuve de mauvaise qualité : c’est une conséquence du vocabulaire et des données d’entraînement.\n\n### Un tokenizer jouet, pour voir les merges\n\nLe code de ce module entraîne un BPE minuscule sur cinq formes. Il ne remplace pas un tokenizer de production : le vocabulaire est minuscule et les règles sont simplifiées. Il montre cependant le mécanisme : compter les paires, fusionner la plus fréquente, recommencer, puis appliquer les fusions aux formes du corpus.",
+      "diagram": {
+        "title": "Du texte brut aux identifiants du modèle",
+        "description": "Schéma illustratif : le texte est normalisé, découpé, transformé par des fusions de sous-mots, puis converti en identifiants qui occupent la fenêtre de contexte. Aucune mesure n’est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 300\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Normalisation, fusions de sous-mots, identifiants et fenêtre de contexte\">\n  <defs>\n    <marker id=\"tk-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"300\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">La frontière des tokens est apprise</text>\n  <text x=\"410\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"tk-text\">\n    <rect x=\"24\" y=\"100\" width=\"136\" height=\"104\" rx=\"10\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"92\" y=\"128\" fill=\"#e0f2fe\" font-size=\"13\" text-anchor=\"middle\">Texte brut</text>\n    <text x=\"92\" y=\"150\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">caractères</text>\n    <text x=\"92\" y=\"170\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">Unicode</text>\n  </g>\n\n  <g id=\"tk-normalize\">\n    <rect x=\"180\" y=\"100\" width=\"136\" height=\"104\" rx=\"10\" fill=\"#111827\" stroke=\"#a78bfa\" stroke-width=\"2\"/>\n    <text x=\"248\" y=\"128\" fill=\"#ede9fe\" font-size=\"13\" text-anchor=\"middle\">Normalisation</text>\n    <text x=\"248\" y=\"150\" fill=\"#ddd6fe\" font-size=\"11\" text-anchor=\"middle\">espaces</text>\n    <text x=\"248\" y=\"170\" fill=\"#c4b5fd\" font-size=\"11\" text-anchor=\"middle\">pré-découpage</text>\n  </g>\n\n  <g id=\"tk-merges\">\n    <rect x=\"336\" y=\"100\" width=\"136\" height=\"104\" rx=\"10\" fill=\"#101a10\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"404\" y=\"128\" fill=\"#d1fae5\" font-size=\"13\" text-anchor=\"middle\">Fusions BPE</text>\n    <text x=\"404\" y=\"150\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">paires</text>\n    <text x=\"404\" y=\"170\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">fréquentes</text>\n  </g>\n\n  <g id=\"tk-ids\">\n    <rect x=\"492\" y=\"100\" width=\"136\" height=\"104\" rx=\"10\" fill=\"#1c1408\" stroke=\"#f59e0b\" stroke-width=\"2\"/>\n    <text x=\"560\" y=\"128\" fill=\"#fef3c7\" font-size=\"13\" text-anchor=\"middle\">Identifiants</text>\n    <text x=\"560\" y=\"150\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">entiers</text>\n    <text x=\"560\" y=\"170\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">vocabulaire</text>\n  </g>\n\n  <g id=\"tk-context\">\n    <rect x=\"648\" y=\"100\" width=\"148\" height=\"104\" rx=\"10\" fill=\"#1f1020\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"722\" y=\"128\" fill=\"#fce7f3\" font-size=\"13\" text-anchor=\"middle\">Contexte</text>\n    <text x=\"722\" y=\"150\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">instruction</text>\n    <text x=\"722\" y=\"170\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">réponse</text>\n  </g>\n\n  <g stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#tk-arrow)\">\n    <line x1=\"160\" y1=\"152\" x2=\"176\" y2=\"152\"/>\n    <line x1=\"316\" y1=\"152\" x2=\"332\" y2=\"152\"/>\n    <line x1=\"472\" y1=\"152\" x2=\"488\" y2=\"152\"/>\n    <line x1=\"628\" y1=\"152\" x2=\"644\" y2=\"152\"/>\n  </g>\n\n  <text x=\"410\" y=\"258\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">Le même texte peut produire un nombre différent de tokens selon le vocabulaire.</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Normaliser et découper",
+            "explanation": "Le tokenizer applique ses règles Unicode, gère les espaces et prépare des unités de base.",
+            "highlight": [
+              "tk-text",
+              "tk-normalize"
+            ]
+          },
+          {
+            "title": "2. Appliquer les fusions",
+            "explanation": "Les paires fréquentes apprises pendant l’entraînement sont fusionnées. Un mot fréquent peut devenir un seul token.",
+            "highlight": [
+              "tk-merges"
+            ]
+          },
+          {
+            "title": "3. Produire les identifiants",
+            "explanation": "Chaque token reçoit un identifiant entier. La séquence d’identifiants, avec ses tokens spéciaux, occupe la fenêtre de contexte.",
+            "highlight": [
+              "tk-ids",
+              "tk-context"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "code": "from collections import Counter\n\ncorpus = [\"basse\", \"basses\", \"bassin\", \"bas\", \"basse\"]\nwords = [list(word) + [\"</w>\"] for word in corpus]\n\n\ndef pair_counts(words):\n    counts = Counter()\n    for symbols in words:\n        for a, b in zip(symbols, symbols[1:]):\n            counts[(a, b)] += 1\n    return counts\n\n\nmerges = []\nfor _ in range(4):\n    counts = pair_counts(words)\n    if not counts:\n        break\n    best = max(counts, key=lambda p: (counts[p], p))\n    merges.append(best)\n    a, b = best\n    new_words = []\n    for symbols in words:\n        out, i = [], 0\n        while i < len(symbols):\n            if i + 1 < len(symbols) and (symbols[i], symbols[i + 1]) == best:\n                out.append(a + b)\n                i += 2\n            else:\n                out.append(symbols[i])\n                i += 1\n        new_words.append(out)\n    words = new_words\n\nprint(\"merges:\", merges)\nprint(\"basse ->\", words[0])\nprint(\"bassin ->\", words[2])",
+        "explanation": "BPE jouet : quatre fusions sont apprises sur un corpus minuscule, puis appliquées aux formes du corpus. La sortie montre que « basse » devient un seul symbole après les fusions, tandis que « bassin » conserve des morceaux. Un vrai tokenizer apprendrait des milliers de fusions sur un grand corpus et gérerait les octets inconnus. La leçon reste la même : la frontière entre les tokens est apprise, pas définie par l’orthographe.",
+        "output": "merges: [('b', 'a'), ('ba', 's'), ('bas', 's'), ('bass', 'e')]\nbasse -> ['basse', '</w>']\nbassin -> ['bass', 'i', 'n', '</w>']",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Qu’est-ce qu’un token ?",
+          "options": [
+            "Une unité de texte produite par le tokenizer",
+            "Un caractère unique dans tous les modèles",
+            "Toujours un mot complet"
+          ],
+          "correctIndex": 0,
+          "explanation": "Un token peut être un mot, une partie de mot, un signe ou un octet. Sa forme dépend du vocabulaire et des règles du tokenizer."
+        },
+        {
+          "question": "Pourquoi utiliser des sous-mots plutôt que des mots entiers ?",
+          "options": [
+            "Pour supprimer les erreurs de langue",
+            "Pour couvrir les mots rares avec un vocabulaire de taille raisonnable",
+            "Pour éviter d’avoir une fenêtre de contexte"
+          ],
+          "correctIndex": 1,
+          "explanation": "Les sous-mots permettent de représenter des mots rares ou nouveaux à partir de morceaux fréquents, sans construire un vocabulaire gigantesque."
+        },
+        {
+          "question": "Que compte la fenêtre de contexte d’un modèle ?",
+          "options": [
+            "Les mots du dictionnaire uniquement",
+            "Les octets du fichier modèle",
+            "Les tokens, y compris l’instruction, les documents et la réponse"
+          ],
+          "correctIndex": 2,
+          "explanation": "La fenêtre est exprimée en tokens. Tout ce qui est envoyé au modèle et tout ce qu’il génère consomme cette capacité."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Token",
+          "definition": "Unité de texte produite par un tokenizer et associée à un identifiant entier."
+        },
+        {
+          "term": "Vocabulaire",
+          "definition": "Ensemble des tokens connus par un tokenizer et par le modèle associé."
+        },
+        {
+          "term": "BPE",
+          "definition": "Byte-pair encoding : algorithme qui fusionne répétitivement les paires d’unités les plus fréquentes."
+        },
+        {
+          "term": "Fenêtre de contexte",
+          "definition": "Nombre maximal de tokens qu’un modèle peut prendre en compte dans un appel."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Caractères ou tokens",
+          "prompt": "Un prompt de 6 000 caractères peut-il tenir dans une fenêtre de 2 000 tokens ? Expliquez pourquoi la réponse n’est pas une simple division, et ce que la fenêtre doit compter en plus du texte de l’utilisateur.",
+          "solution": "Il n’existe pas de conversion fixe entre caractères et tokens : un mot fréquent peut tenir en un token, un nom rare, un nombre ou un emoji peut être découpé en plusieurs. Le résultat dépend du tokenizer et de la langue. Il faut donc compter avec le tokenizer du modèle, pas estimer au caractère. La fenêtre de contexte compte aussi l’instruction système, les exemples, les documents récupérés, l’historique et la réponse en cours de génération. Un prompt qui tient en caractères peut ainsi dépasser la fenêtre, et le même contenu peut coûter différemment selon le vocabulaire."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Brown et al., Language Models are Few-Shot Learners, 2020.",
+          "href": "https://arxiv.org/abs/2005.14165"
+        }
+      ]
+    },
+    {
+      "id": "embeddings-rag",
+      "title": "Embeddings et RAG",
+      "keyTakeaways": [
+        "Un embedding est un vecteur appris, pas une base de connaissances.",
+        "La similarité cosinus compare des directions ; aucun seuil n’est universel.",
+        "Le RAG ajoute une recherche de passages avant la génération.",
+        "Un RAG ne supprime ni les erreurs de retrieval ni les hallucinations.",
+        "La recherche et la génération doivent être évaluées séparément."
+      ],
+      "theory": "### Représenter le sens par un vecteur\n\nUn embedding est un vecteur de nombres réels associé à un texte, une image ou un autre objet. L’idée directrice est que des objets utilisés dans des contextes proches reçoivent des vecteurs proches. Un modèle d’embedding apprend cette géométrie sur des paires ou des corpus. BERT (Devlin et al., 2018) produit des représentations contextuelles : le vecteur d’un mot dépend de la phrase qui l’entoure. Pour comparer des phrases entières, on agrège souvent les vecteurs des tokens, par exemple avec une moyenne ou un token spécial.\n\nUn embedding n’est pas une base de connaissances. Il ne contient pas le texte source et ne permet pas de retrouver une phrase exacte. Il permet de comparer des proximités dans un espace de dimension fixe. Cette propriété est utile pour la recherche, le classement et le regroupement, mais elle ne garantit pas que deux textes proches disent la même chose.\n\n### La similarité cosinus\n\nPour comparer deux vecteurs, on utilise souvent la similarité cosinus. Elle mesure l’angle entre les vecteurs, pas leur longueur :\n\n$$\\cos(a,b)=\\frac{a\\cdot b}{\\|a\\|\\,\\|b\\|}$$\n\nLa valeur est comprise entre -1 et 1. Elle vaut 1 pour des vecteurs colinéaires de même sens, 0 pour des vecteurs orthogonaux, -1 pour des vecteurs opposés. En pratique, les scores observés dépendent du modèle et du corpus : il n’existe pas de seuil universel qui dirait « ce passage est pertinent ». Un seuil se choisit en évaluant sur des questions réelles. Un score élevé signifie que les vecteurs pointent dans une direction proche, pas que le passage contient la réponse. Il faut donc toujours regarder les passages eux-mêmes et les droits d’accès avant de les utiliser.\n\n### Le RAG en trois temps\n\nLe retrieval-augmented generation (RAG) combine un modèle génératif avec une mémoire externe. Lewis et al. (2020) décrivent un modèle paramétrique, entraîné sur un corpus, et une mémoire non paramétrique, constituée d’un index de documents. Le pipeline se lit en trois temps. La recherche sélectionne des passages ; l’augmentation les insère dans le prompt ; la génération produit une réponse à partir de la question et des passages.\n\nEn pratique, on découpe les documents en morceaux (chunks), on calcule leurs embeddings, on stocke les vecteurs dans un index, puis on vectorise la question pour retrouver les morceaux les plus proches. Le nombre de morceaux retenus, souvent appelé top-k, est un réglage. Un morceau trop grand dilue l’information ; un morceau trop petit perd le contexte. Le chevauchement entre morceaux limite les coupures malheureuses.\n\n### Ce que le RAG ne règle pas\n\nLe RAG ne supprime pas les erreurs. Si le bon passage n’est pas retrouvé, le modèle répond sans lui, ou invente. Si le passage est retrouvé mais contredit un autre passage, le modèle peut choisir le mauvais. Si le document est obsolète, la réponse l’est aussi. Si le document contient une instruction malveillante, le modèle peut la suivre : c’est une injection indirecte. Enfin, le RAG ne remplace pas une vérification des droits d’accès : un index mal filtré peut renvoyer un document confidentiel.\n\nCes limites expliquent pourquoi un RAG simple déçoit en production. Les améliorations classiques sont la recherche hybride (vecteurs et mots-clés), le reranking, le découpage structurel et l’évaluation séparée de la recherche et de la génération. Le cours consacré au RAG détaille ces techniques ; ici, nous retenons seulement la chaîne et ses points de rupture.\n\n### Évaluer sans se raconter d’histoires\n\nUn RAG se mesure sur deux plans. La recherche se mesure avec des questions dont on connaît le passage pertinent : taux de succès à k, rang du bon passage. La génération se mesure avec des réponses de référence ou une grille de critères : la réponse répond-elle à la question, cite-t-elle un passage, contredit-elle le contexte ? Une évaluation uniquement subjective sur quelques exemples ne dit rien de la robustesse.\n\nIl faut aussi mesurer les cas où le système devrait dire « je ne sais pas ». Un RAG qui répond toujours quelque chose peut paraître fluide tout en inventant. La qualité d’un système se voit autant sur ses refus que sur ses réponses.\n\n### Calculer une similarité\n\nLe code de ce module calcule la similarité cosinus entre une requête et trois vecteurs fictifs, puis les classe. Les vecteurs ne viennent d’aucun modèle : ils sont choisis pour l’exemple.",
+      "diagram": {
+        "title": "Le pipeline RAG, de l’index à la réponse",
+        "description": "Schéma illustratif : les documents sont découpés et vectorisés dans un index ; la question est vectorisée, comparée aux passages, puis insérée dans un prompt avant la génération. Aucune mesure n’est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 340\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Documents, chunks, embeddings, index, question, recherche, prompt et génération\">\n  <defs>\n    <marker id=\"rg-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"340\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Chercher, augmenter, générer</text>\n  <text x=\"410\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"rg-docs\">\n    <rect x=\"24\" y=\"78\" width=\"160\" height=\"78\" rx=\"10\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"104\" y=\"106\" fill=\"#e0f2fe\" font-size=\"13\" text-anchor=\"middle\">Documents</text>\n    <text x=\"104\" y=\"128\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">textes, PDF, pages</text>\n  </g>\n\n  <g id=\"rg-chunks\">\n    <rect x=\"214\" y=\"78\" width=\"160\" height=\"78\" rx=\"10\" fill=\"#111827\" stroke=\"#a78bfa\" stroke-width=\"2\"/>\n    <text x=\"294\" y=\"106\" fill=\"#ede9fe\" font-size=\"13\" text-anchor=\"middle\">Chunks</text>\n    <text x=\"294\" y=\"128\" fill=\"#ddd6fe\" font-size=\"11\" text-anchor=\"middle\">découpage</text>\n  </g>\n\n  <g id=\"rg-embeddings\">\n    <rect x=\"404\" y=\"78\" width=\"160\" height=\"78\" rx=\"10\" fill=\"#101a10\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"484\" y=\"106\" fill=\"#d1fae5\" font-size=\"13\" text-anchor=\"middle\">Embeddings</text>\n    <text x=\"484\" y=\"128\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">vecteurs</text>\n  </g>\n\n  <g id=\"rg-index\">\n    <rect x=\"594\" y=\"78\" width=\"202\" height=\"78\" rx=\"10\" fill=\"#1c1408\" stroke=\"#f59e0b\" stroke-width=\"2\"/>\n    <text x=\"695\" y=\"106\" fill=\"#fef3c7\" font-size=\"13\" text-anchor=\"middle\">Index vectoriel</text>\n    <text x=\"695\" y=\"128\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">recherche par proximité</text>\n  </g>\n\n  <g id=\"rg-query\">\n    <rect x=\"24\" y=\"230\" width=\"160\" height=\"78\" rx=\"10\" fill=\"#1f1020\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"104\" y=\"258\" fill=\"#fce7f3\" font-size=\"13\" text-anchor=\"middle\">Question</text>\n    <text x=\"104\" y=\"280\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">texte utilisateur</text>\n  </g>\n\n  <g id=\"rg-search\">\n    <rect x=\"214\" y=\"230\" width=\"160\" height=\"78\" rx=\"10\" fill=\"#0b1f1a\" stroke=\"#2dd4bf\" stroke-width=\"2\"/>\n    <text x=\"294\" y=\"258\" fill=\"#ccfbf1\" font-size=\"13\" text-anchor=\"middle\">Recherche</text>\n    <text x=\"294\" y=\"280\" fill=\"#99f6e4\" font-size=\"11\" text-anchor=\"middle\">top-k passages</text>\n  </g>\n\n  <g id=\"rg-prompt\">\n    <rect x=\"404\" y=\"230\" width=\"160\" height=\"78\" rx=\"10\" fill=\"#1e1b4b\" stroke=\"#818cf8\" stroke-width=\"2\"/>\n    <text x=\"484\" y=\"258\" fill=\"#e0e7ff\" font-size=\"13\" text-anchor=\"middle\">Prompt augmenté</text>\n    <text x=\"484\" y=\"280\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">question + extraits</text>\n  </g>\n\n  <g id=\"rg-generation\">\n    <rect x=\"594\" y=\"230\" width=\"202\" height=\"78\" rx=\"10\" fill=\"#1f1020\" stroke=\"#fb7185\" stroke-width=\"2\"/>\n    <text x=\"695\" y=\"258\" fill=\"#ffe4e6\" font-size=\"13\" text-anchor=\"middle\">Génération</text>\n    <text x=\"695\" y=\"280\" fill=\"#fecdd3\" font-size=\"11\" text-anchor=\"middle\">réponse à vérifier</text>\n  </g>\n\n  <g stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#rg-arrow)\">\n    <line x1=\"184\" y1=\"117\" x2=\"210\" y2=\"117\"/>\n    <line x1=\"374\" y1=\"117\" x2=\"400\" y2=\"117\"/>\n    <line x1=\"564\" y1=\"117\" x2=\"590\" y2=\"117\"/>\n    <line x1=\"184\" y1=\"269\" x2=\"210\" y2=\"269\"/>\n    <line x1=\"374\" y1=\"269\" x2=\"400\" y2=\"269\"/>\n    <line x1=\"564\" y1=\"269\" x2=\"590\" y2=\"269\"/>\n    <line x1=\"294\" y1=\"226\" x2=\"294\" y2=\"160\"/>\n    <line x1=\"484\" y1=\"226\" x2=\"484\" y2=\"160\"/>\n  </g>\n\n  <text x=\"410\" y=\"330\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">La recherche et la génération peuvent échouer séparément.</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Découper et vectoriser",
+            "explanation": "Les documents sont découpés en morceaux, puis chaque morceau devient un vecteur avec un modèle d’embedding.",
+            "highlight": [
+              "rg-docs",
+              "rg-chunks",
+              "rg-embeddings"
+            ]
+          },
+          {
+            "title": "2. Construire l’index",
+            "explanation": "Les vecteurs sont stockés dans un index qui permet de retrouver rapidement les passages proches d’une requête.",
+            "highlight": [
+              "rg-index"
+            ]
+          },
+          {
+            "title": "3. Retrouver des passages",
+            "explanation": "La question est vectorisée et comparée aux vecteurs de l’index. Les k passages les plus proches sont sélectionnés.",
+            "highlight": [
+              "rg-query",
+              "rg-search"
+            ]
+          },
+          {
+            "title": "4. Augmenter puis générer",
+            "explanation": "Les passages sont insérés dans le prompt. Le modèle génère une réponse à partir de la question et des extraits, sans garantie de vérité.",
+            "highlight": [
+              "rg-prompt",
+              "rg-generation"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "code": "import math\n\n\ndef cosine(a, b):\n    dot = sum(x * y for x, y in zip(a, b))\n    na = math.sqrt(sum(x * x for x in a))\n    nb = math.sqrt(sum(y * y for y in b))\n    return dot / (na * nb) if na and nb else 0.0\n\n\nquery = [0.9, 0.1, 0.0]\ndocs = {\n    \"remboursement\": [0.8, 0.2, 0.1],\n    \"livraison\": [0.1, 0.9, 0.4],\n    \"paiement\": [0.2, 0.1, 0.9],\n}\n\nranking = sorted(docs.items(), key=lambda item: cosine(query, item[1]), reverse=True)\nfor name, vector in ranking:\n    print(f\"{name}: {cosine(query, vector):.3f}\")",
+        "explanation": "Les vecteurs sont inventés pour l’exemple. La sortie montre que le score le plus élevé n’est pas une preuve de pertinence, seulement une proximité géométrique.",
+        "output": "remboursement: 0.984\npaiement: 0.226\nlivraison: 0.201",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Que mesure la similarité cosinus ?",
+          "options": [
+            "La longueur des vecteurs",
+            "L’angle entre deux vecteurs",
+            "Le nombre de documents indexés"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le cosinus compare les directions. Deux vecteurs de longueurs différentes peuvent avoir une similarité élevée s’ils pointent dans la même direction."
+        },
+        {
+          "question": "Pourquoi découper les documents en morceaux ?",
+          "options": [
+            "Pour supprimer le besoin de recherche",
+            "Pour réduire le nombre de documents",
+            "Pour retrouver des passages précis sans vectoriser un document entier"
+          ],
+          "correctIndex": 2,
+          "explanation": "Un vecteur de document entier mélange trop d’informations. Des morceaux permettent de retrouver un passage précis, à condition de choisir une taille et un chevauchement adaptés."
+        },
+        {
+          "question": "Quel risque reste présent même avec un RAG ?",
+          "options": [
+            "La possibilité que le bon passage ne soit pas retrouvé",
+            "Le modèle n’a plus besoin de contexte",
+            "L’index devient inutile"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le RAG dépend de la recherche. Si le passage pertinent n’est pas dans les résultats, la génération peut inventer ou répondre sans lui."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Embedding",
+          "definition": "Vecteur qui représente un texte ou un autre objet dans un espace appris."
+        },
+        {
+          "term": "Similarité cosinus",
+          "definition": "Mesure de l’angle entre deux vecteurs, comprise entre -1 et 1."
+        },
+        {
+          "term": "Chunk",
+          "definition": "Morceau de document indexé séparément pour la recherche."
+        },
+        {
+          "term": "Index vectoriel",
+          "definition": "Structure qui stocke des vecteurs et permet de retrouver les plus proches d’une requête."
+        },
+        {
+          "term": "RAG",
+          "definition": "Retrieval-augmented generation : recherche de passages, augmentation du prompt, puis génération."
+        }
+      ],
+      "example": {
+        "title": "Trois passages, un classement",
+        "text": "**Scénario illustratif.** Une question sur un délai de retour est comparée à trois passages. Les scores de similarité sont 0,82, 0,61 et 0,34. Le premier passage contient la règle, le deuxième une exception et le troisième un texte commercial. Un seuil à 0,5 retient les deux premiers. Si l'exception contredit la règle, le modèle doit recevoir les deux passages, pas seulement le meilleur. Le score n'est pas une probabilité de vérité : il indique une proximité dans l'espace d'embeddings."
+      },
+      "exercises": [
+        {
+          "title": "Un seuil et deux passages",
+          "prompt": "Une question sur un délai de retour est comparée à trois passages, avec des similarités de 0,82, 0,61 et 0,34. Un seuil à 0,5 retient quels passages ? Pourquoi ne pas garder seulement le meilleur si le deuxième contient une exception ?",
+          "solution": "Le seuil retient les deux premiers passages, à 0,82 et 0,61 ; le troisième, à 0,34, est écarté. Garder seulement le meilleur serait risqué : si le deuxième passage contient une exception qui contredit la règle, le modèle doit recevoir les deux pour arbitrer. La similarité mesure une proximité dans l’espace des embeddings, pas une probabilité de vérité, et aucun seuil n’est universel. Il faut aussi vérifier les droits d’accès des passages et évaluer séparément la recherche et la génération, y compris les cas où le système devrait répondre qu’il ne sait pas."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Devlin et al., BERT : Pre-training of Deep Bidirectional Transformers for Language Understanding, 2018.",
+          "href": "https://arxiv.org/abs/1810.04805"
+        },
+        {
+          "label": "Lewis et al., Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks, 2020.",
+          "href": "https://arxiv.org/abs/2005.11401"
+        }
+      ]
+    },
+    {
+      "id": "multimodal",
+      "title": "Modèles multimodaux",
+      "keyTakeaways": [
+        "Une modalité est une forme de donnée ; un modèle multimodal en traite plusieurs.",
+        "Les encodeurs projettent les modalités dans un espace commun, mais cet alignement reste statistique.",
+        "La fusion peut être précoce, tardive ou passer par des tokens visuels dans un modèle de langage.",
+        "La diffusion génère des images en apprenant à débruiter, pas en copiant une image source.",
+        "Un modèle multimodal peut halluciner un détail, mal lire un texte ou ignorer une relation spatiale."
+      ],
+      "theory": "### Une modalité, une représentation\n\nUne modalité est une forme de donnée : texte, image, audio, vidéo, action. Un modèle unimodal traite une seule forme. Un modèle multimodal en traite plusieurs, soit en entrée, soit en sortie, soit les deux. Il ne suffit pas de brancher deux modèles : il faut définir comment les représentations se rencontrent.\n\nLe texte est déjà une séquence de tokens. Une image est une grille de pixels ; on peut la découper en patches, la passer dans un CNN ou dans un Transformer visuel. Un son est une onde ; on le convertit souvent en spectrogramme, puis en trames. Une vidéo ajoute le temps : des trames, parfois accompagnées de l’audio. Chaque encodeur produit des vecteurs, mais ces vecteurs n’ont pas naturellement la même signification.\n\n### Un espace commun\n\nLa première idée est de projeter les représentations dans un espace partagé. On entraîne des encodeurs sur des paires (image, légende), (audio, transcription) ou (vidéo, description), avec un objectif qui rapproche les paires correspondantes et éloigne les autres. Une projection linéaire ou un petit réseau adapte la dimension. Une fois l’espace construit, on peut comparer une image et un texte, ou retrouver une image à partir d’une phrase.\n\nCette approche a une limite : l’alignement est statistique. Deux contenus peuvent être proches dans l’espace sans être équivalents. Une image de « chien » et une image de « loup » peuvent être proches ; une négation, un détail rare ou une relation spatiale peuvent être mal capturés. L’espace commun est un outil de rapprochement, pas un dictionnaire de vérité.\n\n### Fusionner les informations\n\nDeux familles de fusion existent. La fusion précoce combine les représentations avant les couches de décision ; la fusion tardive combine des scores ou des sorties. Les modèles de dialogue multimodaux utilisent souvent une troisième voie : un encodeur visuel projette des patches dans une séquence de tokens, et le modèle de langage traite ces tokens comme du texte. L’image devient une suite de vecteurs que l’attention peut consulter.\n\nLe Transformer (Vaswani et al., 2017) est central ici, car l’attention permet à une position de texte de s’appuyer sur des positions visuelles ou audio. Un modèle peut ainsi répondre à une question sur une image, décrire un graphique ou résumer une scène. La qualité dépend de l’encodeur, de la résolution, de la quantité de données alignées et de la façon dont les modalités sont mêlées pendant l’entraînement.\n\n### Générer des images, du son et de la vidéo\n\nPour générer du texte, un modèle autorégressif prédit des tokens. Pour générer une image, deux familles sont courantes. Les modèles autorégressifs produisent des tokens visuels, comme un texte. Les modèles de diffusion partent d’un bruit et apprennent à le retirer progressivement. Ho et al. (2020) formalisent ce processus : une phase avant ajoute du bruit à une image, une phase inverse apprend à débruiter. À la génération, on part d’un bruit et on applique le modèle inverse pendant un nombre de pas fixé.\n\nLa diffusion ne produit pas une image « à partir de rien » : elle apprend une distribution d’images et échantillonne. Le conditionnement par un texte peut se faire par des mécanismes d’attention croisée ou par concaténation, selon l’architecture. Pour l’audio, on peut générer des formes d’onde, des spectrogrammes ou des tokens issus d’un codec. Pour la vidéo, il faut en plus assurer la cohérence temporelle, ce qui est plus difficile qu’une suite d’images indépendantes.\n\n### Ce qu’un modèle multimodal ne fait pas\n\nUn modèle multimodal ne voit pas comme un humain et n’entend pas comme un humain. Il calcule des représentations à partir de données échantillonnées. Il peut halluciner un détail absent de l’image, mal lire un petit texte, confondre deux objets proches ou ignorer une relation spatiale. Il peut aussi reproduire des biais présents dans les paires d’entraînement. Une réponse fluide n’est pas une preuve de perception correcte. Un modèle peut même décrire une image plausible à partir du texte de la question sans réellement s’appuyer sur les pixels. La vérification doit donc inclure des questions dont la réponse est absente de l’image, pour voir s’il invente.\n\nL’évaluation doit donc être spécifique : exactitude sur des questions visuelles, qualité de l’OCR, robustesse aux perturbations, cohérence temporelle pour la vidéo, respect de la consigne. Les benchmarks publics donnent des ordres de grandeur, pas une garantie pour votre cas. Il faut tester sur les documents, les images et les langues que le système rencontrera réellement.",
+      "diagram": {
+        "title": "Trois modalités, un espace de travail",
+        "description": "Schéma illustratif : le texte, l’image et l’audio passent par des encodeurs, sont projetés dans un espace commun, puis fusionnés avant la génération. Aucune mesure n’est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 360\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Texte, image et audio, encodeurs, espace commun, fusion et sortie\">\n  <defs>\n    <marker id=\"mm-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"360\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Encoder, aligner, fusionner</text>\n  <text x=\"410\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"mm-text\">\n    <rect x=\"24\" y=\"84\" width=\"170\" height=\"62\" rx=\"10\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"109\" y=\"110\" fill=\"#e0f2fe\" font-size=\"13\" text-anchor=\"middle\">Texte</text>\n    <text x=\"109\" y=\"130\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">tokens</text>\n  </g>\n\n  <g id=\"mm-image\">\n    <rect x=\"24\" y=\"160\" width=\"170\" height=\"62\" rx=\"10\" fill=\"#1f1020\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"109\" y=\"186\" fill=\"#fce7f3\" font-size=\"13\" text-anchor=\"middle\">Image</text>\n    <text x=\"109\" y=\"206\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">pixels, patches</text>\n  </g>\n\n  <g id=\"mm-audio\">\n    <rect x=\"24\" y=\"236\" width=\"170\" height=\"62\" rx=\"10\" fill=\"#1c1408\" stroke=\"#f59e0b\" stroke-width=\"2\"/>\n    <text x=\"109\" y=\"262\" fill=\"#fef3c7\" font-size=\"13\" text-anchor=\"middle\">Audio</text>\n    <text x=\"109\" y=\"282\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">trames, spectrogramme</text>\n  </g>\n\n  <g id=\"mm-encoders\">\n    <rect x=\"234\" y=\"132\" width=\"150\" height=\"118\" rx=\"10\" fill=\"#111827\" stroke=\"#a78bfa\" stroke-width=\"2\"/>\n    <text x=\"309\" y=\"160\" fill=\"#ede9fe\" font-size=\"13\" text-anchor=\"middle\">Encodeurs</text>\n    <text x=\"309\" y=\"182\" fill=\"#ddd6fe\" font-size=\"11\" text-anchor=\"middle\">texte</text>\n    <text x=\"309\" y=\"202\" fill=\"#ddd6fe\" font-size=\"11\" text-anchor=\"middle\">vision</text>\n    <text x=\"309\" y=\"222\" fill=\"#c4b5fd\" font-size=\"11\" text-anchor=\"middle\">audio</text>\n  </g>\n\n  <g id=\"mm-space\">\n    <rect x=\"424\" y=\"132\" width=\"160\" height=\"118\" rx=\"10\" fill=\"#101a10\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"504\" y=\"160\" fill=\"#d1fae5\" font-size=\"13\" text-anchor=\"middle\">Espace commun</text>\n    <text x=\"504\" y=\"182\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">projection</text>\n    <text x=\"504\" y=\"202\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">alignement</text>\n    <text x=\"504\" y=\"222\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">vecteurs</text>\n  </g>\n\n  <g id=\"mm-fusion\">\n    <rect x=\"624\" y=\"132\" width=\"172\" height=\"118\" rx=\"10\" fill=\"#1e1b4b\" stroke=\"#818cf8\" stroke-width=\"2\"/>\n    <text x=\"710\" y=\"160\" fill=\"#e0e7ff\" font-size=\"13\" text-anchor=\"middle\">Fusion</text>\n    <text x=\"710\" y=\"182\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">attention croisée</text>\n    <text x=\"710\" y=\"202\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">tokens visuels</text>\n    <text x=\"710\" y=\"222\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">concaténation</text>\n  </g>\n\n  <g id=\"mm-output\">\n    <rect x=\"624\" y=\"272\" width=\"172\" height=\"54\" rx=\"10\" fill=\"#1f1020\" stroke=\"#fb7185\" stroke-width=\"2\"/>\n    <text x=\"710\" y=\"304\" fill=\"#ffe4e6\" font-size=\"13\" text-anchor=\"middle\">Sortie multimodale</text>\n  </g>\n\n  <g stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#mm-arrow)\">\n    <line x1=\"194\" y1=\"115\" x2=\"230\" y2=\"160\"/>\n    <line x1=\"194\" y1=\"191\" x2=\"230\" y2=\"191\"/>\n    <line x1=\"194\" y1=\"267\" x2=\"230\" y2=\"222\"/>\n    <line x1=\"384\" y1=\"191\" x2=\"420\" y2=\"191\"/>\n    <line x1=\"584\" y1=\"191\" x2=\"620\" y2=\"191\"/>\n    <line x1=\"710\" y1=\"250\" x2=\"710\" y2=\"268\"/>\n  </g>\n\n  <text x=\"410\" y=\"348\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">L’alignement est statistique : proximité ne veut pas dire équivalence.</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Encoder chaque modalité",
+            "explanation": "Le texte, l’image et l’audio passent par des encodeurs adaptés, qui produisent des vecteurs de dimensions différentes.",
+            "highlight": [
+              "mm-text",
+              "mm-image",
+              "mm-audio",
+              "mm-encoders"
+            ]
+          },
+          {
+            "title": "2. Aligner dans un espace commun",
+            "explanation": "Une projection amène les vecteurs dans un même espace. L’entraînement rapproche les paires correspondantes, sans garantir une équivalence sémantique parfaite.",
+            "highlight": [
+              "mm-space"
+            ]
+          },
+          {
+            "title": "3. Fusionner et générer",
+            "explanation": "La fusion combine les informations, par attention croisée, tokens visuels ou concaténation, avant la sortie texte, image ou audio.",
+            "highlight": [
+              "mm-fusion",
+              "mm-output"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "À quoi sert un espace de représentations commun ?",
+          "options": [
+            "À garantir que deux contenus proches sont équivalents",
+            "À supprimer le besoin d’encodeurs",
+            "À permettre de comparer et de combiner des modalités différentes"
+          ],
+          "correctIndex": 2,
+          "explanation": "L’espace commun permet de rapprocher et de combiner des vecteurs issus de modalités différentes. La proximité reste une indication statistique, pas une preuve d’équivalence."
+        },
+        {
+          "question": "Que fait un modèle de diffusion pendant l’entraînement ?",
+          "options": [
+            "Il copie une image source",
+            "Il apprend à retirer du bruit ajouté progressivement",
+            "Il classe des images sans les générer"
+          ],
+          "correctIndex": 1,
+          "explanation": "La phase avant ajoute du bruit, la phase inverse apprend à le retirer. À la génération, le modèle part d’un bruit et applique ce processus inverse."
+        },
+        {
+          "question": "Quelle limite faut-il garder en tête avec un modèle multimodal ?",
+          "options": [
+            "Il peut halluciner un détail ou mal lire un petit texte",
+            "Il ne peut traiter qu’une seule langue",
+            "Il ne produit que des images"
+          ],
+          "correctIndex": 0,
+          "explanation": "Une réponse fluide ne garantit pas une perception correcte. Le modèle peut inventer un détail, confondre des objets ou ignorer une relation spatiale."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Modalité",
+          "definition": "Forme de donnée traitée par un modèle : texte, image, audio, vidéo ou action."
+        },
+        {
+          "term": "Encodeur",
+          "definition": "Réseau qui transforme une entrée brute en représentation vectorielle."
+        },
+        {
+          "term": "Espace latent partagé",
+          "definition": "Espace de vecteurs dans lequel plusieurs modalités sont projetées pour être comparées ou combinées."
+        },
+        {
+          "term": "Diffusion",
+          "definition": "Famille de modèles génératifs qui apprennent à débruiter une donnée progressivement."
+        },
+        {
+          "term": "Projection",
+          "definition": "Couche qui adapte la dimension ou l’espace d’une représentation avant une fusion."
+        }
+      ],
+      "example": {
+        "title": "Une image, une question, deux encodeurs",
+        "text": "**Scénario illustratif.** Un utilisateur envoie une photo de meuble et demande si la couleur convient à une pièce. Un encodeur visuel résume l'image, un encodeur de texte traite la question, et un module de fusion combine les deux représentations. Le modèle peut répondre sur la couleur visible, mais pas sur la couleur réelle sous un autre éclairage. Il ne connaît ni les dimensions ni la matière. La réponse doit donc distinguer ce qui est observé de ce qui est supposé."
+      },
+      "exercises": [
+        {
+          "title": "Une couleur observée n’est pas une certitude",
+          "prompt": "Un modèle multimodal décrit la couleur d’un meuble sur une photo et affirme qu’elle conviendra à une pièce. Citez deux limites de perception du module et proposez une question de contrôle destinée à détecter une hallucination.",
+          "solution": "Le modèle observe des pixels sous un éclairage donné : il ne connaît ni la couleur réelle sous une autre lumière, ni la matière, ni les dimensions du meuble. Son alignement image-texte est statistique et peut rapprocher des contenus proches sans les confondre avec la vérité. Il peut aussi halluciner un détail absent, mal lire un petit texte ou ignorer une relation spatiale. Une question de contrôle consiste à demander une information absente de l’image, comme les dimensions ou la marque : s’il répond avec assurance, il invente. La réponse doit distinguer ce qui est observé de ce qui est supposé."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Vaswani et al., Attention Is All You Need, 2017.",
+          "href": "https://arxiv.org/abs/1706.03762"
+        },
+        {
+          "label": "Ho et al., Denoising Diffusion Probabilistic Models, 2020.",
+          "href": "https://arxiv.org/abs/2006.11239"
+        }
+      ]
+    },
+    {
+      "id": "adaptation",
+      "title": "Fine-tuning, LoRA et préférences",
+      "keyTakeaways": [
+        "Le prompt, le RAG et le fine-tuning n’agissent pas sur le même objet.",
+        "Le SFT apprend des réponses par supervision ; la qualité des données compte plus que le volume.",
+        "LoRA gèle la base et apprend deux petites matrices de rang faible.",
+        "DPO optimise directement une politique à partir de paires de réponses préférées et rejetées.",
+        "Un modèle adapté doit être évalué sur la tâche, mais aussi sur les régressions et la sécurité."
+      ],
+      "theory": "### Trois façons d’adapter un modèle\n\nAdapter un modèle pré-entraîné peut vouloir dire trois choses. Le prompt change les instructions ou les exemples sans toucher aux poids. Le RAG ajoute des documents au contexte. Le fine-tuning poursuit l’entraînement sur des exemples et modifie les paramètres. Ces méthodes ne répondent pas aux mêmes besoins : un modèle qui ignore une information récente a besoin d’un accès à cette information, pas nécessairement d’un fine-tuning.\n\nLe fine-tuning supervisé (SFT) apprend au modèle à produire une réponse attendue. Pour un modèle causal, on calcule une perte token par token : à chaque position, le modèle prédit un token et on le compare à la cible. La qualité des données compte plus que la quantité. Des exemples contradictoires, mal formatés ou trop uniformes produisent un modèle qui reproduit le style sans apprendre la tâche. Un jeu de validation distinct est indispensable.\n\n### LoRA : geler la base, apprendre une petite mise à jour\n\nLoRA (Hu et al., 2021) part d’une hypothèse : la mise à jour nécessaire pour adapter un grand modèle peut être décrite par une matrice de rang faible. Plutôt que de modifier librement une matrice $W$, on apprend deux petites matrices $A$ et $B$ dont le produit forme la mise à jour. La matrice d’origine reste gelée. Pour une couche qui calcule $h = Wx$, LoRA ajoute une branche parallèle :\n\n$$h = Wx + \\frac{\\alpha}{r}BAx$$\n\nIci, $A$ a la forme $r \\times k$, $B$ la forme $d \\times r$, et $r$ est le rang. Le produit $BA$ a la même forme que $W$, mais son rang est au plus $r$. Le facteur $\\alpha/r$ ajuste l’échelle. Quand $r$ est petit devant $d$ et $k$, le nombre de paramètres entraînables diminue fortement. À l’inférence, on peut fusionner $W$ et $BA$ pour retrouver une couche unique.\n\nLoRA ne rend pas l’entraînement gratuit : il faut toujours calculer les activations et rétropropager les gradients à travers la base jusqu’aux matrices $A$ et $B$, et choisir le rang, les couches ciblées et le taux d’apprentissage. Il peut se combiner avec une base quantifiée pour réduire la mémoire. Le cours consacré au fine-tuning détaille QLoRA, les variantes et les configurations ; ici, nous retenons le principe.\n\nUne variante fréquente combine LoRA avec une base quantifiée. Les poids de la base sont stockés avec moins de bits, ce qui réduit la mémoire nécessaire, tandis que les adaptateurs restent entraînés dans un format de calcul plus précis. Cette combinaison ne change pas le principe : la base reste majoritairement gelée et l’on apprend une petite mise à jour. Elle ajoute cependant des choix de quantification et de déquantification qui peuvent affecter la qualité. Le cours consacré au fine-tuning détaille ces compromis.\n\n### DPO : apprendre à partir de préférences\n\nLe fine-tuning supervisé apprend « quelle réponse produire ». Les préférences apprennent « quelle réponse est préférée ». La méthode classique passe par un modèle de récompense entraîné sur des comparaisons, puis par un algorithme de renforcement. DPO (Rafailov et al., 2023) propose de simplifier ce montage : on optimise directement la politique à partir de paires (réponse préférée, réponse rejetée), avec un modèle de référence qui limite l’écart.\n\nPosons $r_\\theta(y)$, le logarithme du rapport de probabilités entre la politique et le modèle de référence pour la réponse $y$ conditionnellement à $x$. La perte DPO s’écrit alors :\n\n$$\\mathcal{L} = -\\mathbb{E}\\left[\\log \\sigma\\left(\\beta\\left(r_\\theta(y^+)-r_\\theta(y^-)\\right)\\right)\\right]$$\n\nL’espérance porte sur les paires $(x,y^+,y^-)$. La politique $\\pi_\\theta$ est poussée à augmenter la probabilité de la réponse préférée et à diminuer celle de la réponse rejetée, par rapport au modèle de référence $\\pi_{\\mathrm{ref}}$. Le paramètre $\\beta$ contrôle la force de cette contrainte. DPO ne supprime pas le besoin de données de qualité : des préférences bruitées, ambiguës ou trop étroites produisent un modèle biaisé.\n\n### Choisir et évaluer\n\nL’ordre de décision est souvent le suivant. Commencer par le prompt et, si le problème est documentaire, par le RAG. Passer au SFT si le modèle doit acquérir un format, un style ou une procédure stable. Utiliser LoRA si le budget matériel ou le nombre de variantes impose de ne pas réentraîner tous les poids. Utiliser DPO si l’on dispose de comparaisons humaines fiables et que l’on veut ajuster les préférences. Le full fine-tuning reste utile quand la distribution change profondément, mais il coûte plus cher et produit un nouveau jeu de poids complet.\n\nL’évaluation doit couvrir la tâche, mais aussi les régressions. Un modèle ajusté peut devenir meilleur sur le format et moins bon sur le refus, la sécurité ou les connaissances générales. Il faut un jeu de test tenu à l’écart, des cas adverses et une comparaison avec la base. La perte d’entraînement ne suffit pas : elle mesure l’ajustement aux exemples, pas la qualité en production.",
+      "diagram": {
+        "title": "Trois chemins d’adaptation",
+        "description": "Schéma illustratif : la base peut être adaptée par SFT, par un adaptateur LoRA ou par DPO à partir de préférences, avec un modèle de référence. Aucune mesure n’est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 360\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Modèle de base, SFT, LoRA, paires de préférences, modèle de référence et DPO\">\n  <defs>\n    <marker id=\"ft-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"360\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Geler, adapter, préférer</text>\n  <text x=\"410\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"ft-base\">\n    <rect x=\"24\" y=\"120\" width=\"170\" height=\"92\" rx=\"10\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"109\" y=\"150\" fill=\"#e0f2fe\" font-size=\"13\" text-anchor=\"middle\">Modèle de base</text>\n    <text x=\"109\" y=\"172\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">poids pré-entraînés</text>\n    <text x=\"109\" y=\"192\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">gelé ou ajusté</text>\n  </g>\n\n  <g id=\"ft-sft\">\n    <rect x=\"250\" y=\"84\" width=\"170\" height=\"78\" rx=\"10\" fill=\"#101a10\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"335\" y=\"112\" fill=\"#d1fae5\" font-size=\"13\" text-anchor=\"middle\">SFT</text>\n    <text x=\"335\" y=\"134\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">exemples supervisés</text>\n  </g>\n\n  <g id=\"ft-lora\">\n    <rect x=\"250\" y=\"190\" width=\"170\" height=\"78\" rx=\"10\" fill=\"#111827\" stroke=\"#a78bfa\" stroke-width=\"2\"/>\n    <text x=\"335\" y=\"218\" fill=\"#ede9fe\" font-size=\"13\" text-anchor=\"middle\">LoRA</text>\n    <text x=\"335\" y=\"240\" fill=\"#ddd6fe\" font-size=\"11\" text-anchor=\"middle\">deux matrices de rang r</text>\n  </g>\n\n  <g id=\"ft-pairs\">\n    <rect x=\"250\" y=\"290\" width=\"170\" height=\"54\" rx=\"10\" fill=\"#1f1020\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"335\" y=\"314\" fill=\"#fce7f3\" font-size=\"12\" text-anchor=\"middle\">Paires préférées</text>\n    <text x=\"335\" y=\"332\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">gagnante, perdante</text>\n  </g>\n\n  <g id=\"ft-ref\">\n    <rect x=\"474\" y=\"290\" width=\"160\" height=\"54\" rx=\"10\" fill=\"#1c1408\" stroke=\"#f59e0b\" stroke-width=\"2\"/>\n    <text x=\"554\" y=\"314\" fill=\"#fef3c7\" font-size=\"12\" text-anchor=\"middle\">Modèle de référence</text>\n    <text x=\"554\" y=\"332\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">garde l’écart</text>\n  </g>\n\n  <g id=\"ft-dpo\">\n    <rect x=\"624\" y=\"190\" width=\"172\" height=\"78\" rx=\"10\" fill=\"#1e1b4b\" stroke=\"#818cf8\" stroke-width=\"2\"/>\n    <text x=\"710\" y=\"218\" fill=\"#e0e7ff\" font-size=\"13\" text-anchor=\"middle\">DPO</text>\n    <text x=\"710\" y=\"240\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">politique ajustée</text>\n  </g>\n\n  <g id=\"ft-policy\">\n    <rect x=\"624\" y=\"84\" width=\"172\" height=\"78\" rx=\"10\" fill=\"#1f1020\" stroke=\"#fb7185\" stroke-width=\"2\"/>\n    <text x=\"710\" y=\"112\" fill=\"#ffe4e6\" font-size=\"13\" text-anchor=\"middle\">Politique finale</text>\n    <text x=\"710\" y=\"134\" fill=\"#fecdd3\" font-size=\"11\" text-anchor=\"middle\">à évaluer</text>\n  </g>\n\n  <g stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#ft-arrow)\">\n    <line x1=\"194\" y1=\"150\" x2=\"246\" y2=\"130\"/>\n    <line x1=\"194\" y1=\"180\" x2=\"246\" y2=\"220\"/>\n    <line x1=\"420\" y1=\"123\" x2=\"620\" y2=\"123\"/>\n    <line x1=\"420\" y1=\"229\" x2=\"620\" y2=\"229\"/>\n    <line x1=\"420\" y1=\"317\" x2=\"470\" y2=\"317\"/>\n    <line x1=\"714\" y1=\"290\" x2=\"714\" y2=\"268\"/>\n    <line x1=\"710\" y1=\"190\" x2=\"710\" y2=\"166\"/>\n  </g>\n\n  <text x=\"410\" y=\"352\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">Le choix dépend du besoin, du budget et des données disponibles.</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Partir de la base",
+            "explanation": "Le modèle pré-entraîné fournit les capacités générales. Selon la méthode, ses poids restent gelés ou sont ajustés.",
+            "highlight": [
+              "ft-base"
+            ]
+          },
+          {
+            "title": "2. Superviser ou ajouter LoRA",
+            "explanation": "Le SFT ajuste le modèle sur des exemples. LoRA ajoute seulement deux petites matrices et laisse la base intacte.",
+            "highlight": [
+              "ft-sft",
+              "ft-lora"
+            ]
+          },
+          {
+            "title": "3. Optimiser les préférences",
+            "explanation": "DPO utilise des paires de réponses et un modèle de référence pour ajuster la politique sans entraîner un modèle de récompense séparé.",
+            "highlight": [
+              "ft-pairs",
+              "ft-ref",
+              "ft-dpo",
+              "ft-policy"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Que gèle LoRA pendant l’entraînement ?",
+          "options": [
+            "La matrice de poids d’origine",
+            "Le tokenizer",
+            "Les données d’entraînement"
+          ],
+          "correctIndex": 0,
+          "explanation": "LoRA conserve la matrice d’origine et apprend deux matrices de rang faible dont le produit forme la mise à jour."
+        },
+        {
+          "question": "Quelle est l’idée principale de DPO ?",
+          "options": [
+            "Supprimer tout besoin de données annotées",
+            "Entraîner un modèle de récompense séparé puis appliquer du renforcement",
+            "Optimiser directement la politique à partir de préférences, avec un modèle de référence"
+          ],
+          "correctIndex": 2,
+          "explanation": "DPO reformule l’objectif de préférence pour l’optimiser directement sur la politique. Un modèle de référence limite l’écart, mais des données de qualité restent nécessaires."
+        },
+        {
+          "question": "Pourquoi un jeu de validation distinct est-il nécessaire après un SFT ?",
+          "options": [
+            "Pour augmenter le nombre de paramètres",
+            "Pour vérifier la généralisation au-delà des exemples vus",
+            "Pour supprimer la fonction de perte"
+          ],
+          "correctIndex": 1,
+          "explanation": "La perte d’entraînement mesure l’ajustement aux exemples. Un jeu distinct montre si le modèle généralise ou s’il mémorise."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "SFT",
+          "definition": "Fine-tuning supervisé : entraînement sur des exemples de réponses attendues."
+        },
+        {
+          "term": "LoRA",
+          "definition": "Adaptation par deux matrices de rang faible ajoutées à une base gelée."
+        },
+        {
+          "term": "DPO",
+          "definition": "Optimisation directe d’une politique à partir de paires de réponses préférées et rejetées."
+        },
+        {
+          "term": "Rang",
+          "definition": "Nombre de dimensions indépendantes d’une matrice ; LoRA limite le rang de la mise à jour."
+        },
+        {
+          "term": "Modèle de référence",
+          "definition": "Modèle fixe utilisé pour limiter l’écart de la politique pendant DPO."
+        }
+      ],
+      "example": {
+        "title": "LoRA sur une couche de projection",
+        "text": "**Exemple de calcul.** Une matrice de poids de 4 096 × 4 096 possède environ 16,8 millions de paramètres. Avec LoRA de rang 8, on ajoute deux matrices de 4 096 × 8, soit 65 536 paramètres, sans compter les biais. Le modèle ajuste une correction de rang faible au lieu de modifier toute la matrice. Ce n'est pas une garantie de qualité : le rang, les données et la couche ciblée décident du résultat."
+      },
+      "exercises": [
+        {
+          "title": "Combien de paramètres LoRA",
+          "prompt": "Une couche possède une matrice de poids de 4 096 × 4 096, soit environ 16,8 millions de paramètres. Avec LoRA de rang 8, combien de paramètres les deux matrices A et B ajoutent-elles, et quel rapport cela représente-t-il ? L’entraînement devient-il gratuit pour autant ?",
+          "solution": "A a la forme 8 × 4 096 et B la forme 4 096 × 8, soit 32 768 paramètres chacune, donc 65 536 au total, sans compter les biais. Cela représente environ 0,4 pour cent des 16,8 millions de la matrice d’origine. La base reste gelée et seule cette correction de rang faible est apprise. L’entraînement n’est pas gratuit : il faut toujours calculer les activations et rétropropager les gradients à travers la base jusqu’à A et B, choisir le rang, les couches ciblées et le taux d’apprentissage. La qualité dépend des données et de ces choix."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Hu et al., LoRA : Low-Rank Adaptation of Large Language Models, 2021.",
+          "href": "https://arxiv.org/abs/2106.09685"
+        },
+        {
+          "label": "Rafailov et al., Direct Preference Optimization : Your Language Model is Secretly a Reward Model, 2023.",
+          "href": "https://arxiv.org/abs/2305.18290"
+        }
+      ]
+    },
+    {
+      "id": "agents",
+      "title": "Boucles d’agents et outils",
+      "keyTakeaways": [
+        "Un agent est un programme qui appelle un modèle dans une boucle, pas un modèle qui agit seul.",
+        "Le modèle propose un appel d’outil ; le programme vérifie, exécute et renvoie le résultat.",
+        "L’état et la mémoire sont des choix de conception, limités par la fenêtre de contexte.",
+        "Les conditions d’arrêt et les confirmations humaines doivent être codées dans le programme.",
+        "MCP standardise le branchement des capacités ; les frameworks d’orchestration rendent le flux explicite."
+      ],
+      "theory": "### Un agent est un programme, pas un modèle\n\nUn agent est un programme qui appelle un modèle de langage dans une boucle, exécute des outils et conserve un état. Le modèle ne « décide » pas seul : il produit du texte ou un appel structuré, et le programme décide quoi en faire. Cette distinction est essentielle pour la sécurité. Un modèle peut proposer une action ; il ne l’exécute pas. L’exécution, la validation et les permissions appartiennent au code.\n\nLa boucle comporte généralement quatre temps : observer (assembler le contexte), décider (appeler le modèle), agir (exécuter un outil), puis réinjecter le résultat. Le cours consacré aux boucles agentiques détaille ces étapes, les erreurs et les reprises ; nous en retenons ici la structure et les points de contrôle.\n\n### Le contrat des outils\n\nUn outil est une fonction que le programme expose au modèle. Il a un nom, une description, un schéma d’entrée et, parfois, un schéma de sortie. Le modèle émet une demande d’appel avec des arguments ; le programme vérifie que l’outil existe, que les arguments respectent le schéma et que l’appel est autorisé, puis exécute la fonction. Le résultat revient dans le contexte.\n\nCette séparation permet de brancher des capacités très différentes : recherche documentaire, calcul, lecture de fichier, appel à une API interne. Elle permet aussi de limiter les dégâts. Un outil qui écrit dans un fichier n’a pas besoin d’un accès complet au système ; un outil qui envoie un courriel n’a pas besoin de lire tous les courriels. Le principe du moindre privilège s’applique outil par outil.\n\n### État, mémoire et contexte\n\nLe modèle n’a pas de mémoire entre deux appels. Pour qu’il se souvienne, le programme renvoie l’historique, les résultats d’outils et les notes utiles. Cet état peut être court ou long : la fenêtre de contexte limite ce qui tient dans un appel ; une mémoire externe peut stocker des faits au-delà. Il faut choisir ce qui est résumé, ce qui est conservé et ce qui est oublié.\n\nUne mémoire mal conçue peut nuire. Elle peut conserver une erreur, une instruction injectée ou une donnée personnelle inutile. Elle peut aussi noyer le modèle sous des détails. La mémoire d’un agent est donc un choix de conception, pas un simple tableau qui grandit.\n\n### Contrôler la boucle\n\nUne boucle doit avoir des conditions d’arrêt. Les plus courantes sont un nombre maximal de tours, un budget de tokens ou de temps, et un constat d’absence de progrès. Ces limites doivent être dans le programme, pas seulement dans le prompt : une consigne peut être ignorée, une condition codée s’applique. Il faut aussi prévoir les erreurs d’outil, les réponses invalides et les répétitions.\n\nLes actions sensibles méritent une confirmation humaine. Un agent peut préparer un courriel, calculer un remboursement ou proposer une suppression ; l’envoi, le paiement ou la suppression effective peuvent être soumis à validation. Cette pause réduit le risque d’action irréversible et permet de détecter une injection.\n\n### MCP et les frameworks\n\nLe Model Context Protocol (MCP) standardise la façon dont un hôte expose des outils, des ressources et des prompts à un modèle. La spécification 2025-06-18 décrit les rôles d’hôte, de client et de serveur, et un protocole JSON-RPC. MCP ne remplace pas la logique de l’agent : il uniformise le branchement des capacités. Le cours consacré à MCP détaille l’architecture, les transports et les risques.\n\nLes frameworks d’orchestration proposent une autre brique. LangGraph, par exemple, représente un agent comme un graphe de nœuds et d’arêtes avec un état partagé. La documentation insiste sur l’exécution durable, la reprise après échec et l’intervention humaine. Un graphe rend le flux lisible, mais il ne garantit pas que le modèle choisira la bonne action.\n\n### Un exemple de boucle minimale\n\nLe code de ce module ne fait aucun appel à un modèle. La fonction `politique` tient le rôle de la décision et suit un scénario fixe. Les outils sont de vraies fonctions Python, et la boucle est réelle. L’objectif est de voir le contrôle : un tour pour chercher, un tour pour vérifier, puis l’arrêt.\n\n### Évaluer un agent\n\nUn agent ne se juge pas seulement sur sa phrase finale. Il faut regarder l’état final, les actions effectuées, le nombre de tours, le coût et les erreurs. Une réponse correcte obtenue après une action interdite n’est pas un succès. Une réponse incorrecte peut être due à la politique du modèle, à un outil défaillant ou à un contexte incomplet. Les traces sont donc indispensables.",
+      "diagram": {
+        "title": "La boucle d’un agent et ses points d’arrêt",
+        "description": "Schéma illustratif : le programme observe, appelle le modèle, exécute un outil, réinjecte le résultat et vérifie une condition d’arrêt. Aucune mesure n’est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 300\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Observer, décider, agir, résultat et arrêt dans une boucle d’agent\">\n  <defs>\n    <marker id=\"ag-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"300\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Le programme tient la boucle</text>\n  <text x=\"410\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"ag-observe\">\n    <rect x=\"24\" y=\"100\" width=\"136\" height=\"104\" rx=\"10\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"92\" y=\"128\" fill=\"#e0f2fe\" font-size=\"13\" text-anchor=\"middle\">Observer</text>\n    <text x=\"92\" y=\"150\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">contexte</text>\n    <text x=\"92\" y=\"170\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">historique</text>\n  </g>\n\n  <g id=\"ag-decide\">\n    <rect x=\"180\" y=\"100\" width=\"136\" height=\"104\" rx=\"10\" fill=\"#111827\" stroke=\"#a78bfa\" stroke-width=\"2\"/>\n    <text x=\"248\" y=\"128\" fill=\"#ede9fe\" font-size=\"13\" text-anchor=\"middle\">Décider</text>\n    <text x=\"248\" y=\"150\" fill=\"#ddd6fe\" font-size=\"11\" text-anchor=\"middle\">modèle</text>\n    <text x=\"248\" y=\"170\" fill=\"#c4b5fd\" font-size=\"11\" text-anchor=\"middle\">appel structuré</text>\n  </g>\n\n  <g id=\"ag-act\">\n    <rect x=\"336\" y=\"100\" width=\"136\" height=\"104\" rx=\"10\" fill=\"#101a10\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"404\" y=\"128\" fill=\"#d1fae5\" font-size=\"13\" text-anchor=\"middle\">Agir</text>\n    <text x=\"404\" y=\"150\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">outil</text>\n    <text x=\"404\" y=\"170\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">validation</text>\n  </g>\n\n  <g id=\"ag-result\">\n    <rect x=\"492\" y=\"100\" width=\"136\" height=\"104\" rx=\"10\" fill=\"#1c1408\" stroke=\"#f59e0b\" stroke-width=\"2\"/>\n    <text x=\"560\" y=\"128\" fill=\"#fef3c7\" font-size=\"13\" text-anchor=\"middle\">Résultat</text>\n    <text x=\"560\" y=\"150\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">réinjecté</text>\n    <text x=\"560\" y=\"170\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">dans l’état</text>\n  </g>\n\n  <g id=\"ag-stop\">\n    <rect x=\"648\" y=\"100\" width=\"148\" height=\"104\" rx=\"10\" fill=\"#1f1020\" stroke=\"#fb7185\" stroke-width=\"2\"/>\n    <text x=\"722\" y=\"128\" fill=\"#ffe4e6\" font-size=\"13\" text-anchor=\"middle\">Arrêt</text>\n    <text x=\"722\" y=\"150\" fill=\"#fecdd3\" font-size=\"11\" text-anchor=\"middle\">objectif</text>\n    <text x=\"722\" y=\"170\" fill=\"#fecdd3\" font-size=\"11\" text-anchor=\"middle\">ou limite</text>\n  </g>\n\n  <g stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#ag-arrow)\">\n    <line x1=\"160\" y1=\"152\" x2=\"176\" y2=\"152\"/>\n    <line x1=\"316\" y1=\"152\" x2=\"332\" y2=\"152\"/>\n    <line x1=\"472\" y1=\"152\" x2=\"488\" y2=\"152\"/>\n    <line x1=\"628\" y1=\"152\" x2=\"644\" y2=\"152\"/>\n    <path d=\"M722 204 C 722 246, 92 246, 92 208\" fill=\"none\" stroke-dasharray=\"6 5\"/>\n  </g>\n\n  <text x=\"410\" y=\"258\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">La boucle revient vers l’observation tant qu’une condition d’arrêt n’est pas remplie.</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Observer et décider",
+            "explanation": "Le programme assemble le contexte et appelle le modèle. Le modèle produit une réponse ou une demande d’appel d’outil.",
+            "highlight": [
+              "ag-observe",
+              "ag-decide"
+            ]
+          },
+          {
+            "title": "2. Agir avec un outil",
+            "explanation": "Le programme vérifie l’appel, exécute l’outil autorisé et réinjecte le résultat dans l’état.",
+            "highlight": [
+              "ag-act",
+              "ag-result"
+            ]
+          },
+          {
+            "title": "3. Arrêter ou recommencer",
+            "explanation": "Une condition codée décide de poursuivre ou d’arrêter : objectif atteint, limite de tours, budget ou erreur répétée.",
+            "highlight": [
+              "ag-stop"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "code": "def chercher(question):\n    return {\"statut\": \"ok\", \"document\": \"Le delai de retractation est de quatorze jours.\"}\n\n\ndef verifier(document):\n    return {\"statut\": \"ok\", \"motif\": \"la reponse cite le document\"}\n\n\ntools = {\"chercher\": chercher, \"verifier\": verifier}\n\n\ndef politique(etat):\n    if etat[\"etapes\"] == 0:\n        return (\"chercher\", {\"question\": etat[\"question\"]})\n    if etat[\"etapes\"] == 1:\n        return (\"verifier\", {\"document\": etat[\"document\"]})\n    return None\n\n\netat = {\"question\": \"Quel est le delai de retractation ?\", \"etapes\": 0}\nfor tour in range(4):\n    decision = politique(etat)\n    if decision is None:\n        print(\"fin: objectif atteint\")\n        break\n    nom, arguments = decision\n    resultat = tools[nom](**arguments)\n    etat.update(resultat)\n    etat[\"etapes\"] += 1\n    print(f\"tour {tour + 1}: {nom} -> {resultat['statut']}\")\nelse:\n    print(\"fin: limite de tours atteinte\")",
+        "explanation": "La politique est un scénario fixe, pas un modèle. Dans un agent réel, elle appellerait un modèle et parserait sa réponse. Le programme devrait encore valider le nom de l’outil, les arguments, les permissions et la condition d’arrêt. La sortie affichée est celle du script local, pas celle d’un modèle.",
+        "output": "tour 1: chercher -> ok\ntour 2: verifier -> ok\nfin: objectif atteint",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Qui exécute réellement un outil dans une boucle d’agent ?",
+          "options": [
+            "Le modèle de langage",
+            "Le programme qui entoure le modèle",
+            "Le tokenizer"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le modèle produit une demande d’appel. C’est le programme qui vérifie, exécute et renvoie le résultat."
+        },
+        {
+          "question": "Pourquoi coder un nombre maximal de tours ?",
+          "options": [
+            "Pour éviter une boucle qui ne s’arrête pas",
+            "Pour augmenter la température du modèle",
+            "Pour supprimer les outils"
+          ],
+          "correctIndex": 0,
+          "explanation": "Une consigne dans le prompt peut être ignorée. Une limite dans le programme garantit une borne, même si le modèle continue à proposer des actions."
+        },
+        {
+          "question": "Quel est le rôle de la mémoire d’un agent ?",
+          "options": [
+            "Elle modifie les poids du modèle",
+            "Elle remplace les outils",
+            "Elle conserve un état utile entre les appels"
+          ],
+          "correctIndex": 2,
+          "explanation": "Le modèle n’a pas de mémoire entre deux appels. Le programme décide ce qu’il renvoie : historique, résultats d’outils, résumés ou notes."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Agent",
+          "definition": "Programme qui appelle un modèle dans une boucle, avec des outils et un état."
+        },
+        {
+          "term": "Outil",
+          "definition": "Fonction exposée au modèle, avec un nom, une description et un schéma d’arguments."
+        },
+        {
+          "term": "Boucle agentique",
+          "definition": "Cycle observer, décider, agir et réinjecter le résultat, jusqu’à une condition d’arrêt."
+        },
+        {
+          "term": "État",
+          "definition": "Données conservées par le programme et renvoyées au modèle à chaque tour."
+        },
+        {
+          "term": "Garde-fou",
+          "definition": "Contrôle qui limite les actions d’un agent : permission, validation, confirmation ou budget."
+        }
+      ],
+      "example": {
+        "title": "Une boucle de trois tours",
+        "text": "**Scénario illustratif.** Un agent reçoit une question, appelle un outil de recherche, lit le résultat, puis appelle un calculateur. Chaque tour renvoie l'historique complet au modèle. Si le résultat de recherche contient une instruction adverse, le programme doit la traiter comme une donnée, pas comme une consigne. La boucle s'arrête par une réponse finale, une limite de tours ou une validation humaine. Le modèle ne décide pas seul de l'arrêt."
+      },
+      "exercises": [
+        {
+          "title": "Ce que le programme doit contrôler",
+          "prompt": "Un agent enchaîne une recherche documentaire, puis un calcul, en renvoyant l’historique complet à chaque tour. Indiquez trois contrôles que le programme doit exercer, et expliquez pourquoi ils ne peuvent pas être laissés au modèle.",
+          "solution": "Le programme doit vérifier que l’outil demandé existe, que les arguments respectent le schéma et que l’appel est autorisé : le modèle propose, il n’exécute pas. Il doit fixer les conditions d’arrêt, comme un nombre maximal de tours, un budget de tokens ou de temps et un constat d’absence de progrès : une consigne dans le prompt peut être ignorée ou détournée, une condition codée s’applique. Il doit enfin traiter le résultat de recherche comme une donnée non fiable et demander une confirmation pour une action sensible. Les traces des tours, des appels et des erreurs complètent ce contrôle."
+        }
+      ],
+      "sources": [
+        {
+          "label": "LangGraph, documentation, consultée le 21 octobre 2026.",
+          "href": "https://langchain-ai.github.io/langgraph/"
+        }
+      ]
+    },
+    {
+      "id": "mcp",
+      "title": "MCP et interopérabilité",
+      "keyTakeaways": [
+        "MCP standardise le branchement d’outils, de ressources et de prompts à une application d’IA.",
+        "L’hôte crée les clients, applique les permissions et agrège le contexte ; le serveur expose des capacités.",
+        "Le modèle ne parle pas le protocole : l’hôte traduit et médiatise les appels.",
+        "Le protocole ne peut pas imposer la sécurité ; le consentement et les contrôles restent à l’implémentation.",
+        "MCP se justifie par un besoin d’interopérabilité, pas par la nouveauté."
+      ],
+      "theory": "### Le problème des intégrations\n\nSans protocole commun, chaque application qui veut utiliser un outil doit écrire un adaptateur, et chaque outil doit être intégré dans chaque application. Le nombre de connexions à maintenir croît avec le produit du nombre d’applications et du nombre d’outils. MCP propose un format commun : une application hôte peut brancher plusieurs serveurs sans réécrire chaque intégration. Le cours consacré à MCP détaille les messages et les transports ; nous résumons ici l’architecture et les enjeux.\n\n### Trois rôles\n\nLa spécification 2025-06-18 distingue trois rôles. L’hôte est l’application d’IA que l’utilisateur utilise : un assistant, un éditeur de code, un agent. Il crée et gère des clients, applique les permissions et agrège le contexte. Le client est un connecteur interne à l’hôte, dédié à un serveur. Le serveur expose des capacités : des ressources, des prompts et des outils. Un hôte connecté à trois serveurs contient donc trois clients.\n\nLe modèle de langage ne parle pas directement le protocole. C’est l’hôte qui traduit les capacités du serveur en descriptions d’outils, et qui exécute les appels. Cette médiation est aussi une frontière de sécurité : le serveur ne doit pas recevoir plus de données que nécessaire, et l’utilisateur doit comprendre ce qui est partagé.\n\n### Ce qu’un serveur expose\n\nLa spécification classe les fonctions selon qui décide de les utiliser. Les outils sont choisis par le modèle : ils exécutent une action ou un calcul. Les ressources fournissent des données de contexte, identifiées par une URI ; c’est l’application qui décide de les lire. Les prompts proposent des modèles de consigne paramétrables, souvent déclenchés par l’utilisateur. Les clients peuvent aussi offrir des fonctions au serveur, comme l’échantillonnage, les racines ou la demande d’information à l’utilisateur.\n\nCette séparation évite de tout traiter comme un outil. Une ressource n’est pas une action ; un prompt n’est pas une permission. Un serveur qui expose un outil de suppression de fichier ne devrait pas l’exposer avec les mêmes droits qu’un outil de lecture.\n\n### Transports et autorisation\n\nLa spécification définit deux transports : stdio, où le serveur est un sous-processus lancé par le client, et Streamable HTTP, pour les serveurs distants. Les messages restent du JSON-RPC. Les serveurs distants peuvent nécessiter une autorisation, généralement OAuth, pour savoir qui parle et ce qui est permis. Un serveur local hérite souvent des droits du processus qui le lance.\n\nLe transport ne règle pas la sécurité. Un serveur stdio peut lire des fichiers locaux ; un serveur HTTP peut être compromis ou mal configuré. Il faut vérifier l’origine du serveur, limiter ses permissions et journaliser les appels.\n\nLa négociation de capacités complète ce tableau. Au début d’une connexion, le client et le serveur échangent la version du protocole et les fonctions qu’ils prennent en charge. Un client ne doit pas supposer qu’un serveur expose tous les outils ou toutes les ressources ; il doit lire ce que le serveur déclare. Cette négociation permet de faire évoluer le protocole, mais elle crée aussi des incompatibilités de version. Épingler les versions et tester les combinaisons fait partie d’un déploiement sérieux.\n\n### Les principes de sécurité\n\nLa spécification énonce quatre principes : consentement et contrôle de l’utilisateur, protection des données, sûreté des outils, et contrôle de l’échantillonnage. Elle précise aussi que le protocole ne peut pas les imposer à lui seul : les implémentations doivent prévoir les consentements, les contrôles d’accès et la documentation.\n\nLes descriptions d’outils doivent être traitées comme non fiables, surtout si le serveur n’est pas de confiance. Un outil peut mentir sur ce qu’il fait, ou changer de définition après approbation. Les attaques par injection de prompt peuvent passer par une ressource, un résultat d’outil ou une description. Le cours consacré à MCP détaille ces risques et les mitigations.\n\n### Quand utiliser MCP\n\nMCP est utile quand plusieurs applications doivent brancher les mêmes capacités, ou quand un écosystème de serveurs existe déjà. Pour un petit script qui appelle deux fonctions locales, une bibliothèque d’outils suffit souvent. Le protocole ajoute de la configuration, des versions et une surface de sécurité. La décision doit se prendre sur le besoin d’interopérabilité, pas sur la nouveauté.\n\nUn déploiement MCP demande aussi une gouvernance : inventaire des serveurs, versions épinglées, permissions minimales, revue des descriptions, supervision des appels. Sans cela, le protocole commun devient un point d’entrée commun.",
+      "diagram": {
+        "title": "Hôte, clients et serveurs MCP",
+        "description": "Schéma illustratif : un hôte contient plusieurs clients, chacun relié à un serveur. Les serveurs exposent des ressources, des prompts et des outils. Aucune mesure n’est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 360\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Hôte, clients, serveurs, ressources, prompts et outils\">\n  <defs>\n    <marker id=\"mc-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"360\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Un hôte, plusieurs serveurs</text>\n  <text x=\"410\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"mc-host\">\n    <rect x=\"24\" y=\"110\" width=\"180\" height=\"132\" rx=\"10\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"114\" y=\"140\" fill=\"#e0f2fe\" font-size=\"13\" text-anchor=\"middle\">Hôte</text>\n    <text x=\"114\" y=\"162\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">assistant, éditeur</text>\n    <text x=\"114\" y=\"182\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">permissions</text>\n    <text x=\"114\" y=\"202\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">contexte agrégé</text>\n  </g>\n\n  <g id=\"mc-clients\">\n    <rect x=\"244\" y=\"110\" width=\"160\" height=\"132\" rx=\"10\" fill=\"#111827\" stroke=\"#a78bfa\" stroke-width=\"2\"/>\n    <text x=\"324\" y=\"140\" fill=\"#ede9fe\" font-size=\"13\" text-anchor=\"middle\">Clients</text>\n    <text x=\"324\" y=\"162\" fill=\"#ddd6fe\" font-size=\"11\" text-anchor=\"middle\">un par serveur</text>\n    <text x=\"324\" y=\"182\" fill=\"#ddd6fe\" font-size=\"11\" text-anchor=\"middle\">JSON-RPC</text>\n    <text x=\"324\" y=\"202\" fill=\"#c4b5fd\" font-size=\"11\" text-anchor=\"middle\">capacités</text>\n  </g>\n\n  <g id=\"mc-servers\">\n    <rect x=\"444\" y=\"80\" width=\"170\" height=\"70\" rx=\"10\" fill=\"#101a10\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"529\" y=\"108\" fill=\"#d1fae5\" font-size=\"12\" text-anchor=\"middle\">Serveur fichiers</text>\n    <text x=\"529\" y=\"130\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">lecture, écriture</text>\n\n    <rect x=\"444\" y=\"164\" width=\"170\" height=\"70\" rx=\"10\" fill=\"#1c1408\" stroke=\"#f59e0b\" stroke-width=\"2\"/>\n    <text x=\"529\" y=\"192\" fill=\"#fef3c7\" font-size=\"12\" text-anchor=\"middle\">Serveur base</text>\n    <text x=\"529\" y=\"214\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">requêtes</text>\n\n    <rect x=\"444\" y=\"248\" width=\"170\" height=\"70\" rx=\"10\" fill=\"#1f1020\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"529\" y=\"276\" fill=\"#fce7f3\" font-size=\"12\" text-anchor=\"middle\">Serveur API</text>\n    <text x=\"529\" y=\"298\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">actions distantes</text>\n  </g>\n\n  <g id=\"mc-features\">\n    <rect x=\"654\" y=\"110\" width=\"142\" height=\"132\" rx=\"10\" fill=\"#1e1b4b\" stroke=\"#818cf8\" stroke-width=\"2\"/>\n    <text x=\"725\" y=\"140\" fill=\"#e0e7ff\" font-size=\"12\" text-anchor=\"middle\">Capacités</text>\n    <text x=\"725\" y=\"162\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">ressources</text>\n    <text x=\"725\" y=\"182\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">prompts</text>\n    <text x=\"725\" y=\"202\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">outils</text>\n  </g>\n\n  <g stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#mc-arrow)\">\n    <line x1=\"204\" y1=\"176\" x2=\"240\" y2=\"176\"/>\n    <line x1=\"404\" y1=\"176\" x2=\"440\" y2=\"130\"/>\n    <line x1=\"404\" y1=\"190\" x2=\"440\" y2=\"196\"/>\n    <line x1=\"404\" y1=\"210\" x2=\"440\" y2=\"270\"/>\n    <line x1=\"614\" y1=\"176\" x2=\"650\" y2=\"176\"/>\n  </g>\n\n  <text x=\"410\" y=\"348\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">Le modèle ne parle pas le protocole : l’hôte médiatise les appels et les permissions.</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. L’hôte crée les clients",
+            "explanation": "L’application d’IA ouvre un client par serveur, applique ses règles de consentement et agrège le contexte.",
+            "highlight": [
+              "mc-host",
+              "mc-clients"
+            ]
+          },
+          {
+            "title": "2. Les serveurs exposent des capacités",
+            "explanation": "Chaque serveur décrit les ressources, prompts et outils qu’il propose. Le client négocie les capacités avec lui.",
+            "highlight": [
+              "mc-servers",
+              "mc-features"
+            ]
+          },
+          {
+            "title": "3. L’hôte traduit et contrôle",
+            "explanation": "L’hôte présente les outils au modèle, vérifie les appels et renvoie les résultats. Le protocole ne remplace pas ces contrôles.",
+            "highlight": [
+              "mc-host",
+              "mc-clients",
+              "mc-features"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Quel rôle joue l’hôte MCP ?",
+          "options": [
+            "Il expose directement ses fichiers au modèle sans contrôle",
+            "Il remplace le serveur par un tokenizer",
+            "Il crée les clients, applique les permissions et agrège le contexte"
+          ],
+          "correctIndex": 2,
+          "explanation": "L’hôte est l’application d’IA. Il gère les clients, les consentements, les permissions et l’intégration du contexte."
+        },
+        {
+          "question": "Que peut exposer un serveur MCP ?",
+          "options": [
+            "Des ressources, des prompts et des outils",
+            "Uniquement des outils",
+            "Uniquement des modèles de langage"
+          ],
+          "correctIndex": 0,
+          "explanation": "La spécification distingue les ressources, les prompts et les outils, selon qui décide de les utiliser."
+        },
+        {
+          "question": "Qui doit mettre en œuvre les principes de sécurité de MCP ?",
+          "options": [
+            "Le protocole seul",
+            "Les implémentations, avec consentement et contrôles d’accès",
+            "Le modèle de langage seul"
+          ],
+          "correctIndex": 1,
+          "explanation": "La spécification précise que le protocole ne peut pas imposer ces principes. Les hôtes et les serveurs doivent prévoir les consentements, les permissions et la documentation."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "MCP",
+          "definition": "Model Context Protocol : protocole d’intégration d’outils, de ressources et de prompts à une application d’IA."
+        },
+        {
+          "term": "Hôte",
+          "definition": "Application d’IA qui crée les clients, applique les permissions et agrège le contexte."
+        },
+        {
+          "term": "Client",
+          "definition": "Connecteur interne à l’hôte, dédié à un seul serveur MCP."
+        },
+        {
+          "term": "Serveur",
+          "definition": "Programme qui expose des ressources, des prompts et des outils à un client MCP."
+        },
+        {
+          "term": "JSON-RPC",
+          "definition": "Format de messages d’appel à distance utilisé par MCP."
+        }
+      ],
+      "example": {
+        "title": "Trois outils exposés par un serveur",
+        "text": "**Scénario illustratif.** Un serveur MCP expose un outil de lecture de ticket, un outil de calcul de remboursement et une ressource de politique interne. Le client découvre les outils, demande une autorisation, puis appelle celui qui convient. Le serveur ne doit pas supposer que l'outil est autorisé parce qu'il est décrit : l'application vérifie les droits. La compatibilité du protocole ne remplace pas la validation des actions."
+      },
+      "exercises": [
+        {
+          "title": "Trois serveurs, trois clients",
+          "prompt": "Un hôte MCP se connecte à trois serveurs. Combien de clients contient-il, et pourquoi le modèle de langage ne parle-t-il pas directement le protocole ? Quelles conséquences cela a-t-il pour les permissions ?",
+          "solution": "L’hôte crée un client par serveur, donc trois clients. Le modèle ne parle pas JSON-RPC : l’hôte traduit les capacités du serveur en descriptions d’outils, transmet les appels et agrège le contexte. Cette médiation est aussi une frontière de sécurité : le serveur ne doit pas recevoir plus de données que nécessaire, et l’utilisateur doit comprendre ce qui est partagé. Le protocole ne peut pas imposer à lui seul le consentement, la protection des données ou la sûreté des outils ; ces contrôles restent à l’implémentation. Il faut donc limiter les permissions par serveur, revoir les descriptions d’outils et épingler les versions."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Model Context Protocol, spécification 2025-06-18, consultée le 21 octobre 2026.",
+          "href": "https://modelcontextprotocol.io/specification/2025-06-18"
+        }
+      ]
+    },
+    {
+      "id": "multi-agents",
+      "title": "Systèmes multi-agents",
+      "keyTakeaways": [
+        "Plusieurs agents se justifient par des rôles, des contextes ou des permissions différents.",
+        "Les topologies varient : orchestrateur, pipeline, débat ou critique.",
+        "Un état partagé facilite la convergence mais crée des conflits d’écriture.",
+        "La coordination doit borner la délégation, le budget et les conditions d’arrêt.",
+        "Sans traçabilité, un système multi-agents ne peut être ni débogué ni évalué."
+      ],
+      "theory": "### Pourquoi plusieurs agents\n\nUn agent unique peut suffire pour une tâche courte avec quelques outils. Un système multi-agents devient intéressant quand les rôles sont réellement différents : un agent qui cherche, un agent qui vérifie, un agent qui rédige, un agent qui exécute. La séparation peut isoler les contextes, limiter les permissions et permettre de travailler en parallèle. Elle ajoute aussi de la coordination, des messages et des coûts.\n\nIl ne faut pas confondre « plusieurs agents » avec « plusieurs modèles ». Plusieurs agents peuvent utiliser le même modèle, ou des modèles différents. Ce qui les distingue, c’est leur rôle, leur état, leurs outils et leur politique d’arrêt.\n\n### Des topologies variées\n\nLa topologie la plus simple est l’orchestrateur avec des sous-agents. L’orchestrateur décompose la tâche, délègue des sous-tâches, récupère les résultats et décide de la suite. Une autre topologie est le pipeline : un agent prépare, un autre transforme, un troisième vérifie. On trouve aussi des débats ou des critiques : un agent produit, un autre cherche les erreurs, un troisième arbitre.\n\nLangGraph représente ces flux comme un graphe : des nœuds exécutent des étapes, des arêtes définissent les transitions, et un état partagé circule. La documentation met en avant la reprise après échec, l’intervention humaine et le mélange d’étapes déterministes et d’étapes pilotées par le modèle. Le graphe ne dit pas quel agent est le meilleur ; il rend le flux explicite.\n\n### État partagé ou messages\n\nDeux styles de coordination coexistent. Dans le style à état partagé, les agents lisent et écrivent dans un même objet : une liste de tâches, un document, une base de faits. Dans le style à messages, les agents s’envoient des demandes et des réponses. L’état partagé facilite la convergence, mais il crée des conflits d’écriture et des dépendances. Les messages isolent mieux les contextes, mais peuvent perdre de l’information ou dupliquer des efforts.\n\nLe choix dépend de la tâche. Une chaîne de vérification documentaire se prête bien à un état partagé ; une exploration parallèle se prête mieux à des messages et à une fusion finale. Dans les deux cas, il faut définir qui a le droit d’écrire, comment résoudre un désaccord et quand arrêter.\n\n### Coordination et arrêt\n\nUn système multi-agents doit éviter trois pièges : la duplication, la boucle de délégation et la propagation d’erreur. La duplication survient quand deux agents font la même chose sans le savoir. La boucle survient quand un agent délègue à un autre qui lui rend la tâche. La propagation survient quand un résultat faux est accepté par l’agent suivant sans vérification.\n\nLes parades sont organisationnelles et techniques : un plan explicite, des rôles bornés, un budget global, un nombre maximal de délégations, des points de contrôle et une trace des décisions. L’arrêt doit être décidé par le programme, pas seulement par le prompt. Un agent qui « pense avoir fini » peut se tromper.\n\n### Coûts et observabilité\n\nChaque agent peut appeler un modèle plusieurs fois, et chaque appel coûte des tokens et de la latence. Un système à plusieurs agents multiplie donc les appels, les outils et les échanges. Il faut mesurer le coût par tâche, le nombre de tours et le temps passé, puis comparer avec une solution plus simple. Le cours consacré aux boucles agentiques donne les formules de coût d’une boucle ; ici, retenez que la coordination n’est pas gratuite.\n\nL’observabilité est la condition pour comprendre ce qui se passe. Il faut tracer les entrées, les sorties, les appels d’outils, les erreurs et les transitions. Les tutoriels PyTorch montrent comment profiler une application pour identifier les goulets d’étranglement ; un système multi-agents a besoin du même esprit d’instrumentation, appliqué aux appels de modèles et aux messages. Sans traces, on ne peut ni déboguer ni évaluer.\n\n### Sécurité\n\nLa surface d’attaque s’étend avec le nombre d’agents et d’outils. Un agent compromis peut envoyer une instruction à un autre agent, qui la traite comme une donnée fiable. Une ressource lue par un agent peut contenir une injection indirecte. Un outil trop permissif peut être utilisé par un agent qui n’aurait pas dû y accéder.\n\nLes principes restent les mêmes : moindre privilège par agent, validation des messages, séparation des rôles, confirmation humaine pour les actions irréversibles et journalisation. Il faut aussi décider quels agents peuvent parler à quels autres. Un graphe de communication explicite vaut mieux qu’un bus de messages ouvert à tous.\n\n### Évaluer et savoir s’en passer\n\nL’évaluation doit porter sur l’état final, la qualité de la trajectoire, le coût et la sécurité. Un système qui atteint le bon résultat en contournant une permission n’est pas un succès. Un système qui réussit sur dix exemples soigneusement choisis n’est pas validé. Il faut des tâches réalistes, des cas d’échec et une revue humaine.\n\nEnfin, il faut savoir renoncer. Si un agent unique avec trois outils fait le travail, un système multi-agents ajoute de la complexité sans bénéfice démontré. La question n’est pas « combien d’agents puis-je brancher ? » mais « quel rôle exige un contexte, des permissions ou un rythme différents ? ». Sans réponse claire, la solution simple est souvent la meilleure.",
+      "diagram": {
+        "title": "Orchestrateur, sous-agents et état partagé",
+        "description": "Schéma illustratif : un orchestrateur délègue à deux sous-agents, un état partagé circule, puis un critique vérifie avant la sortie. Aucune mesure n’est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 380\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Orchestrateur, sous-agents, état partagé, critique et résultat final\">\n  <defs>\n    <marker id=\"ma-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"380\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Déléguer, partager, vérifier</text>\n  <text x=\"410\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"ma-orch\">\n    <rect x=\"310\" y=\"82\" width=\"200\" height=\"76\" rx=\"10\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"410\" y=\"110\" fill=\"#e0f2fe\" font-size=\"13\" text-anchor=\"middle\">Orchestrateur</text>\n    <text x=\"410\" y=\"132\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">décompose, délègue, arbitre</text>\n  </g>\n\n  <g id=\"ma-workers\">\n    <rect x=\"80\" y=\"204\" width=\"200\" height=\"76\" rx=\"10\" fill=\"#101a10\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"180\" y=\"232\" fill=\"#d1fae5\" font-size=\"13\" text-anchor=\"middle\">Sous-agent A</text>\n    <text x=\"180\" y=\"254\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">recherche, outils</text>\n\n    <rect x=\"540\" y=\"204\" width=\"200\" height=\"76\" rx=\"10\" fill=\"#1c1408\" stroke=\"#f59e0b\" stroke-width=\"2\"/>\n    <text x=\"640\" y=\"232\" fill=\"#fef3c7\" font-size=\"13\" text-anchor=\"middle\">Sous-agent B</text>\n    <text x=\"640\" y=\"254\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">rédaction, calcul</text>\n  </g>\n\n  <g id=\"ma-state\">\n    <rect x=\"310\" y=\"204\" width=\"200\" height=\"76\" rx=\"10\" fill=\"#111827\" stroke=\"#a78bfa\" stroke-width=\"2\"/>\n    <text x=\"410\" y=\"232\" fill=\"#ede9fe\" font-size=\"13\" text-anchor=\"middle\">État partagé</text>\n    <text x=\"410\" y=\"254\" fill=\"#ddd6fe\" font-size=\"11\" text-anchor=\"middle\">tâches, faits, décisions</text>\n  </g>\n\n  <g id=\"ma-critic\">\n    <rect x=\"310\" y=\"300\" width=\"200\" height=\"56\" rx=\"10\" fill=\"#1f1020\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"410\" y=\"324\" fill=\"#fce7f3\" font-size=\"13\" text-anchor=\"middle\">Critique</text>\n    <text x=\"410\" y=\"344\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">vérifie, signale les erreurs</text>\n  </g>\n\n  <g id=\"ma-final\">\n    <rect x=\"612\" y=\"300\" width=\"184\" height=\"56\" rx=\"10\" fill=\"#1e1b4b\" stroke=\"#818cf8\" stroke-width=\"2\"/>\n    <text x=\"704\" y=\"324\" fill=\"#e0e7ff\" font-size=\"13\" text-anchor=\"middle\">Résultat final</text>\n    <text x=\"704\" y=\"344\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">à valider</text>\n  </g>\n\n  <g stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#ma-arrow)\">\n    <line x1=\"330\" y1=\"158\" x2=\"220\" y2=\"200\"/>\n    <line x1=\"490\" y1=\"158\" x2=\"600\" y2=\"200\"/>\n    <line x1=\"280\" y1=\"242\" x2=\"306\" y2=\"242\"/>\n    <line x1=\"540\" y1=\"242\" x2=\"514\" y2=\"242\"/>\n    <line x1=\"410\" y1=\"280\" x2=\"410\" y2=\"296\"/>\n    <line x1=\"510\" y1=\"328\" x2=\"608\" y2=\"328\"/>\n  </g>\n\n  <text x=\"410\" y=\"372\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">Sans trace des messages et des écritures, la coordination reste opaque.</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Décomposer et déléguer",
+            "explanation": "L’orchestrateur découpe la tâche et confie des sous-tâches à des agents dont les rôles et les outils diffèrent.",
+            "highlight": [
+              "ma-orch",
+              "ma-workers"
+            ]
+          },
+          {
+            "title": "2. Partager l’état",
+            "explanation": "Les agents lisent et écrivent dans un état commun, ou s’échangent des messages. Il faut définir les droits d’écriture et les conflits.",
+            "highlight": [
+              "ma-state"
+            ]
+          },
+          {
+            "title": "3. Vérifier et conclure",
+            "explanation": "Un critique contrôle le résultat avant la sortie. Le programme borne les délégations et décide de l’arrêt.",
+            "highlight": [
+              "ma-critic",
+              "ma-final"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Quand un système multi-agents se justifie-t-il ?",
+          "options": [
+            "Quand des rôles, des contextes ou des permissions doivent être séparés",
+            "Uniquement quand on utilise plusieurs modèles différents",
+            "Toujours, car il est plus rapide"
+          ],
+          "correctIndex": 0,
+          "explanation": "La séparation doit répondre à un besoin réel. Sinon, un agent unique avec quelques outils est plus simple à contrôler et à évaluer."
+        },
+        {
+          "question": "Quel risque crée un état partagé ?",
+          "options": [
+            "Il supprime les outils",
+            "Il peut provoquer des conflits d’écriture et des dépendances",
+            "Il empêche toute trace"
+          ],
+          "correctIndex": 1,
+          "explanation": "Un état partagé facilite la convergence, mais plusieurs agents peuvent écrire au même endroit ou dépendre d’une valeur modifiée par un autre."
+        },
+        {
+          "question": "Pourquoi la traçabilité est-elle indispensable ?",
+          "options": [
+            "Pour augmenter le nombre de tokens",
+            "Pour remplacer les conditions d’arrêt",
+            "Pour comprendre les décisions, les erreurs et les coûts"
+          ],
+          "correctIndex": 2,
+          "explanation": "Un système multi-agents est difficile à déboguer sans traces des messages, des appels d’outils et des transitions. La trace permet aussi d’évaluer la trajectoire, pas seulement la réponse finale."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Orchestrateur",
+          "definition": "Agent ou programme qui décompose une tâche, délègue et agrège les résultats."
+        },
+        {
+          "term": "Sous-agent",
+          "definition": "Agent chargé d’une sous-tâche, avec son contexte, ses outils et sa politique."
+        },
+        {
+          "term": "État partagé",
+          "definition": "Objet commun que plusieurs agents lisent et modifient."
+        },
+        {
+          "term": "Délégation",
+          "definition": "Transfert d’une sous-tâche à un autre agent, avec un périmètre et des outils définis."
+        },
+        {
+          "term": "Traçabilité",
+          "definition": "Capacité à retrouver les entrées, sorties, appels et transitions d’un système."
+        }
+      ],
+      "example": {
+        "title": "Un orchestrateur et deux sous-agents",
+        "text": "**Scénario illustratif.** Un orchestrateur confie une recherche à un sous-agent et un calcul à un autre. Chaque sous-agent possède son propre contexte et ses propres outils. Seules les synthèses remontent. Si un sous-agent résume mal, l'orchestrateur ne le voit pas. Il faut conserver les références et prévoir une relecture pour les décisions importantes. Le parallélisme réduit la latence, mais augmente le coût et la coordination."
+      },
+      "exercises": [
+        {
+          "title": "Quand un orchestrateur se justifie",
+          "prompt": "Une tâche de recherche et de calcul est confiée à un orchestrateur et deux sous-agents. Dans quels cas ce découpage se justifie-t-il, et quels trois pièges de coordination le module demande-t-il de surveiller ?",
+          "solution": "Le découpage se justifie si les rôles diffèrent réellement : contextes séparés, permissions distinctes, outils différents ou travail en parallèle. Il ajoute de la coordination, des messages et des coûts, donc un agent unique avec trois outils peut suffire. Trois pièges sont à surveiller : la duplication, quand deux agents font la même chose ; la boucle de délégation, quand un agent rend la tâche à celui qui la lui a confiée ; la propagation d’erreur, quand un résultat faux est accepté sans vérification. Un plan explicite, un budget global, un nombre maximal de délégations et des traces bornent ces risques."
+        }
+      ],
+      "sources": [
+        {
+          "label": "LangGraph, documentation, consultée le 21 octobre 2026.",
+          "href": "https://langchain-ai.github.io/langgraph/"
+        },
+        {
+          "label": "Model Context Protocol, spécification 2025-06-18, consultée le 21 octobre 2026.",
+          "href": "https://modelcontextprotocol.io/specification/2025-06-18"
+        }
+      ]
+    },
+    {
+      "id": "choisir-architecture",
+      "title": "Choisir une architecture multimodale",
+      "keyTakeaways": [
+        "Un système multimodal se choisit sur la tâche, les modalités, les données et le coût, pas sur le nombre de paramètres.",
+        "Les encodeurs spécialisés et les modèles génératifs ne rendent pas les mêmes services : compréhension, génération ou dialogue.",
+        "L’alignement image-texte dépend des paires vues à l’entraînement et du domaine ; il ne garantit pas la vérité visuelle.",
+        "Un pipeline de production sépare l’ingestion, le prétraitement, le modèle et la vérification.",
+        "Le coût complet inclut les tokens visuels, la latence, le stockage et la relecture."
+      ],
+      "theory": "### Panorama des approches\n\nUn système multimodal traite au moins deux modalités, par exemple du texte et des images, du texte et de l'audio, ou plusieurs flux à la fois. Il n'existe pas une architecture unique. Certains systèmes alignent une image et un texte dans un espace commun pour la recherche ou la classification. D'autres utilisent un encodeur visuel et un modèle de langage pour répondre à une question sur une image. D'autres encore génèrent une image à partir d'un texte. Ces fonctions ne se comparent pas sur la même échelle.\n\nLa première distinction est compréhension contre génération. Un modèle de compréhension transforme une entrée multimodale en représentation ou en réponse textuelle. Un modèle de génération produit une image, un son ou une vidéo. Un modèle de dialogue combine les deux dans une conversation. Choisir un modèle de génération pour classer des images serait un détour coûteux ; choisir un classifieur pour rédiger une description serait insuffisant.\n\nLa deuxième distinction est l'alignement. Les modèles contrastifs apprennent à rapprocher les représentations de paires image-texte compatibles et à éloigner les paires incompatibles. Ils sont utiles pour la recherche, le zéro-shot et le tri. Ils ne garantissent pas que tous les détails de l'image sont compris. Une image peut être proche d'une légende sans que le modèle sache lire un petit texte ou compter des objets.\n\n### Encodeurs, décodeurs et fusion\n\nUn encodeur visuel transforme l'image en une grille de vecteurs. Un encodeur de texte transforme les tokens en vecteurs. La fusion peut être précoce, en concaténant les représentations avant un modèle commun, ou tardive, en combinant les scores de deux encodeurs. La fusion par attention croisée permet au texte de sélectionner les régions visuelles pertinentes. Chaque choix a un coût et des limites.\n\nLes modèles à tokens visuels projettent des patchs d'image dans l'espace du modèle de langage. Le texte et l'image deviennent une séquence de jetons, et le modèle génère la réponse. Cette approche est flexible, mais elle consomme beaucoup de tokens pour une image haute résolution. Réduire la résolution ou le nombre de patchs diminue le coût et peut faire perdre des détails.\n\n### Données et alignement\n\nLes paires image-texte ne sont pas neutres. Une légende décrit ce que l'annotateur a vu, pas toute l'image. Un modèle entraîné sur des photographies naturelles peut mal fonctionner sur des schémas, des radiographies ou des captures d'écran. Il faut vérifier le domaine, la langue, la résolution et la qualité des légendes.\n\nL'alignement ne garantit pas la vérité. Une image générée peut être proche d'une légende tout en étant fausse. Un modèle peut décrire une scène plausible sans avoir vu le détail demandé. Pour une décision importante, il faut une vérification humaine ou une source externe, pas seulement un score de similarité.\n\n### Pipeline de production\n\nUn pipeline lisible sépare quatre étapes. L'ingestion reçoit l'image, le texte ou l'audio et vérifie le format. Le prétraitement normalise la résolution, le canal et la durée. Le modèle produit une représentation ou une réponse. La vérification contrôle le format, les sources et les cas incertains.\n\nLe stockage des images et des embeddings a un coût. Une image haute résolution peut être réduite pour l'index, mais conservée pour la vérification. Les embeddings doivent être recalculés quand le modèle change. Les journaux doivent éviter de conserver des données sensibles sans durée ni contrôle d'accès.\n\n### Coût et latence\n\nLes tokens visuels pèsent dans la facture. Une image découpée en nombreux patchs coûte plus qu'une image réduite. La latence dépend de l'encodeur, du modèle de langage et de la longueur de la réponse. Un système qui traite des images en lot peut privilégier le débit ; un assistant interactif privilégie la première réponse.\n\nLe coût complet inclut l'inférence, le stockage, la bande passante, la relecture et la maintenance. Un modèle plus petit peut suffire pour une classification ; un modèle plus grand peut être nécessaire pour une réponse détaillée. Il faut mesurer sur les images réelles et les questions réelles.\n\n### Choisir selon la tâche\n\nPour une recherche d'images, un modèle contrastif et un index vectoriel suffisent souvent. Pour une réponse sur une image, un encodeur visuel associé à un modèle de langage est plus direct. Pour générer une image, un modèle de diffusion ou de flux est adapté. Pour un assistant vocal, la chaîne audio, texte et modèle de langage doit être évaluée de bout en bout.\n\nLa question utile n'est pas « quel est le meilleur modèle multimodal ? » mais « quelle modalité, quelle sortie et quelle vérification sont nécessaires ? ». Un système qui répond bien à une question simple peut échouer sur une question qui demande de compter, de lire ou de comparer plusieurs images.\n\n> **Repère.** Un modèle multimodal ne voit pas le monde : il calcule des représentations à partir de données. La qualité dépend de la tâche, du domaine et de la vérification.",
+      "diagram": {
+        "title": "Choisir selon la tâche multimodale",
+        "description": "Schéma illustratif : recherche, réponse sur image, génération et dialogue ne demandent pas la même architecture.",
+        "svg": "<svg viewBox=\"0 0 900 390\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Schéma illustratif : choix d'une architecture multimodale\">\n  <rect width=\"900\" height=\"390\" rx=\"16\" fill=\"#0f172a\" />\n  <text x=\"450\" y=\"32\" fill=\"#7dd3fc\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"16\" text-anchor=\"middle\">La tâche avant le modèle</text>\n  <g id=\"mm-search\">\n    <rect x=\"30\" y=\"62\" width=\"200\" height=\"120\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" stroke-width=\"1.4\" />\n    <text x=\"130\" y=\"90\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Recherche</text>\n    <text x=\"130\" y=\"116\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">image et texte</text>\n    <text x=\"130\" y=\"136\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">espace commun</text>\n    <text x=\"130\" y=\"158\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">contrastif, index</text>\n  </g>\n  <g id=\"mm-answer\">\n    <rect x=\"245\" y=\"62\" width=\"200\" height=\"120\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#34d399\" stroke-width=\"1.4\" />\n    <text x=\"345\" y=\"90\" fill=\"#a7f3d0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Réponse sur image</text>\n    <text x=\"345\" y=\"116\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">encodeur visuel</text>\n    <text x=\"345\" y=\"136\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">modèle de langage</text>\n    <text x=\"345\" y=\"158\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">tokens visuels</text>\n  </g>\n  <g id=\"mm-generate\">\n    <rect x=\"460\" y=\"62\" width=\"200\" height=\"120\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#a78bfa\" stroke-width=\"1.4\" />\n    <text x=\"560\" y=\"90\" fill=\"#ede9fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Génération</text>\n    <text x=\"560\" y=\"116\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">diffusion ou flux</text>\n    <text x=\"560\" y=\"136\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">conditionnement</text>\n    <text x=\"560\" y=\"158\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">texte, image, audio</text>\n  </g>\n  <g id=\"mm-dialogue\">\n    <rect x=\"675\" y=\"62\" width=\"190\" height=\"120\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#fbbf24\" stroke-width=\"1.4\" />\n    <text x=\"770\" y=\"90\" fill=\"#fde68a\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Dialogue</text>\n    <text x=\"770\" y=\"116\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">plusieurs tours</text>\n    <text x=\"770\" y=\"136\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">mémoire et outils</text>\n    <text x=\"770\" y=\"158\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">latence et coût</text>\n  </g>\n  <g id=\"mm-check\">\n    <rect x=\"85\" y=\"230\" width=\"730\" height=\"100\" rx=\"10\" fill=\"#0d1f2d\" stroke=\"#38bdf8\" stroke-width=\"1.4\" />\n    <text x=\"450\" y=\"258\" fill=\"#bae6fd\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Vérification</text>\n    <text x=\"450\" y=\"284\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">domaine, résolution, sources, cas incertains</text>\n    <text x=\"450\" y=\"306\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">une représentation n'est pas une preuve</text>\n  </g>\n  <text x=\"450\" y=\"360\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Mesurer sur les images et les questions réelles</text>\n</svg>",
+        "steps": [
+          {
+            "title": "La tâche",
+            "explanation": "Rechercher, répondre, générer et dialoguer ne demandent pas les mêmes modèles ni les mêmes métriques.",
+            "highlight": [
+              "mm-search",
+              "mm-answer",
+              "mm-generate",
+              "mm-dialogue"
+            ]
+          },
+          {
+            "title": "Le pipeline",
+            "explanation": "L’ingestion, le prétraitement, l’encodage et la fusion doivent être testés séparément, puis de bout en bout.",
+            "highlight": [
+              "mm-answer",
+              "mm-generate"
+            ]
+          },
+          {
+            "title": "La vérification",
+            "explanation": "Un score d’alignement ne prouve pas la vérité. Il faut vérifier le domaine, les sources et les cas incertains.",
+            "highlight": [
+              "mm-check"
+            ]
+          }
+        ]
+      },
+      "example": {
+        "title": "Choisir pour un assistant de diagnostic",
+        "text": "**Scénario illustratif.** Un hôpital veut un assistant qui répond à des questions sur des images de peau. Le système doit citer les zones visibles, signaler l'incertitude et ne pas poser de diagnostic seul. Un encodeur visuel associé à un modèle de langage peut décrire et répondre, mais il doit être évalué sur des images du même appareil, avec des cas ambigus et des lésions rares. Un modèle contrastif seul ne suffit pas : il trie des images, il n'explique pas. La validation clinique reste humaine."
+      },
+      "quiz": [
+        {
+          "question": "Quelle architecture est la plus directe pour répondre à une question sur une image ?",
+          "options": [
+            "Un modèle de diffusion seul",
+            "Un encodeur visuel associé à un modèle de langage",
+            "Un index vectoriel sans modèle",
+            "Un classifieur d’images seul"
+          ],
+          "correctIndex": 1,
+          "explanation": "L’encodeur transforme l’image en représentation, le modèle de langage produit la réponse. Un modèle de diffusion génère des images, il ne répond pas à une question."
+        },
+        {
+          "question": "Que garantit un score de similarité image-texte élevé ?",
+          "options": [
+            "La vérité de la description",
+            "Une proximité dans l’espace appris, pas une preuve",
+            "La lecture de tous les détails",
+            "La qualité de l’image"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le score mesure une proximité de représentations. Il ne garantit ni la vérité, ni la lecture des petits détails."
+        },
+        {
+          "question": "Pourquoi les tokens visuels ont-ils un coût ?",
+          "options": [
+            "Parce qu’ils sont gratuits",
+            "Parce qu’une image peut être découpée en nombreux jetons traités par le modèle",
+            "Parce qu’ils suppriment le texte",
+            "Parce qu’ils réduisent la résolution"
+          ],
+          "correctIndex": 1,
+          "explanation": "Une image haute résolution peut produire beaucoup de patchs, qui consomment du contexte et du calcul."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Encodeur visuel",
+          "definition": "Réseau qui transforme une image en une grille de représentations vectorielles."
+        },
+        {
+          "term": "Alignement",
+          "definition": "Apprentissage de représentations proches pour des paires image-texte compatibles."
+        },
+        {
+          "term": "Tokens visuels",
+          "definition": "Patchs d’image projetés dans l’espace d’un modèle de langage."
+        },
+        {
+          "term": "Fusion",
+          "definition": "Combinaison de représentations de plusieurs modalités, précoce ou tardive."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Compréhension ou génération",
+          "prompt": "Un modèle multimodal est présenté comme le plus récent et le plus grand. Pourquoi cela ne suffit-il pas pour choisir une architecture ?",
+          "solution": "Compréhension, génération et dialogue ne rendent pas les mêmes services. Le choix dépend de la tâche, des modalités, des données, de l’alignement, de la latence et du coût. Un pipeline de production sépare l’ingestion, le prétraitement, le modèle et la vérification."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Vaswani et al., Attention Is All You Need, 2017.",
+          "href": "https://arxiv.org/abs/1706.03762"
+        },
+        {
+          "label": "Lewis et al., Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks, 2020.",
+          "href": "https://arxiv.org/abs/2005.11401"
+        },
+        {
+          "label": "LangGraph, documentation, consultée le 21 octobre 2026.",
+          "href": "https://langchain-ai.github.io/langgraph/"
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "label": "Vaswani et al., Attention Is All You Need, 2017.",
+      "href": "https://arxiv.org/abs/1706.03762"
+    },
+    {
+      "label": "Brown et al., Language Models are Few-Shot Learners, 2020.",
+      "href": "https://arxiv.org/abs/2005.14165"
+    },
+    {
+      "label": "Devlin et al., BERT : Pre-training of Deep Bidirectional Transformers for Language Understanding, 2018.",
+      "href": "https://arxiv.org/abs/1810.04805"
+    },
+    {
+      "label": "Lewis et al., Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks, 2020.",
+      "href": "https://arxiv.org/abs/2005.11401"
+    },
+    {
+      "label": "Model Context Protocol, spécification 2025-06-18, consultée le 21 octobre 2026.",
+      "href": "https://modelcontextprotocol.io/specification/2025-06-18"
+    },
+    {
+      "label": "LangGraph, documentation, consultée le 21 octobre 2026.",
+      "href": "https://langchain-ai.github.io/langgraph/"
+    },
+    {
+      "label": "Ho et al., Denoising Diffusion Probabilistic Models, 2020.",
+      "href": "https://arxiv.org/abs/2006.11239"
+    },
+    {
+      "label": "Hu et al., LoRA : Low-Rank Adaptation of Large Language Models, 2021.",
+      "href": "https://arxiv.org/abs/2106.09685"
+    },
+    {
+      "label": "Rafailov et al., Direct Preference Optimization : Your Language Model is Secretly a Reward Model, 2023.",
+      "href": "https://arxiv.org/abs/2305.18290"
+    },
+    {
+      "label": "PyTorch, tutoriels, consultés le 21 octobre 2026.",
+      "href": "https://docs.pytorch.org/tutorials/"
+    }
+  ],
+  "related": [
+    {
+      "to": "/cours/rag",
+      "title": "Le RAG en profondeur",
+      "description": "Pipeline, recherche hybride, reranking, évaluation et sécurité du RAG."
+    },
+    {
+      "to": "/cours/mcp",
+      "title": "Le Model Context Protocol en profondeur",
+      "description": "Architecture, messages JSON-RPC, transports, autorisation et risques de MCP."
+    },
+    {
+      "to": "/cours/boucles-agentiques",
+      "title": "Les boucles agentiques en profondeur",
+      "description": "Appel d’outils, mémoire, arrêt, coûts, garde-fous et évaluation d’un agent."
+    }
+  ]
+}

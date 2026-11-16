@@ -1,0 +1,899 @@
+{
+  "slug": "gpu-cpu",
+  "title": "Pourquoi l'IA tourne surtout sur GPU",
+  "subtitle": "Parallélisme, calcul matriciel, précision mixte et mémoire, pour comprendre ce qui distingue réellement un GPU d'un CPU",
+  "level": "Intermédiaire",
+  "tags": [
+    "GPU",
+    "CPU",
+    "Tensor Cores",
+    "VRAM",
+    "CUDA",
+    "Inférence"
+  ],
+  "summary": "Un processeur graphique n'est pas un processeur central en plus rapide. C'est une autre organisation du calcul, pensée pour répéter en parallèle des opérations simples sur de grands tableaux. Ce cours explique pourquoi les réseaux de neurones se prêtent à ce régime, ce que change la précision mixte, pourquoi la mémoire limite souvent plus que le calcul, et comment le modèle roofline aide à lire un GPU sans recopier des chiffres de constructeur.",
+  "introduction": "### Pourquoi ce sujet\n\nLes modèles d'IA sont souvent décrits par leurs paramètres, leurs données et leurs résultats. Le matériel qui les exécute reste une boîte noire. Pourtant, deux questions très concrètes en dépendent. Pourquoi un même modèle peut-il être rapide sur une machine et lent sur une autre ? Pourquoi une carte graphique dont la mémoire semble suffisante refuse-t-elle parfois de charger un lot un peu plus grand ?\n\nLa réponse ne tient pas à un chiffre unique. Elle tient à la forme du calcul, à la précision des nombres, à la hiérarchie de la mémoire et au débit avec lequel les données circulent. Un CPU et un GPU ne sont pas deux versions du même processeur, l'une lente et l'autre rapide. Ce sont deux compromis différents, adaptés à des travaux différents.\n\n### D'où viennent les idées\n\nCe cours s'appuie sur des documents techniques et des articles de recherche, pas sur des fiches commerciales. Le guide de programmation CUDA de NVIDIA décrit le modèle d'exécution des GPU et la hiérarchie de threads et de mémoire. La page de NVIDIA sur les Tensor Cores présente les unités de calcul matriciel et les formats de précision associés. L'article de Williams, Waterman et Patterson (2009) introduit le modèle roofline, qui relie calcul, bande passante et intensité arithmétique. La documentation de PyTorch sur la précision automatique explique comment *autocast* choisit les formats. Les articles FlashAttention (Dao et al., 2022) et PagedAttention (Kwon et al., 2023) montrent deux problèmes pratiques de l'inférence moderne, le trafic mémoire de l'attention et la gestion du cache KV.\n\n### Ce qu'il faut savoir avant\n\n- savoir ce qu'est un CPU et un GPU ;\n- connaître les bases d'une multiplication de matrices ;\n- savoir lire un court script Python pour les calculs d'illustration ;\n- aucune expérience CUDA n'est requise.\n\n### Ce que vous saurez expliquer à la fin\n\n- pourquoi un GPU excelle sur des calculs réguliers et parallèles, et pourquoi un CPU reste préférable pour d'autres tâches ;\n- comment une couche de réseau de neurones devient une multiplication de matrices, et ce que représentent les FLOPs comptés ;\n- ce que sont les Tensor Cores, TF32, FP16 et BF16, et pourquoi l'accumulation se fait souvent en FP32 ;\n- ce qui occupe la VRAM, comment estimer un cache KV et pourquoi la bande passante peut limiter avant le calcul ;\n- comment le modèle roofline distingue une phase limitée par le calcul d'une phase limitée par la mémoire ;\n- ce que CUDA apporte, quelles sont les alternatives, et pourquoi le choix d'un accélérateur dépend de la charge de travail.\n\n### Ses limites\n\nCe cours ne donne aucune fiche technique de produit, aucun prix, aucun débit mesuré et aucun classement de cartes. Les chiffres utilisés sont des valeurs d'illustration clairement identifiées ou des ordres de grandeur. Les performances réelles dépendent du modèle, des formes de tenseurs, des bibliothèques, de la version des pilotes et de la machine. Le modèle roofline est une borne supérieure, pas une prédiction. Enfin, le matériel évolue vite : les mécanismes expliqués ici restent utiles, mais les noms, les formats et les rapports entre calcul et mémoire changent d'une génération à l'autre.",
+  "prerequisites": [
+    "Savoir ce qu'est un CPU et un GPU",
+    "Connaître les bases d'une multiplication de matrices",
+    "Savoir lire un court script Python pour les calculs d'illustration",
+    "Aucune expérience CUDA requise"
+  ],
+  "checkedOn": "2026-10-26",
+  "cover": {
+    "src": "pics/cours/gpu-cpu.webp",
+    "alt": "Quelques grands cœurs face à une grille dense de petits cœurs, métaphore du CPU et du GPU."
+  },
+  "modules": [
+    {
+      "id": "philosophies",
+      "title": "Deux philosophies du silicium",
+      "keyTakeaways": [
+        "Un CPU et un GPU exécutent les mêmes opérations de base, mais répartissent différemment leur budget de transistors entre latence et débit.",
+        "Un CPU privilégie quelques cœurs complexes, de grands caches et des mécanismes qui réduisent l'attente sur du code irrégulier.",
+        "Un GPU privilégie de nombreuses unités simples et masque la latence mémoire en changeant rapidement de groupe de threads.",
+        "La loi d'Amdahl borne le gain d'une parallélisation : une fraction séquentielle même faible finit par dominer.",
+        "Le transfert des données entre mémoire hôte et mémoire du GPU, ainsi que les noyaux trop petits, limitent souvent le gain réel."
+      ],
+      "theory": "### Deux façons de dépenser le silicium\n\nUn processeur central (CPU) et un processeur graphique (GPU) exécutent tous deux des instructions, lisent des données et écrivent des résultats. Leur différence ne tient pas à une instruction secrète : elle tient à la répartition du budget de transistors. Un CPU consacre une part importante de sa surface à réduire la latence d'une suite d'instructions : caches, prédiction de branchement, exécution dans le désordre, unités polyvalentes. Un GPU consacre une part plus grande à répéter de nombreuses unités de calcul simples et compte sur le parallélisme pour masquer les temps d'attente.\n\nCette différence se résume souvent par une opposition entre **latence** et **débit**. Le CPU cherche à terminer vite une tâche, même si elle est irrégulière. Le GPU cherche à terminer beaucoup de tâches indépendantes par unité de temps, à condition qu'elles se ressemblent. Aucun des deux n'est meilleur dans l'absolu : le bon processeur dépend de la forme du travail.\n\n### Le CPU, optimisé pour la latence\n\nUn CPU de bureau compte quelques cœurs, parfois quelques dizaines sur les modèles haut de gamme, chacun avec un pipeline profond, une prédiction de branchement, une exécution dans le désordre et des caches privés. Ces mécanismes coûtent de la surface, mais ils réduisent le temps d'attente d'une instruction qui dépend de la précédente. Ils sont précieux pour du code qui enchaîne des décisions, parcourt des structures de données irrégulières, attend des entrées ou exécute beaucoup de code différent.\n\nLe CPU est aussi le chef d'orchestre de la machine. Il lance le système d'exploitation, gère les fichiers et le réseau, alloue la mémoire, prépare les données et appelle le GPU. Même dans un serveur d'inférence, une partie du travail reste sur le CPU : tokenisation, décodage, orchestration des requêtes, gestion des files d'attente.\n\n> **Repère.** Un CPU n'est pas un GPU lent. C'est un processeur conçu pour un autre profil de travail.\n\n### Le GPU, optimisé pour le débit\n\nUn GPU de calcul aligne des milliers de petites unités de calcul, regroupées en processeurs de flux. Les threads y sont exécutés par groupes, appelés warps sur les GPU NVIDIA, et un warp regroupe 32 threads. Dans le modèle SIMT (*single instruction, multiple threads*), les threads d'un warp exécutent la même instruction sur des données différentes. Cette organisation est efficace quand le travail est régulier : une même opération appliquée à des milliers d'éléments.\n\nQuand les threads d'un warp prennent des chemins différents, le matériel exécute les branches l'une après l'autre et masque les threads inactifs. On parle de **divergence**. Un réseau de neurones contient peu de branches de ce type : ses couches appliquent les mêmes multiplications et les mêmes additions à tous les éléments d'un tenseur. C'est précisément ce qui convient au GPU.\n\nLe GPU masque aussi la latence de la mémoire en changeant de warp. Pendant qu'un groupe attend une donnée, un autre groupe calcule. Pour que cela fonctionne, il faut assez de warps prêts à s'exécuter. Le nombre de warps résidents est limité par les registres, la mémoire partagée et les ressources du processeur de flux. Augmenter le nombre de threads ne suffit donc pas : il faut aussi que chaque thread ait du travail utile et que les données soient disponibles.\n\n### La loi d'Amdahl\n\nLa parallélisation a une limite mathématique simple. Si une fraction $p$ du temps d'exécution peut être parallélisée et que la partie restante reste séquentielle, le gain maximal avec $s$ unités de calcul vaut :\n\n$$\\text{gain} \\le \\frac{1}{(1-p) + p/s}$$\n\nQuand $s$ devient très grand, le gain tend vers $1/(1-p)$. Avec 10 % de temps séquentiel, le gain maximal est donc d'environ 10, même avec une infinité de processeurs. Ce résultat ne dépend pas du GPU : il décrit la partie du programme qui ne se parallélise pas.\n\nDans la pratique, il faut ajouter les coûts de lancement des noyaux, les synchronisations, le transfert des données et les déséquilibres de charge. Un petit calcul lancé sur un GPU peut être plus lent que le même calcul sur un CPU, parce que le temps de préparation et de transfert dépasse le temps de calcul.\n\n### Le transfert de données\n\nUn CPU et un GPU disposent souvent de mémoires séparées. Les données doivent être copiées de la mémoire hôte vers la mémoire du GPU avant le calcul, puis le résultat revient. Ce transfert a un coût, et il ne disparaît pas parce que le calcul est rapide. Le garder hors de la boucle critique est souvent plus important que gagner quelques opérations.\n\nCertaines architectures partagent une partie de la mémoire ou proposent une mémoire unifiée. Cela simplifie l'adressage, mais ne supprime ni la hiérarchie matérielle ni le coût des accès. Un accès à une donnée éloignée reste plus lent qu'un accès à un cache local.\n\n### Quand le CPU reste le bon choix\n\nLe CPU reste préférable pour un calcul séquentiel, pour un lot minuscule, pour du code très branchu, pour une requête isolée dont la latence compte plus que le débit, ou pour un modèle assez petit pour tenir confortablement en mémoire. Il est aussi indispensable pour tout ce qui entoure le modèle : lecture des fichiers, prétraitement, gestion des erreurs, réponse réseau.\n\nLe GPU devient intéressant quand le travail contient assez de parallélisme régulier pour occuper ses unités, quand les données restent sur la carte entre les étapes et quand le lot est suffisamment grand. La question n'est donc pas « GPU ou CPU ? » mais « quelle partie de cette charge de travail est assez régulière et assez volumineuse pour justifier un GPU ? ».\n\n### Ce que retient la suite\n\nLes modules suivants partent de cette base. Une couche de réseau de neurones se ramène à des multiplications de matrices, ce qui fournit au GPU un travail régulier. La précision des nombres détermine quelles unités peuvent être utilisées. La mémoire et la bande passante fixent souvent la limite réelle. Le modèle roofline relie ces éléments dans une même lecture.",
+      "diagram": {
+        "title": "Quelques gros cœurs face à une grille de petits cœurs",
+        "description": "Schéma illustratif : à gauche, un CPU avec quelques cœurs et ses caches ; à droite, un GPU avec une grille dense d'unités simples et sa mémoire. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 420\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"CPU avec quelques gros coeurs et GPU avec une grille dense de petits coeurs, reliés par un transfert de données\">\n  <rect width=\"800\" height=\"420\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Deux organisations du calcul</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"cpu\">\n    <rect x=\"40\" y=\"90\" width=\"250\" height=\"250\" rx=\"14\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"165\" y=\"118\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">CPU</text>\n    <g fill=\"#0ea5e9\" stroke=\"#0f172a\" stroke-width=\"1.5\">\n      <rect x=\"70\" y=\"140\" width=\"85\" height=\"65\" rx=\"6\"/>\n      <rect x=\"175\" y=\"140\" width=\"85\" height=\"65\" rx=\"6\"/>\n      <rect x=\"70\" y=\"220\" width=\"85\" height=\"65\" rx=\"6\"/>\n      <rect x=\"175\" y=\"220\" width=\"85\" height=\"65\" rx=\"6\"/>\n    </g>\n    <text x=\"112\" y=\"178\" fill=\"#f8fafc\" font-size=\"11\" text-anchor=\"middle\">cœur</text>\n    <text x=\"217\" y=\"178\" fill=\"#f8fafc\" font-size=\"11\" text-anchor=\"middle\">cœur</text>\n    <text x=\"112\" y=\"258\" fill=\"#f8fafc\" font-size=\"11\" text-anchor=\"middle\">cœur</text>\n    <text x=\"217\" y=\"258\" fill=\"#f8fafc\" font-size=\"11\" text-anchor=\"middle\">cœur</text>\n    <text x=\"165\" y=\"316\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">caches, contrôle, latence</text>\n  </g>\n\n  <g id=\"gpu\">\n    <rect x=\"430\" y=\"90\" width=\"330\" height=\"250\" rx=\"14\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"595\" y=\"118\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">GPU</text>\n    <g fill=\"#10b981\" stroke=\"#0f172a\" stroke-width=\"1\">\n      <rect x=\"455\" y=\"140\" width=\"28\" height=\"22\"/><rect x=\"489\" y=\"140\" width=\"28\" height=\"22\"/><rect x=\"523\" y=\"140\" width=\"28\" height=\"22\"/><rect x=\"557\" y=\"140\" width=\"28\" height=\"22\"/><rect x=\"591\" y=\"140\" width=\"28\" height=\"22\"/><rect x=\"625\" y=\"140\" width=\"28\" height=\"22\"/><rect x=\"659\" y=\"140\" width=\"28\" height=\"22\"/><rect x=\"693\" y=\"140\" width=\"28\" height=\"22\"/>\n      <rect x=\"455\" y=\"168\" width=\"28\" height=\"22\"/><rect x=\"489\" y=\"168\" width=\"28\" height=\"22\"/><rect x=\"523\" y=\"168\" width=\"28\" height=\"22\"/><rect x=\"557\" y=\"168\" width=\"28\" height=\"22\"/><rect x=\"591\" y=\"168\" width=\"28\" height=\"22\"/><rect x=\"625\" y=\"168\" width=\"28\" height=\"22\"/><rect x=\"659\" y=\"168\" width=\"28\" height=\"22\"/><rect x=\"693\" y=\"168\" width=\"28\" height=\"22\"/>\n      <rect x=\"455\" y=\"196\" width=\"28\" height=\"22\"/><rect x=\"489\" y=\"196\" width=\"28\" height=\"22\"/><rect x=\"523\" y=\"196\" width=\"28\" height=\"22\"/><rect x=\"557\" y=\"196\" width=\"28\" height=\"22\"/><rect x=\"591\" y=\"196\" width=\"28\" height=\"22\"/><rect x=\"625\" y=\"196\" width=\"28\" height=\"22\"/><rect x=\"659\" y=\"196\" width=\"28\" height=\"22\"/><rect x=\"693\" y=\"196\" width=\"28\" height=\"22\"/>\n      <rect x=\"455\" y=\"224\" width=\"28\" height=\"22\"/><rect x=\"489\" y=\"224\" width=\"28\" height=\"22\"/><rect x=\"523\" y=\"224\" width=\"28\" height=\"22\"/><rect x=\"557\" y=\"224\" width=\"28\" height=\"22\"/><rect x=\"591\" y=\"224\" width=\"28\" height=\"22\"/><rect x=\"625\" y=\"224\" width=\"28\" height=\"22\"/><rect x=\"659\" y=\"224\" width=\"28\" height=\"22\"/><rect x=\"693\" y=\"224\" width=\"28\" height=\"22\"/>\n      <rect x=\"455\" y=\"252\" width=\"28\" height=\"22\"/><rect x=\"489\" y=\"252\" width=\"28\" height=\"22\"/><rect x=\"523\" y=\"252\" width=\"28\" height=\"22\"/><rect x=\"557\" y=\"252\" width=\"28\" height=\"22\"/><rect x=\"591\" y=\"252\" width=\"28\" height=\"22\"/><rect x=\"625\" y=\"252\" width=\"28\" height=\"22\"/><rect x=\"659\" y=\"252\" width=\"28\" height=\"22\"/><rect x=\"693\" y=\"252\" width=\"28\" height=\"22\"/>\n    </g>\n    <text x=\"595\" y=\"316\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">nombreuses unités, débit</text>\n  </g>\n\n  <g id=\"transfert\">\n    <line x1=\"290\" y1=\"215\" x2=\"430\" y2=\"215\" stroke=\"#fbbf24\" stroke-width=\"3\" stroke-dasharray=\"8 5\"/>\n    <path d=\"M430,215 L418,209 L418,221 Z\" fill=\"#fbbf24\"/>\n    <text x=\"360\" y=\"200\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">données</text>\n    <text x=\"360\" y=\"238\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">transfert</text>\n  </g>\n\n  <g id=\"memoire\">\n    <rect x=\"40\" y=\"360\" width=\"250\" height=\"34\" rx=\"8\" fill=\"#111827\" stroke=\"#64748b\" stroke-width=\"1.5\"/>\n    <text x=\"165\" y=\"382\" fill=\"#cbd5e1\" font-size=\"11\" text-anchor=\"middle\">mémoire hôte</text>\n    <rect x=\"430\" y=\"360\" width=\"330\" height=\"34\" rx=\"8\" fill=\"#111827\" stroke=\"#64748b\" stroke-width=\"1.5\"/>\n    <text x=\"595\" y=\"382\" fill=\"#cbd5e1\" font-size=\"11\" text-anchor=\"middle\">mémoire du GPU</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Le CPU et la latence",
+            "explanation": "Quelques cœurs complexes, de grands caches et des mécanismes de contrôle réduisent le temps d'attente sur du code irrégulier ou séquentiel.",
+            "highlight": [
+              "cpu",
+              "memoire"
+            ]
+          },
+          {
+            "title": "2. Le GPU et le débit",
+            "explanation": "Une grille dense de petites unités exécute la même opération sur beaucoup de données. Le débit vient du parallélisme, pas de la vitesse d'un cœur isolé.",
+            "highlight": [
+              "gpu"
+            ]
+          },
+          {
+            "title": "3. Le transfert",
+            "explanation": "Les données doivent circuler entre la mémoire hôte et celle du GPU. Ce transfert, et la préparation des noyaux, limitent les gains quand le calcul est petit.",
+            "highlight": [
+              "transfert"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Quel type de travail un GPU traite-t-il le plus efficacement ?",
+          "options": [
+            "Des calculs réguliers, répétés sur de grands tableaux indépendants",
+            "Une suite de décisions conditionnelles très différentes d'un élément à l'autre",
+            "Un seul calcul séquentiel dont chaque étape dépend de la précédente",
+            "La gestion des entrées-sorties et du système de fichiers"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le GPU excelle quand beaucoup de threads exécutent la même opération sur des données différentes. Les branches divergentes et les dépendances séquentielles réduisent son efficacité."
+        },
+        {
+          "question": "Que signifie l'opposition entre latence et débit ?",
+          "options": [
+            "Le GPU est toujours plus rapide, quelle que soit la tâche",
+            "La latence mesure la mémoire et le débit mesure la fréquence",
+            "Le CPU cherche à finir vite une tâche, le GPU cherche à en finir beaucoup par unité de temps",
+            "Le CPU ne peut exécuter qu'une instruction à la fois"
+          ],
+          "correctIndex": 2,
+          "explanation": "Le CPU optimise le temps de réponse sur une tâche, le GPU optimise le nombre de tâches terminées par unité de temps lorsque le parallélisme est suffisant."
+        },
+        {
+          "question": "Une application passe 10 % de son temps dans une partie non parallélisable. Quel gain maximal peut-on espérer en parallélisant parfaitement le reste, même avec une infinité de processeurs ?",
+          "options": [
+            "Environ 2 fois",
+            "Environ 10 fois",
+            "Environ 100 fois",
+            "Aucun gain"
+          ],
+          "correctIndex": 1,
+          "explanation": "La loi d'Amdahl donne 1/(1-p). Avec p = 0,9, le plafond vaut 1/0,1 = 10. La partie séquentielle finit par dominer."
+        },
+        {
+          "question": "Pourquoi un petit calcul peut-il être plus lent sur un GPU que sur un CPU ?",
+          "options": [
+            "Parce que le GPU ne sait pas faire d'additions",
+            "Parce que le lancement des noyaux et le transfert des données peuvent dépasser le temps de calcul",
+            "Parce qu'un GPU ne peut traiter qu'un seul thread",
+            "Parce que le CPU utilise toujours des nombres plus précis"
+          ],
+          "correctIndex": 1,
+          "explanation": "Un noyau trop petit n'occupe pas assez d'unités pour amortir la préparation et les transferts. Le gain dépend de la taille du travail, pas seulement du processeur."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Latence",
+          "definition": "Temps nécessaire pour terminer une opération ou une tâche. Le CPU est conçu pour la réduire sur des suites d'instructions dépendantes."
+        },
+        {
+          "term": "Débit",
+          "definition": "Quantité de travail terminée par unité de temps. Le GPU cherche à l'augmenter en exécutant beaucoup de threads en parallèle."
+        },
+        {
+          "term": "SIMT",
+          "definition": "Modèle d'exécution où un groupe de threads applique la même instruction à des données différentes."
+        },
+        {
+          "term": "Warp",
+          "definition": "Groupe de threads exécutés ensemble sur un GPU NVIDIA. Sa taille est de 32 threads."
+        },
+        {
+          "term": "Loi d'Amdahl",
+          "definition": "Relation qui borne le gain d'une parallélisation à partir de la fraction de travail restée séquentielle."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Le plafond d'Amdahl",
+          "prompt": "Un traitement passe 75 % de son temps dans une partie parallélisable et 25 % dans une partie séquentielle. Calculez le gain maximal avec un très grand nombre d'unités de calcul, puis avec 8 unités. Expliquez enfin pourquoi un petit calcul peut être plus lent sur un GPU que sur un CPU malgré ce gain théorique.",
+          "solution": "Avec p = 0,75 et s qui tend vers l'infini, le gain tend vers 1 / (1 - 0,75) = 4. Avec s = 8, il vaut 1 / (0,25 + 0,75 / 8) = 1 / 0,34375 ≈ 2,9. La partie séquentielle fixe donc un plafond de 4, quel que soit le nombre de cœurs. Pour un petit calcul, il faut ajouter le lancement des noyaux, les synchronisations et le transfert des données entre mémoire hôte et mémoire du GPU. Ces coûts peuvent dépasser le temps de calcul et rendre le CPU plus rapide."
+        }
+      ],
+      "sources": [
+        {
+          "label": "NVIDIA, CUDA Programming Guide, consulté le 21 octobre 2026.",
+          "href": "https://docs.nvidia.com/cuda/cuda-programming-guide/"
+        },
+        {
+          "label": "Williams, Waterman et Patterson, Roofline: An Insightful Visual Performance Model for Multicore Architectures, 2009.",
+          "href": "https://doi.org/10.1145/1498765.1498785"
+        }
+      ]
+    },
+    {
+      "id": "gemm",
+      "title": "Les réseaux de neurones comme multiplications de matrices",
+      "keyTakeaways": [
+        "Une couche dense calcule $Y = XW + b$, où chaque sortie est un produit scalaire entre une ligne de l'entrée et une colonne des poids.",
+        "Pour un lot de $M$ exemples, une entrée de dimension $K$ et une sortie de dimension $N$, le nombre d'opérations élémentaires est $2MNK$ si l'on compte une multiplication et une addition par terme.",
+        "Le tuilage découpe la multiplication en blocs pour réutiliser les mêmes données dans les caches et la mémoire partagée.",
+        "Augmenter la taille du lot augmente le nombre d'opérations, mais permet de réutiliser les poids et améliore l'intensité arithmétique.",
+        "Compter les FLOPs ne prédit pas le temps d'exécution : la mémoire, la précision, les formes et l'occupation du GPU comptent autant."
+      ],
+      "theory": "### Une couche dense est un produit matriciel\n\nUne couche dense, ou couche entièrement connectée, reçoit un lot d'entrées et applique une transformation affine. Pour un lot de $M$ exemples, une entrée de dimension $K$ et une sortie de dimension $N$, on écrit :\n\n$$Y = XW + b$$\n\nLa matrice $X$ a la forme $(M, K)$, la matrice des poids $W$ a la forme $(K, N)$ et le biais $b$ a la forme $(N,)$. Le produit $XW$ a la forme $(M, N)$ : chaque ligne correspond à un exemple, chaque colonne à une sortie. L'élément $Y_{ij}$ est le produit scalaire de la ligne $i$ de $X$ et de la colonne $j$ de $W$, plus le biais.\n\nCette écriture est celle de la couche linéaire de la plupart des bibliothèques. Elle montre déjà pourquoi le GPU est concerné : les mêmes opérations se répètent sur toutes les lignes et toutes les colonnes. Il n'y a pas de décision à prendre par élément, seulement des multiplications et des additions à enchaîner.\n\n### Pourquoi $2MNK$ opérations\n\nChaque élément de $Y$ est une somme de $K$ produits. Il y a $M \\times N$ éléments. Le nombre de multiplications est donc $M \\times N \\times K$, et le nombre d'additions de la somme est du même ordre. Si l'on compte une multiplication et une addition par terme, on obtient :\n\n$$2 \\times M \\times N \\times K$$\n\nCette convention est utile pour comparer des formes, mais elle n'est pas universelle. Certaines bibliothèques comptent une opération multiply-add comme une seule opération, et les processeurs peuvent fusionner multiplication et addition dans une instruction FMA. Il faut donc préciser la convention quand on annonce un nombre de FLOPs. Dans ce cours, « FLOPs » désigne des opérations élémentaires comptées comme ci-dessus, sauf mention contraire.\n\nPrenons une couche qui passe de 768 à 768 valeurs, avec un lot de 32 exemples. Le calcul vaut $2 \\times 32 \\times 768 \\times 768$, soit environ 37,7 millions d'opérations. Un lot de 256 exemples multiplie ce nombre par huit. Le calcul croît linéairement avec la taille du lot, ce qui est attendu : chaque exemple supplémentaire ajoute ses propres produits scalaires.\n\n### Le lot augmente la réutilisation\n\nLes poids ne dépendent pas de l'exemple. Dans un lot, la même matrice $W$ est utilisée pour toutes les lignes de $X$. Si le noyau lit $W$ une fois et le garde dans un cache ou dans la mémoire partagée, le coût de lecture des poids est amorti sur tout le lot. C'est l'un des intérêts du traitement par lots : le nombre d'opérations augmente, mais la quantité de données lues par opération peut diminuer.\n\nCette réutilisation ne se produit pas automatiquement. Elle dépend de la façon dont le noyau est écrit, de la taille des tuiles et de la mémoire disponible. Un lot plus grand peut aussi dépasser la mémoire et forcer des découpages supplémentaires. Il n'existe donc pas de taille de lot idéale dans l'absolu : elle dépend du modèle, de la carte et de l'objectif, débit ou latence.\n\n> **Repère.** Un lot plus grand améliore souvent le débit, mais il augmente aussi la mémoire et peut allonger le temps de réponse d'une requête isolée.\n\n### Le tuilage\n\nUne multiplication de matrices naïve lit chaque élément de $A$ et de $B$ plusieurs fois. Pour calculer une tuile de $C$, il faut parcourir toute la dimension $K$ et accumuler des produits. Si les données ne tiennent pas dans les caches, chaque lecture repart vers la mémoire principale, beaucoup plus lente.\n\nLe **tuilage** consiste à découper $A$, $B$ et $C$ en blocs. Un groupe de threads charge une tuile de $A$ et une tuile de $B$ dans la mémoire partagée, calcule les produits, puis passe à la tuile suivante. Les mêmes données sont ainsi réutilisées par plusieurs threads avant de retourner en mémoire globale. Le choix de la taille des tuiles est un compromis : des tuiles trop petites réutilisent peu, des tuiles trop grandes consomment trop de mémoire partagée ou de registres.\n\nCe découpage est au cœur des bibliothèques de calcul matriciel. Il explique aussi pourquoi une multiplication de matrices peut être limitée par la mémoire même quand le processeur sait faire beaucoup d'opérations par seconde. Nous retrouverons cette idée avec le modèle roofline.\n\n### Ce que fait une bibliothèque\n\nDans la pratique, on n'écrit presque jamais le noyau de multiplication de matrices à la main. Les bibliothèques comme cuBLAS fournissent des implantations optimisées pour de nombreuses formes et précisions, avec des replis pour les cas irréguliers. Les frameworks choisissent un noyau en fonction des dimensions, du type de données et de la carte. Les cas particuliers, comme les petites matrices ou les formes irrégulières, peuvent recevoir des noyaux dédiés.\n\nCette couche logicielle explique une partie de la différence entre un GPU théorique et un GPU observé. Un même nombre de FLOPs peut être exécuté par un noyau bien adapté ou par un noyau générique qui lit trop de mémoire. Les chiffres annoncés par un constructeur correspondent à des conditions précises, souvent à de grandes matrices et à une précision donnée.\n\n### Convolution et attention se ramènent souvent à un produit matriciel\n\nUne convolution peut être transformée en multiplication de matrices par une opération appelée *im2col* : les fenêtres glissantes sont recopiées en colonnes, puis la convolution devient un produit matriciel. Cette transformation consomme de la mémoire, et les bibliothèques utilisent parfois des variantes qui évitent cette copie.\n\nL'attention d'un Transformer contient aussi des produits matriciels. Les scores sont calculés par un produit entre les requêtes et les clés, puis les valeurs sont combinées par un second produit avec les poids d'attention. Pour un lot et plusieurs têtes, ces opérations deviennent des multiplications de matrices par lots. C'est l'une des raisons pour lesquelles les GPU sont adaptés aux Transformers.\n\n### Le lot n'est pas gratuit\n\nEn inférence, traiter plusieurs requêtes ensemble augmente le débit du serveur, mais chaque requête attend parfois plus longtemps. Le lot augmente aussi la mémoire des activations et du cache KV. Les serveurs modernes utilisent des stratégies de lotissement continu, où de nouvelles requêtes rejoignent un lot en cours, pour mieux remplir le matériel sans bloquer les autres.\n\nL'article PagedAttention (Kwon et al., 2023) montre que la gestion du cache KV et de la mémoire du lot est devenue un problème à part entière. Un lot trop grand ne tient pas en mémoire, et un lot trop petit laisse les unités de calcul inactives. Le bon réglage se mesure sur la charge réelle.\n\n### Compter n'est pas prédire\n\nLe nombre de FLOPs donne une idée de la quantité de calcul, pas du temps. Il ignore la lecture des poids, les accès au cache, les latences, les synchronisations et l'occupation des unités. Un noyau peut passer plus de temps à attendre des données qu'à calculer. C'est pourquoi les modules suivants parlent de précision, de mémoire et de bande passante.\n\nLe code ci-dessous compte les opérations pour trois tailles de lot. Il ne mesure aucun temps et ne suppose aucune carte particulière. Il sert à vérifier l'arithmétique et à voir comment le calcul croît avec le lot.",
+      "diagram": {
+        "title": "Une multiplication de matrices découpée en tuiles",
+        "description": "Schéma illustratif : les matrices A, B et C, une tuile de C et la boucle sur la dimension K. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Matrices A, B et C avec une tuile mise en évidence et une boucle sur la dimension K\">\n  <rect width=\"800\" height=\"440\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">C est calculée tuile par tuile</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"matrice-a\">\n    <text x=\"125\" y=\"92\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">A (M x K)</text>\n    <rect x=\"55\" y=\"105\" width=\"140\" height=\"150\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <g stroke=\"#1e293b\" stroke-width=\"1\">\n      <line x1=\"90\" y1=\"105\" x2=\"90\" y2=\"255\"/><line x1=\"125\" y1=\"105\" x2=\"125\" y2=\"255\"/><line x1=\"160\" y1=\"105\" x2=\"160\" y2=\"255\"/>\n      <line x1=\"55\" y1=\"142\" x2=\"195\" y2=\"142\"/><line x1=\"55\" y1=\"180\" x2=\"195\" y2=\"180\"/><line x1=\"55\" y1=\"218\" x2=\"195\" y2=\"218\"/>\n    </g>\n    <rect x=\"90\" y=\"142\" width=\"35\" height=\"38\" fill=\"#38bdf8\" opacity=\"0.35\" stroke=\"#7dd3fc\" stroke-width=\"2\"/>\n    <text x=\"125\" y=\"285\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">lignes = exemples</text>\n  </g>\n\n  <g id=\"matrice-b\">\n    <text x=\"335\" y=\"92\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">B (K x N)</text>\n    <rect x=\"265\" y=\"105\" width=\"140\" height=\"150\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <g stroke=\"#1e293b\" stroke-width=\"1\">\n      <line x1=\"300\" y1=\"105\" x2=\"300\" y2=\"255\"/><line x1=\"335\" y1=\"105\" x2=\"335\" y2=\"255\"/><line x1=\"370\" y1=\"105\" x2=\"370\" y2=\"255\"/>\n      <line x1=\"265\" y1=\"142\" x2=\"405\" y2=\"142\"/><line x1=\"265\" y1=\"180\" x2=\"405\" y2=\"180\"/><line x1=\"265\" y1=\"218\" x2=\"405\" y2=\"218\"/>\n    </g>\n    <rect x=\"300\" y=\"142\" width=\"35\" height=\"38\" fill=\"#34d399\" opacity=\"0.35\" stroke=\"#6ee7b7\" stroke-width=\"2\"/>\n    <text x=\"335\" y=\"285\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">colonnes = sorties</text>\n  </g>\n\n  <g id=\"matrice-c\">\n    <text x=\"625\" y=\"92\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">C (M x N)</text>\n    <rect x=\"525\" y=\"105\" width=\"200\" height=\"150\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <g stroke=\"#1e293b\" stroke-width=\"1\">\n      <line x1=\"575\" y1=\"105\" x2=\"575\" y2=\"255\"/><line x1=\"625\" y1=\"105\" x2=\"625\" y2=\"255\"/><line x1=\"675\" y1=\"105\" x2=\"675\" y2=\"255\"/>\n      <line x1=\"525\" y1=\"142\" x2=\"725\" y2=\"142\"/><line x1=\"525\" y1=\"180\" x2=\"725\" y2=\"180\"/><line x1=\"525\" y1=\"218\" x2=\"725\" y2=\"218\"/>\n    </g>\n    <rect x=\"575\" y=\"142\" width=\"50\" height=\"38\" fill=\"#fbbf24\" opacity=\"0.35\" stroke=\"#fcd34d\" stroke-width=\"2\"/>\n    <text x=\"625\" y=\"285\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">une tuile de C</text>\n  </g>\n\n  <g id=\"tuile\">\n    <line x1=\"195\" y1=\"161\" x2=\"265\" y2=\"161\" stroke=\"#64748b\" stroke-width=\"2\" stroke-dasharray=\"6 4\"/>\n    <line x1=\"405\" y1=\"161\" x2=\"525\" y2=\"161\" stroke=\"#64748b\" stroke-width=\"2\" stroke-dasharray=\"6 4\"/>\n    <text x=\"460\" y=\"150\" fill=\"#cbd5e1\" font-size=\"11\" text-anchor=\"middle\">produit</text>\n  </g>\n\n  <g id=\"boucle-k\">\n    <rect x=\"265\" y=\"330\" width=\"270\" height=\"70\" rx=\"12\" fill=\"#111827\" stroke=\"#a78bfa\" stroke-width=\"2\"/>\n    <text x=\"400\" y=\"356\" fill=\"#ddd6fe\" font-size=\"12\" text-anchor=\"middle\">pour chaque bloc de K</text>\n    <text x=\"400\" y=\"380\" fill=\"#c4b5fd\" font-size=\"11\" text-anchor=\"middle\">charger, multiplier, accumuler</text>\n    <path d=\"M400,330 L400,255\" stroke=\"#a78bfa\" stroke-width=\"2\" stroke-dasharray=\"6 4\"/>\n    <path d=\"M400,330 L400,322\" stroke=\"#a78bfa\" stroke-width=\"2\"/>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Les dimensions",
+            "explanation": "A fournit les exemples et la dimension d'entrée, B les poids et la dimension de sortie, C le résultat. La dimension K est commune à A et à B.",
+            "highlight": [
+              "matrice-a",
+              "matrice-b",
+              "matrice-c"
+            ]
+          },
+          {
+            "title": "2. Une tuile de C",
+            "explanation": "Un groupe de threads calcule un bloc de C. Pour chaque élément du bloc, il accumule les produits sur toute la dimension K.",
+            "highlight": [
+              "tuile"
+            ]
+          },
+          {
+            "title": "3. La boucle sur K",
+            "explanation": "Les blocs de A et de B sont chargés, multipliés et accumulés. Le tuilage permet de réutiliser les mêmes données avant de revenir à la mémoire globale.",
+            "highlight": [
+              "boucle-k"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Le script compte les opérations élémentaires d'une couche linéaire pour trois tailles de lot, avec une entrée et une sortie de 768 valeurs. Il ne mesure aucun temps : il vérifie seulement l'arithmétique.",
+        "code": "def gemm_flops(m, k, n):\n    return 2 * m * n * k\n\nfor m in (1, 32, 256):\n    flops = gemm_flops(m, 768, 768)\n    print(f\"lot de {m:>3} : {flops:>15,} FLOPs\")",
+        "output": "lot de   1 :       1,179,648 FLOPs\nlot de  32 :      37,748,736 FLOPs\nlot de 256 :     301,989,888 FLOPs",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Pour une couche linéaire avec un lot de 2 exemples, une entrée de 3 valeurs et une sortie de 4 valeurs, combien d'opérations élémentaires compte-t-on avec la convention 2MNK ?",
+          "options": [
+            "12",
+            "24",
+            "48",
+            "96"
+          ],
+          "correctIndex": 2,
+          "explanation": "2 fois 2 fois 3 fois 4 = 48. Le lot vaut M = 2, la dimension d'entrée K = 3 et la dimension de sortie N = 4."
+        },
+        {
+          "question": "Que fait un doublement de la taille du lot, à formes et poids identiques ?",
+          "options": [
+            "Il double le nombre d'opérations et laisse idéalement la lecture des poids inchangée",
+            "Il divise le nombre d'opérations par deux",
+            "Il supprime le besoin de mémoire",
+            "Il change la forme de la matrice des poids"
+          ],
+          "correctIndex": 0,
+          "explanation": "Chaque exemple ajoute ses propres produits scalaires, donc le calcul double. Les poids, eux, ne dépendent pas du lot et peuvent être réutilisés."
+        },
+        {
+          "question": "Pourquoi tuile-t-on une multiplication de matrices ?",
+          "options": [
+            "Pour éviter les additions",
+            "Pour changer la précision des calculs",
+            "Pour supprimer la boucle sur K",
+            "Pour réduire les accès à la mémoire globale en réutilisant les mêmes blocs"
+          ],
+          "correctIndex": 3,
+          "explanation": "Le tuilage charge des blocs dans la mémoire partagée ou les registres et les réutilise. Il ne supprime ni les additions ni la boucle sur K."
+        },
+        {
+          "question": "Dans un mécanisme d'attention, quelles opérations prennent la forme de produits matriciels ?",
+          "options": [
+            "Uniquement le softmax",
+            "Les produits entre requêtes et clés, puis entre poids d'attention et valeurs",
+            "Uniquement l'addition du biais",
+            "Aucune, l'attention n'utilise pas de matrices"
+          ],
+          "correctIndex": 1,
+          "explanation": "Les scores d'attention viennent d'un produit requêtes-clés, et la sortie d'un produit entre les poids d'attention et les valeurs. Ces opérations se prêtent aux noyaux matriciels du GPU."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "GEMM",
+          "definition": "Multiplication de matrices générale, utilisée comme brique de base de nombreuses couches."
+        },
+        {
+          "term": "Tuilage",
+          "definition": "Découpage d'un calcul en blocs pour réutiliser les données dans les caches et la mémoire partagée."
+        },
+        {
+          "term": "Intensité arithmétique",
+          "definition": "Rapport entre le nombre d'opérations et le nombre d'octets transférés. Elle sert à distinguer un calcul limité par la mémoire d'un calcul limité par les unités."
+        },
+        {
+          "term": "FMA",
+          "definition": "Instruction qui combine une multiplication et une addition en une seule opération. Sa prise en compte change le décompte des FLOPs."
+        },
+        {
+          "term": "im2col",
+          "definition": "Transformation qui recopie les fenêtres d'une convolution en colonnes pour la ramener à une multiplication de matrices."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Compter les opérations d'une couche",
+          "prompt": "Une couche linéaire reçoit un lot de 16 exemples de dimension 1 024 et produit 512 sorties. Calculez le nombre d'opérations avec la convention 2MNK, puis refaites le calcul pour un lot de 1 et un lot de 64. Expliquez ce que le lot apporte en plus du nombre d'opérations.",
+          "solution": "Pour M = 16, K = 1 024 et N = 512 : 2 × 16 × 1 024 × 512 = 16 777 216 opérations, soit environ 16,8 millions. Pour M = 1, on obtient 1 048 576, et pour M = 64, 67 108 864. Le calcul croît linéairement avec le lot, mais les poids ne changent pas : la même matrice est lue pour toutes les lignes. Un noyau peut donc charger les poids une fois et les réutiliser, ce qui améliore l'intensité arithmétique et l'utilisation du matériel. Le gain dépend du tuilage et de la mémoire disponible."
+        }
+      ],
+      "sources": [
+        {
+          "label": "NVIDIA, Tensor Cores, consulté le 21 octobre 2026.",
+          "href": "https://www.nvidia.com/en-us/data-center/tensor-cores/"
+        },
+        {
+          "label": "Williams, Waterman et Patterson, Roofline: An Insightful Visual Performance Model for Multicore Architectures, 2009.",
+          "href": "https://doi.org/10.1145/1498765.1498785"
+        }
+      ]
+    },
+    {
+      "id": "tensor-cores",
+      "title": "Tensor Cores et précision mixte",
+      "keyTakeaways": [
+        "Un Tensor Core est une unité spécialisée dans les petites multiplications de matrices suivies d'une accumulation, pas un remplacement de tous les cœurs du GPU.",
+        "FP32, TF32, FP16 et BF16 n'échangent pas seulement de la vitesse contre de la précision : ils diffèrent aussi par la plage de valeurs représentables.",
+        "Dans les modes courants, les produits sont calculés en basse précision et la somme est accumulée en FP32, ce qui limite la perte de précision sans la supprimer.",
+        "*autocast* choisit un format par opération et laisse en FP32 les calculs sensibles comme le softmax ou la normalisation.",
+        "Le loss scaling protège les gradients FP16 du sous-dépassement, et un gain de vitesse n'est jamais garanti sans mesure sur la charge réelle."
+      ],
+      "theory": "### Un calculateur pour le produit matriciel\n\nUn Tensor Core est une unité de calcul spécialisée dans les opérations matricielles. Là où un cœur classique exécute des additions et des multiplications sur des nombres isolés ou de petits vecteurs, un Tensor Core effectue une multiplication de petites matrices suivie d'une accumulation. NVIDIA résume l'opération sous la forme $D = AB + C$. Les dimensions exactes des tuiles et les formats pris en charge varient selon les générations : la documentation du constructeur est la référence, et un cours ne doit pas transformer une génération particulière en règle générale.\n\nCes unités ne remplacent pas les cœurs ordinaires. Elles accélèrent les opérations pour lesquelles elles ont été conçues, dans des formats et avec des contraintes d'alignement précis. Un noyau qui ne peut pas les utiliser retombe sur les cœurs classiques. C'est pourquoi une bibliothèque choisit un algorithme en fonction de la forme des matrices, de la précision demandée et de la génération de la carte. Un petit produit matriciel, une forme irrégulière ou un type non pris en charge peuvent laisser les Tensor Cores inactifs.\n\n### Les formats de nombre\n\nUn nombre flottant se décrit par trois champs : un signe, un exposant et une mantisse. L'exposant détermine la plage de valeurs représentables, la mantisse détermine la finesse relative. Plus la mantisse est longue, plus le nombre peut être représenté précisément. Plus l'exposant est large, plus le nombre peut être grand ou petit sans dépasser ou sous-dépasser.\n\n| Format | Signe | Exposant | Mantisse | Ce qu'il faut retenir |\n|---|---|---|---|---|\n| FP32 | 1 bit | 8 bits | 23 bits | Référence de précision et de plage. |\n| TF32 | 1 bit | 8 bits | 10 bits | Même plage d'exposant que FP32, mantisse réduite. |\n| FP16 | 1 bit | 5 bits | 10 bits | Plage réduite, mantisse de même longueur que TF32. |\n| BF16 | 1 bit | 8 bits | 7 bits | Plage proche de FP32, mantisse plus courte. |\n\nTF32 n'est pas un format de stockage généraliste. C'est un mode de calcul proposé par les Tensor Cores : les entrées gardent la plage de FP32, mais la mantisse est arrondie à 10 bits avant la multiplication. Il ne faut donc pas le confondre avec un type de tenseur que l'on utiliserait partout.\n\nFP16 a une plage d'exposant plus étroite. Il peut représenter des nombres très grands ou très petits avec moins d'amplitude que FP32, et donc dépasser vers l'infini ou sous-dépasser vers zéro dans des calculs mal échelonnés. BF16 conserve une plage proche de FP32, au prix d'une mantisse plus courte : il est moins précis, mais moins sujet aux débordements de plage. Le choix entre FP16 et BF16 dépend donc du modèle, des gradients et du matériel.\n\n### L'accumulation en FP32\n\nDans les modes courants, les Tensor Cores multiplient des entrées en basse précision et accumulent les produits dans un accumulateur FP32. Cette accumulation plus large limite la perte de précision quand on additionne beaucoup de termes, ce qui est le cas d'un produit scalaire de grande dimension. Elle ne rend pas le résultat exact : les produits eux-mêmes ont déjà été arrondis, et l'ordre des additions influence le résultat.\n\nIl faut distinguer la précision des entrées, celle de l'accumulateur et celle de la sortie. Une couche peut recevoir des activations FP16, accumuler en FP32 et produire une sortie FP16. Les bits ne disparaissent pas parce que l'accumulateur est large : ils ont déjà été perdus à l'entrée. L'accumulation FP32 réduit l'erreur d'arrondi de la somme, elle ne restaure pas l'information absente.\n\n> **Repère.** « Accumuler en FP32 » ne signifie pas que tout le calcul est en FP32. Cela signifie que la somme des produits est stockée dans un accumulateur plus précis.\n\n### La précision mixte\n\nLa précision mixte consiste à utiliser plusieurs formats dans un même modèle. Les opérations qui tolèrent une mantisse courte, comme les grandes multiplications de matrices et les convolutions, peuvent tourner en FP16 ou en BF16. Les opérations sensibles, comme le softmax, la normalisation, le calcul de la perte ou certaines réductions, restent en FP32. L'objectif est de profiter des unités rapides sans dégrader la stabilité.\n\nPyTorch implémente cette politique avec *autocast*. Le contexte *autocast* examine chaque opération et choisit un format pour ses entrées. Il ne convertit pas tous les tenseurs d'un coup : les poids restent souvent en FP32, et les opérations non éligibles continuent en FP32. La documentation de PyTorch précise la liste des opérations concernées, qui évolue avec les versions.\n\nCe choix par opération explique pourquoi la précision mixte n'est pas une simple conversion globale. Une conversion globale en FP16 peut faire diverger un modèle, tandis qu'une politique ciblée conserve les calculs critiques en FP32. Elle demande néanmoins une validation : les résultats numériques changent, et certains modèles y sont plus sensibles que d'autres.\n\n### Le loss scaling\n\nEn FP16, les gradients peuvent devenir si petits qu'ils passent sous la plus petite valeur représentable et deviennent nuls. Le loss scaling multiplie la perte par un facteur avant la rétropropagation, ce qui multiplie les gradients par le même facteur. Après le calcul, les gradients sont divisés par ce facteur avant la mise à jour des poids. Les petits gradients restent ainsi représentables pendant la passe arrière.\n\nLes implémentations modernes utilisent souvent un facteur dynamique : si aucun dépassement n'est détecté, le facteur augmente ; si un dépassement apparaît, il diminue. BF16, avec sa plage d'exposant plus large, est moins exposé au sous-dépassement, mais cela ne dispense pas de vérifier les pertes, les gradients et les sorties. Le loss scaling est un outil de stabilité, pas une garantie de qualité.\n\n### Ce que la précision mixte ne garantit pas\n\nUn Tensor Core ne rend pas un calcul automatiquement plus rapide. Si le noyau est limité par la lecture des poids ou du cache KV, augmenter la vitesse des multiplications ne change presque rien. Si la forme des matrices ne convient pas, la bibliothèque peut choisir un autre noyau. Si la carte ne prend pas en charge le format, le calcul retombe sur un autre format ou sur les cœurs classiques.\n\nLa précision mixte peut aussi modifier les résultats. Un modèle qui converge en FP32 peut produire des pertes différentes, des gradients plus bruités ou, dans les cas mal réglés, des valeurs non finies. Il faut comparer les courbes de perte, vérifier l'absence de résultats non finis et de débordements, et évaluer sur un jeu de validation. Un gain de débit qui casse le modèle n'est pas un gain.\n\nLe code ci-dessous montre le mécanisme d'*autocast* sur une petite couche linéaire. Il bascule sur CUDA et FP16 si un GPU est disponible, sinon sur CPU et BF16. Il n'affiche que les types, pas les valeurs, afin que la sortie ne dépende pas du hasard des initialisations.",
+      "diagram": {
+        "title": "Des formats d'entrée à l'accumulateur FP32",
+        "description": "Schéma illustratif : FP32, TF32, FP16 et BF16 entrent dans un Tensor Core, dont le produit est accumulé en FP32. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 430\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Formats FP32, TF32, FP16 et BF16 envoyés à un Tensor Core puis à un accumulateur FP32\">\n  <rect width=\"800\" height=\"430\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Précision des entrées, précision de la somme</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"fp32\">\n    <rect x=\"50\" y=\"95\" width=\"140\" height=\"54\" rx=\"10\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"120\" y=\"118\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">FP32</text>\n    <text x=\"120\" y=\"137\" fill=\"#7dd3fc\" font-size=\"10\" text-anchor=\"middle\">8 exposant / 23 mantisse</text>\n  </g>\n  <g id=\"tf32\">\n    <rect x=\"50\" y=\"165\" width=\"140\" height=\"54\" rx=\"10\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"120\" y=\"188\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">TF32</text>\n    <text x=\"120\" y=\"207\" fill=\"#7dd3fc\" font-size=\"10\" text-anchor=\"middle\">8 exposant / 10 mantisse</text>\n  </g>\n  <g id=\"fp16\">\n    <rect x=\"50\" y=\"235\" width=\"140\" height=\"54\" rx=\"10\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"120\" y=\"258\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">FP16</text>\n    <text x=\"120\" y=\"277\" fill=\"#6ee7b7\" font-size=\"10\" text-anchor=\"middle\">5 exposant / 10 mantisse</text>\n  </g>\n  <g id=\"bf16\">\n    <rect x=\"50\" y=\"305\" width=\"140\" height=\"54\" rx=\"10\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"120\" y=\"328\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">BF16</text>\n    <text x=\"120\" y=\"347\" fill=\"#6ee7b7\" font-size=\"10\" text-anchor=\"middle\">8 exposant / 7 mantisse</text>\n  </g>\n\n  <g id=\"tensor-core\">\n    <rect x=\"290\" y=\"165\" width=\"190\" height=\"125\" rx=\"12\" fill=\"#111827\" stroke=\"#a78bfa\" stroke-width=\"2.5\"/>\n    <text x=\"385\" y=\"198\" fill=\"#ddd6fe\" font-size=\"14\" text-anchor=\"middle\">Tensor Core</text>\n    <text x=\"385\" y=\"222\" fill=\"#c4b5fd\" font-size=\"11\" text-anchor=\"middle\">produit matriciel</text>\n    <text x=\"385\" y=\"242\" fill=\"#c4b5fd\" font-size=\"11\" text-anchor=\"middle\">et accumulation</text>\n    <text x=\"385\" y=\"270\" fill=\"#a78bfa\" font-size=\"11\" text-anchor=\"middle\">D = A B + C</text>\n  </g>\n\n  <g id=\"accumulateur\">\n    <rect x=\"570\" y=\"165\" width=\"180\" height=\"125\" rx=\"12\" fill=\"#111827\" stroke=\"#fbbf24\" stroke-width=\"2.5\"/>\n    <text x=\"660\" y=\"198\" fill=\"#fef3c7\" font-size=\"14\" text-anchor=\"middle\">Accumulateur</text>\n    <text x=\"660\" y=\"222\" fill=\"#fcd34d\" font-size=\"12\" text-anchor=\"middle\">FP32</text>\n    <text x=\"660\" y=\"246\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">somme des produits</text>\n    <text x=\"660\" y=\"270\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">avant sortie</text>\n  </g>\n\n  <g id=\"flux\">\n    <g stroke=\"#64748b\" stroke-width=\"1.8\">\n      <line x1=\"190\" y1=\"122\" x2=\"290\" y2=\"190\"/>\n      <line x1=\"190\" y1=\"192\" x2=\"290\" y2=\"210\"/>\n      <line x1=\"190\" y1=\"262\" x2=\"290\" y2=\"245\"/>\n      <line x1=\"190\" y1=\"332\" x2=\"290\" y2=\"270\"/>\n    </g>\n    <line x1=\"480\" y1=\"227\" x2=\"570\" y2=\"227\" stroke=\"#a78bfa\" stroke-width=\"2.5\"/>\n    <path d=\"M570,227 L558,221 L558,233 Z\" fill=\"#a78bfa\"/>\n    <text x=\"525\" y=\"214\" fill=\"#c4b5fd\" font-size=\"10\" text-anchor=\"middle\">produits</text>\n  </g>\n\n  <text x=\"400\" y=\"405\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">Les entrées peuvent être plus courtes que l'accumulateur</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Les formats d'entrée",
+            "explanation": "FP32 sert de référence. TF32 garde la plage de FP32 avec une mantisse plus courte. FP16 réduit la plage, BF16 réduit la mantisse tout en gardant une plage proche de FP32.",
+            "highlight": [
+              "fp32",
+              "tf32",
+              "fp16",
+              "bf16"
+            ]
+          },
+          {
+            "title": "2. Le Tensor Core",
+            "explanation": "L'unité effectue un petit produit matriciel suivi d'une accumulation. Les dimensions et les formats pris en charge dépendent de la génération de matériel.",
+            "highlight": [
+              "tensor-core",
+              "flux"
+            ]
+          },
+          {
+            "title": "3. L'accumulateur",
+            "explanation": "La somme est stockée dans un accumulateur FP32 dans les modes courants. Cela limite l'erreur d'arrondi de la somme, sans restaurer la précision perdue à l'entrée.",
+            "highlight": [
+              "accumulateur"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Le script exécute une couche linéaire sous *autocast*. Il utilise CUDA et FP16 si un GPU est disponible, sinon le CPU et BF16. Les poids restent en FP32, la sortie prend le format choisi par *autocast*. La sortie affichée a été obtenue sur une machine où CUDA était disponible.",
+        "code": "import torch\n\ndevice = \"cuda\" if torch.cuda.is_available() else \"cpu\"\ndtype = torch.float16 if device == \"cuda\" else torch.bfloat16\n\nlinear = torch.nn.Linear(4, 3).to(device)\nx = torch.randn(2, 4, device=device)\n\nwith torch.autocast(device_type=device, dtype=dtype):\n    y = linear(x)\n    print(\"sous autocast :\", y.dtype)\n\nprint(\"poids :\", linear.weight.dtype)\nprint(\"sortie :\", y.dtype)",
+        "output": "sous autocast : torch.float16\npoids : torch.float32\nsortie : torch.float16",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Quel format garde une plage d'exposant de 8 bits et une mantisse de 10 bits, utilisé comme entrée de calcul par les Tensor Cores ?",
+          "options": [
+            "FP16",
+            "TF32",
+            "BF16",
+            "INT8"
+          ],
+          "correctIndex": 1,
+          "explanation": "TF32 combine un exposant de 8 bits, comme FP32, et une mantisse de 10 bits. FP16 a un exposant de 5 bits et BF16 une mantisse de 7 bits."
+        },
+        {
+          "question": "Pourquoi accumule-t-on souvent les produits en FP32 plutôt qu'en FP16 ?",
+          "options": [
+            "Pour limiter l'erreur d'arrondi quand on additionne beaucoup de termes",
+            "Pour supprimer complètement les erreurs d'arrondi",
+            "Pour éviter d'utiliser les Tensor Cores",
+            "Pour réduire la mémoire occupée par les poids"
+          ],
+          "correctIndex": 0,
+          "explanation": "Un accumulateur plus large réduit la perte de précision de la somme. Il ne rend pas le résultat exact, car les produits ont déjà été arrondis."
+        },
+        {
+          "question": "Que fait *autocast* dans PyTorch ?",
+          "options": [
+            "Il convertit tous les tenseurs du modèle en FP16 avant l'entraînement",
+            "Il remplace le softmax par une approximation plus rapide",
+            "Il supprime le besoin de loss scaling",
+            "Il choisit un format par opération et laisse certaines opérations en FP32"
+          ],
+          "correctIndex": 3,
+          "explanation": "*autocast* applique une politique par opération. Les opérations sensibles restent en FP32, et les poids ne sont pas tous convertis d'un coup."
+        },
+        {
+          "question": "À quoi sert le loss scaling en FP16 ?",
+          "options": [
+            "À augmenter la taille du lot",
+            "À convertir les poids en BF16",
+            "À éviter que des gradients trop petits deviennent nuls par sous-dépassement",
+            "À accélérer le chargement des données"
+          ],
+          "correctIndex": 2,
+          "explanation": "La perte est multipliée par un facteur avant la rétropropagation, puis les gradients sont divisés par ce facteur. Les petits gradients restent représentables."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Tensor Core",
+          "definition": "Unité de calcul spécialisée dans les petites multiplications de matrices suivies d'une accumulation, avec des formats et des contraintes propres à chaque génération."
+        },
+        {
+          "term": "TF32",
+          "definition": "Mode de calcul qui garde l'exposant de FP32 et réduit la mantisse à 10 bits pour les entrées des Tensor Cores."
+        },
+        {
+          "term": "BF16",
+          "definition": "Format flottant à 8 bits d'exposant et 7 bits de mantisse, qui privilégie la plage de valeurs au détriment de la finesse."
+        },
+        {
+          "term": "Autocast",
+          "definition": "Politique de précision mixte qui choisit un format par opération et conserve les calculs sensibles en FP32."
+        },
+        {
+          "term": "Loss scaling",
+          "definition": "Technique qui multiplie la perte avant la rétropropagation pour éviter que les gradients FP16 ne passent sous le seuil de représentation."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Choisir un format d'entrée",
+          "prompt": "TF32, FP16 et BF16 ont des exposants et des mantisses différents. Rappelez leurs champs, puis expliquez pourquoi BF16 est souvent préféré à FP16 lorsque les gradients débordent, et pourquoi TF32 n'est pas un format de stockage comme les autres.",
+          "solution": "FP32 sert de référence avec 8 bits d'exposant et 23 de mantisse. TF32 garde 8 bits d'exposant et réduit la mantisse à 10 bits. FP16 a 5 bits d'exposant et 10 de mantisse. BF16 a 8 bits d'exposant et 7 de mantisse. BF16 couvre donc une plage proche de FP32, ce qui limite les débordements et les sous-dépassements, au prix d'une mantisse plus courte. TF32 n'est pas un type de tenseur généraliste : c'est un mode de calcul des Tensor Cores, qui arrondit les entrées à 10 bits de mantisse tout en gardant la plage de FP32."
+        }
+      ],
+      "sources": [
+        {
+          "label": "NVIDIA, Tensor Cores, consulté le 21 octobre 2026.",
+          "href": "https://www.nvidia.com/en-us/data-center/tensor-cores/"
+        },
+        {
+          "label": "PyTorch, Automatic Mixed Precision, consulté le 21 octobre 2026.",
+          "href": "https://docs.pytorch.org/docs/stable/amp.html"
+        }
+      ]
+    },
+    {
+      "id": "vram",
+      "title": "Bande passante, VRAM et goulot d'étranglement",
+      "keyTakeaways": [
+        "La mémoire d'un GPU est une hiérarchie : registres, mémoire partagée, caches, HBM et mémoire hôte, avec des compromis différents entre capacité, latence et bande passante.",
+        "Les poids, les activations, les gradients, les états d'optimisation et le cache KV se partagent la VRAM, et leurs volumes ne suivent pas les mêmes règles.",
+        "Le cache KV croît linéairement avec le nombre de couches, la dimension cachée (d_model), la longueur de contexte et la taille du lot.",
+        "La quantification réduit le nombre d'octets par valeur, mais elle peut dégrader la précision et ne supprime pas les coûts de déquantification.",
+        "Un dépassement de mémoire peut venir de la fragmentation ou des réservations de l'allocateur, même quand la somme des tenseurs semble tenir."
+      ],
+      "theory": "### Une hiérarchie, pas un seul réservoir\n\nLa mémoire d'un GPU n'est pas un bloc uniforme. Elle forme une hiérarchie. Les registres sont au plus près des unités de calcul, très rapides et de capacité très limitée. La mémoire partagée, propre à un processeur de flux (SM), est plus grande que les registres mais reste petite ; elle est partagée par les threads d'un bloc. Le cache L1 se situe au même niveau, puis le cache L2, puis la mémoire vidéo, généralement de la HBM sur les accélérateurs de calcul ou de la GDDR sur beaucoup de cartes grand public, avec une grande capacité et une bande passante élevée. Enfin, la mémoire hôte du CPU est accessible par un interconnect, avec un coût supplémentaire.\n\nChaque niveau est un compromis. Plus on monte vers les unités, plus la mémoire est rapide, petite et chère par octet. Plus on descend vers la VRAM, plus la capacité augmente, mais plus la latence et le coût énergétique des accès comptent. Les caches ne sont utiles que si les données sont réutilisées : un accès à une donnée jamais relue ne profite d'aucun cache.\n\n> **Repère.** Un GPU n'est pas seulement limité par le nombre d'opérations qu'il peut faire, mais aussi par la vitesse à laquelle il peut amener les données jusqu'aux unités.\n\n### Ce qui occupe la VRAM\n\nEn entraînement, la VRAM contient les poids du modèle, les gradients, les états de l'optimiseur, les activations conservées pour la rétropropagation et divers tampons temporaires. En inférence, elle contient les poids, les activations du moment, le cache KV et les tampons des noyaux. À cela s'ajoutent la mémoire du contexte CUDA, les espaces de travail des bibliothèques et la fragmentation de l'allocateur.\n\nCette liste explique pourquoi le calcul « nombre de paramètres fois taille d'un paramètre » ne suffit pas. Un modèle de 7 milliards de paramètres en FP16 occupe environ 14 Go pour ses seuls poids, soit 13 Gio. En entraînement avec Adam en précision mixte, il faut ajouter une copie maîtresse des poids en FP32 et les états de l'optimiseur. Dans une configuration courante, on compte 2 octets pour les poids FP16, 4 pour la copie maîtresse, 2 pour les gradients FP16 et 8 pour les deux moments FP32, soit environ 16 octets par paramètre, hors activations et tampons. Le total approche alors 112 Go pour 7 milliards de paramètres. Ce chiffre est une estimation d'illustration, pas une fiche produit : les implémentations et les formats varient.\n\n### Les activations\n\nLes activations sont les sorties intermédiaires des couches. En propagation avant, elles peuvent être libérées au fur et à mesure. En entraînement, il faut souvent les conserver pour calculer les gradients de la rétropropagation. Leur volume dépend de la taille du lot, de la longueur des séquences, du nombre de couches, de la dimension cachée et du type de couche.\n\nDeux modèles de même taille peuvent donc avoir des besoins mémoire très différents selon leur contexte et leur lot. Une séquence plus longue ajoute des activations, et un lot plus grand multiplie leur nombre. Le gradient checkpointing consiste à ne conserver que certaines activations et à recalculer les autres pendant la passe arrière. Il économise de la mémoire au prix de calcul supplémentaire.\n\n### Le cache KV\n\nEn génération autorégressive, le modèle produit un token à la fois. Pour éviter de recalculer les clés et les valeurs des tokens déjà traités, il les conserve dans un cache. Pour un modèle d'attention multi-têtes classique, la taille du cache vaut :\n\n$$KV = 2 \\times L \\times d \\times T \\times B \\times b$$\n\noù $L$ est le nombre de couches, $d$ la dimension cachée, $T$ le nombre de tokens, $B$ la taille du lot et $b$ le nombre d'octets par valeur. Le facteur 2 correspond aux clés et aux valeurs. Avec 32 couches, une dimension de 4096, 4096 tokens, un lot de 1 et des valeurs FP16, on obtient environ 2 Gio.\n\nCe cache croît linéairement avec la longueur du contexte et avec le lot. Pour huit séquences de même longueur, il atteint environ 16 Gio dans cet exemple. C'est pourquoi un serveur peut servir un modèle dont les poids tiennent largement en mémoire, mais saturer dès que le contexte ou le nombre de requêtes simultanées augmente. Les architectures à requêtes groupées, qui partagent certaines clés et valeurs entre plusieurs têtes, réduisent ce volume, mais ne l'annulent pas.\n\nL'article PagedAttention (Kwon et al., 2023) propose de gérer le cache KV par blocs, comme des pages, pour limiter la fragmentation et permettre un partage plus fin entre requêtes. Le principe ne change pas la formule : il change la manière d'allouer et de libérer l'espace.\n\n### Bande passante et quantification\n\nPendant le décodage, chaque token généré demande de lire les poids et le cache KV, mais effectue relativement peu de calcul par rapport au volume lu. Le matériel peut donc être limité par la bande passante mémoire plutôt que par ses unités de calcul. C'est un point que le modèle roofline formalise au module suivant.\n\nLa quantification réduit le nombre d'octets par valeur. Passer de FP16 à INT8 divise approximativement par deux le volume occupé par les paramètres, et INT4 par quatre, selon le format et les échelles associées. Cette réduction peut permettre de charger un modèle plus grand ou d'augmenter le lot. Elle a un coût : les valeurs sont arrondies, il faut parfois déquantifier avant certains calculs, et la qualité peut baisser. Une quantification réussie se mesure sur la tâche visée, pas seulement sur la taille du fichier.\n\n### Pourquoi la VRAM manque alors que le compte semble bon\n\nUn dépassement de mémoire, ou OOM, ne signifie pas toujours que la somme des tenseurs dépasse la capacité. L'allocateur réserve des blocs, garde des tampons en cache et peut laisser des trous entre les allocations. La mémoire réservée peut être supérieure à la mémoire réellement utilisée par les tenseurs. La fragmentation peut empêcher une nouvelle allocation de trouver un bloc contigu assez grand.\n\nLes outils du framework permettent de distinguer la mémoire allouée de la mémoire réservée. Libérer le cache de l'allocateur rend disponibles les blocs inutilisés, mais ne compacte pas la mémoire et ne résout pas toujours la fragmentation. Réduire le lot, la longueur de contexte ou recourir au checkpointing sont des leviers plus directs.\n\n### Mesurer plutôt que deviner\n\nLes formules donnent des ordres de grandeur. Les besoins réels dépendent des noyaux, des tampons temporaires, de la version des bibliothèques et de la carte. Il faut mesurer la mémoire au pic, tester avec le lot et le contexte visés, et vérifier le comportement quand la mémoire manque. Un modèle qui tient à un token près n'est pas un modèle que l'on peut servir sereinement.\n\nLe code ci-dessous applique les formules à un modèle fictif de 7 milliards de paramètres et à un cache KV de 4096 tokens. Les valeurs sont des illustrations, pas des mesures.",
+      "diagram": {
+        "title": "La hiérarchie mémoire du GPU",
+        "description": "Schéma illustratif : registres, mémoire partagée, caches, HBM et mémoire hôte, avec les poids, les activations et le cache KV côté HBM. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 450\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Hiérarchie mémoire du GPU, des registres rapides et petits à la HBM et à la mémoire hôte\">\n  <rect width=\"800\" height=\"450\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Plus on monte, plus c'est rapide et petit</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"registres\">\n    <rect x=\"80\" y=\"90\" width=\"180\" height=\"46\" rx=\"8\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"170\" y=\"118\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">registres</text>\n  </g>\n  <g id=\"partagee\">\n    <rect x=\"80\" y=\"150\" width=\"240\" height=\"46\" rx=\"8\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"200\" y=\"178\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">mémoire partagée et L1</text>\n  </g>\n  <g id=\"l2\">\n    <rect x=\"80\" y=\"210\" width=\"300\" height=\"46\" rx=\"8\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"230\" y=\"238\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">cache L2</text>\n  </g>\n  <g id=\"hbm\">\n    <rect x=\"80\" y=\"270\" width=\"420\" height=\"70\" rx=\"10\" fill=\"#111827\" stroke=\"#34d399\" stroke-width=\"2.5\"/>\n    <text x=\"290\" y=\"298\" fill=\"#d1fae5\" font-size=\"13\" text-anchor=\"middle\">HBM ou GDDR, la VRAM</text>\n    <text x=\"290\" y=\"320\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">grande capacité, bande passante élevée</text>\n  </g>\n  <g id=\"hote\">\n    <rect x=\"80\" y=\"360\" width=\"640\" height=\"46\" rx=\"8\" fill=\"#0f172a\" stroke=\"#64748b\" stroke-width=\"2\"/>\n    <text x=\"400\" y=\"388\" fill=\"#cbd5e1\" font-size=\"12\" text-anchor=\"middle\">mémoire hôte, accessible par un interconnect</text>\n  </g>\n\n  <g id=\"contenu\">\n    <rect x=\"545\" y=\"270\" width=\"210\" height=\"70\" rx=\"10\" fill=\"#111827\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <text x=\"650\" y=\"292\" fill=\"#fef3c7\" font-size=\"12\" text-anchor=\"middle\">poids</text>\n    <text x=\"650\" y=\"310\" fill=\"#fcd34d\" font-size=\"12\" text-anchor=\"middle\">activations</text>\n    <text x=\"650\" y=\"328\" fill=\"#fcd34d\" font-size=\"12\" text-anchor=\"middle\">cache KV</text>\n    <line x1=\"500\" y1=\"305\" x2=\"545\" y2=\"305\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n  </g>\n\n  <g id=\"sens\">\n    <text x=\"400\" y=\"96\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">rapide, petite, chère par octet</text>\n    <text x=\"400\" y=\"430\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">lente, grande, moins chère par octet</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Les niveaux rapides",
+            "explanation": "Les registres et la mémoire partagée sont au plus près des unités. Ils sont petits et doivent être réservés avec soin.",
+            "highlight": [
+              "registres",
+              "partagee"
+            ]
+          },
+          {
+            "title": "2. Les caches",
+            "explanation": "Le cache L2 est partagé par les processeurs de flux. Il amortit les accès répétés, mais ne remplace pas la VRAM pour les gros tenseurs.",
+            "highlight": [
+              "l2"
+            ]
+          },
+          {
+            "title": "3. La HBM",
+            "explanation": "La VRAM contient les poids, les activations et le cache KV. Sa capacité est plus grande, mais sa latence est plus élevée que celle des caches.",
+            "highlight": [
+              "hbm",
+              "contenu"
+            ]
+          },
+          {
+            "title": "4. La mémoire hôte",
+            "explanation": "La mémoire du CPU est plus grande, mais les transferts par l'interconnect coûtent du temps. Garder les données sur la carte évite de répéter ces transferts.",
+            "highlight": [
+              "hote",
+              "sens"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Le script estime la mémoire des poids et du cache KV d'un modèle fictif de 7 milliards de paramètres, avec 32 couches, une dimension de 4096 et des valeurs FP16. Il convertit les octets en Gio et ne mesure aucune carte réelle.",
+        "code": "def gib(n_bytes):\n    return n_bytes / (1024 ** 3)\n\nlayers, d_model, seq_len, batch = 32, 4096, 4096, 1\nbytes_per_value = 2\n\nweights = 7_000_000_000 * bytes_per_value\nkv = 2 * layers * d_model * seq_len * batch * bytes_per_value\n\nprint(f\"poids (7 milliards de parametres, FP16) : {gib(weights):.1f} Gio\")\nprint(f\"cache KV (une sequence de {seq_len} tokens) : {gib(kv):.2f} Gio\")\nprint(f\"cache KV pour 8 sequences : {gib(kv * 8):.2f} Gio\")",
+        "output": "poids (7 milliards de parametres, FP16) : 13.0 Gio\ncache KV (une sequence de 4096 tokens) : 2.00 Gio\ncache KV pour 8 sequences : 16.00 Gio",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "À nombre de couches, dimension cachée et taille de lot fixés, qu'est-ce qui croît linéairement avec le nombre de tokens dans le cache KV ?",
+          "options": [
+            "Le nombre de couches",
+            "La taille du cache KV",
+            "La dimension du vocabulaire",
+            "Le nombre de paramètres du modèle"
+          ],
+          "correctIndex": 1,
+          "explanation": "La formule du cache KV contient un facteur T pour le nombre de tokens. Doubler le contexte double le cache, à autres facteurs constants."
+        },
+        {
+          "question": "Que fait la quantification des poids ?",
+          "options": [
+            "Elle augmente la précision des calculs",
+            "Elle supprime le cache KV",
+            "Elle double la taille du modèle",
+            "Elle réduit le nombre d'octets par valeur, au prix d'une éventuelle perte de précision"
+          ],
+          "correctIndex": 3,
+          "explanation": "La quantification stocke chaque valeur sur moins de bits. Elle réduit la mémoire et parfois le trafic, mais introduit des arrondis et peut nécessiter des étapes de déquantification."
+        },
+        {
+          "question": "Pourquoi un modèle peut-il manquer de VRAM alors que la somme de ses tenseurs semble tenir ?",
+          "options": [
+            "Parce que la VRAM ne peut contenir que des tenseurs FP32",
+            "Parce que le CPU interdit les allocations de plus d'un gigaoctet",
+            "À cause de la fragmentation, des réservations de l'allocateur et des tampons temporaires",
+            "Parce que les poids sont toujours dupliqués sur le disque"
+          ],
+          "correctIndex": 2,
+          "explanation": "L'allocateur réserve des blocs et garde des tampons en cache. La mémoire réservée peut dépasser la mémoire allouée, et la fragmentation peut bloquer une allocation contiguë."
+        },
+        {
+          "question": "En entraînement avec Adam, pourquoi la mémoire par paramètre dépasse-t-elle souvent celle des seuls poids ?",
+          "options": [
+            "Il faut aussi stocker les gradients et les deux moments de l'optimiseur",
+            "Adam duplique chaque poids dans le cache KV",
+            "Adam convertit tous les poids en INT4",
+            "Adam supprime les activations"
+          ],
+          "correctIndex": 0,
+          "explanation": "Adam conserve des moyennes mobiles du gradient et de son carré. Ces états, ainsi que les gradients, s'ajoutent aux poids et augmentent nettement le besoin mémoire."
+        },
+        {
+          "question": "Quel est l'effet d'un doublement de la longueur de contexte sur le cache KV, à nombre de couches, dimension et lot constants ?",
+          "options": [
+            "Il reste identique",
+            "Il double",
+            "Il est divisé par deux",
+            "Il devient nul"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le cache KV est proportionnel au nombre de tokens. Doubler la longueur du contexte double le volume du cache, toutes choses égales par ailleurs."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "VRAM",
+          "definition": "Mémoire globale du GPU, généralement de type HBM. Elle contient les tenseurs et les tampons utilisés par les noyaux."
+        },
+        {
+          "term": "HBM",
+          "definition": "Mémoire à large bande passante utilisée comme mémoire principale de nombreux accélérateurs. Elle est plus grande mais plus lente que les caches."
+        },
+        {
+          "term": "Cache KV",
+          "definition": "Stockage des clés et des valeurs déjà calculées pour les tokens d'une séquence, afin d'éviter de les recalculer à chaque nouveau token."
+        },
+        {
+          "term": "Quantification",
+          "definition": "Réduction du nombre de bits utilisé pour représenter des poids ou des activations, avec un compromis entre mémoire, vitesse et précision."
+        },
+        {
+          "term": "Activation",
+          "definition": "Sortie intermédiaire d'une couche. En entraînement, elle est souvent conservée pour calculer les gradients de la rétropropagation."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Dimensionner un cache KV",
+          "prompt": "Un modèle a 32 couches et une dimension cachée de 4 096. Le cache KV est stocké en 16 bits. Calculez sa taille pour 8 192 tokens et un lot de 4 avec la formule du module, puis expliquez pourquoi PagedAttention ne réduit pas cette quantité et ce qu'il faut ajuster si la mémoire manque.",
+          "solution": "La formule 2 × L × d × T × B × b donne 2 × 32 × 4 096 × 8 192 × 4 × 2 octets, soit 17 179 869 184 octets, donc 16 Gio. PagedAttention range ce cache en blocs pour limiter la fragmentation et faciliter le partage, mais il ne change pas le nombre de clés et de valeurs à stocker. Si la mémoire manque, il faut réduire la longueur de contexte, le lot ou la précision du cache, et surveiller les préemptions. La quantification des poids ne réduit pas ce poste."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Williams, Waterman et Patterson, Roofline: An Insightful Visual Performance Model for Multicore Architectures, 2009.",
+          "href": "https://doi.org/10.1145/1498765.1498785"
+        },
+        {
+          "label": "Kwon et al., Efficient Memory Management for Large Language Model Serving with PagedAttention, 2023.",
+          "href": "https://arxiv.org/abs/2309.06180"
+        }
+      ]
+    },
+    {
+      "id": "roofline",
+      "title": "Inférence, entraînement et modèle roofline",
+      "keyTakeaways": [
+        "Le modèle roofline borne la performance par le minimum entre la puissance de calcul et la bande passante multipliée par l'intensité arithmétique.",
+        "L'intensité arithmétique est le rapport entre les opérations et les octets transférés. Elle permet de savoir si une charge est limitée par le calcul ou par la mémoire.",
+        "Le préremplissage d'un prompt traite beaucoup de tokens en parallèle et se rapproche d'un régime limité par le calcul, tandis que le décodage token par token est souvent limité par la mémoire.",
+        "FlashAttention réduit le trafic mémoire de l'attention en tuilant les calculs, sans approximer le résultat.",
+        "Le roofline est une borne supérieure : il ne prédit ni la latence, ni l'occupation, ni les effets de dépendance."
+      ],
+      "theory": "### Deux plafonds\n\nLe modèle roofline, proposé par Williams, Waterman et Patterson en 2009, représente la performance atteignable d'un noyau en fonction de son intensité arithmétique. Il combine deux limites. La première est la puissance de calcul maximale du processeur, souvent appelée toit du calcul. La seconde est la bande passante mémoire multipliée par le nombre d'opérations effectuées par octet transféré. On écrit :\n\n$$P \\le \\min(P_{\\text{calcul}}, \\beta \\times I)$$\n\noù $P$ est la performance en opérations par seconde, $P_{\\text{calcul}}$ la puissance crête de calcul, $\\beta$ la bande passante mémoire et $I$ l'intensité arithmétique. L'intensité se définit comme le nombre d'opérations divisé par le nombre d'octets transférés :\n\n$$I = \\frac{F}{Q}$$\n\nSi $I$ est faible, la droite $\\beta \\times I$ est basse : le noyau est limité par la mémoire. Si $I$ est élevé, le plafond $P_{\\text{calcul}}$ domine : le noyau est limité par le calcul. Le point où les deux droites se rencontrent s'appelle le point de crête :\n\n$$I^{*} = \\frac{P_{\\text{calcul}}}{\\beta}$$\n\nSur un graphique en échelle logarithmique, la courbe monte avec une pente liée à la bande passante, puis devient horizontale au toit du calcul. Le roofline est une borne supérieure : un noyau réel peut rester en dessous pour de nombreuses raisons, mais il ne peut pas la dépasser dans les hypothèses du modèle.\n\n### Lire la courbe\n\nPrenons une machine fictive avec un toit de 100 TFLOP/s et une bande passante de 1 To/s. Le point de crête vaut 100 FLOP par octet. À une intensité de 1 FLOP par octet, la limite mémoire donne 1 TFLOP/s, soit cent fois moins que le toit. À une intensité de 1000 FLOP par octet, la limite mémoire dépasse le toit et le calcul domine. Ces valeurs sont choisies pour l'exemple : elles ne décrivent aucune carte commerciale.\n\nCe graphique aide à interpréter une mesure. Un noyau qui n'atteint pas le toit peut être limité par la mémoire, par les dépendances entre instructions, par un manque de warps ou par un accès irrégulier. Le roofline ne dit pas lequel de ces problèmes est présent. Il indique seulement quel plafond semble le plus proche.\n\n### Préremplissage et décodage\n\nL'inférence d'un modèle de langage se décompose souvent en deux phases. Le **préremplissage** traite le prompt entier en parallèle. Les tokens du prompt sont disponibles d'un coup, et les produits matriciels portent sur des matrices de taille significative. Le travail est régulier et peut avoir une intensité arithmétique élevée, surtout avec un prompt long et un lot important.\n\nLe **décodage** produit un token à la fois. À chaque étape, le modèle lit les poids et le cache KV, puis effectue relativement peu de calcul par rapport au volume lu. L'intensité arithmétique est faible, et la phase est souvent limitée par la bande passante. Un lot plus grand augmente le travail par lecture et peut rapprocher le décodage du régime limité par le calcul, mais il augmente aussi le cache KV et la mémoire.\n\nCette séparation explique deux mesures différentes. Le temps jusqu'au premier token dépend surtout du préremplissage et de la file d'attente. Le débit de génération dépend du décodage et de la taille du lot. Un serveur peut être rapide sur l'un et lent sur l'autre.\n\n### Attention et FlashAttention\n\nL'attention standard calcule une matrice de scores entre toutes les requêtes et toutes les clés. Pour une séquence de longueur $T$, cette matrice contient $T^2$ éléments. La matérialiser en mémoire puis la relire pour le softmax et le produit avec les valeurs représente un trafic important, surtout quand $T$ grandit.\n\nFlashAttention (Dao et al., 2022) découpe le calcul en tuiles et calcule le softmax par blocs, sans écrire la matrice complète en mémoire globale. La passe arrière recalcule certaines valeurs au lieu de toutes les stocker. Le résultat reste une attention exacte au sens algorithmique, avec des écarts d'arrondi possibles. Le nombre de FLOPs reste du même ordre, mais le trafic mémoire diminue, ce qui déplace le point de fonctionnement sur le roofline.\n\nIl ne faut pas en conclure que FlashAttention accélère tous les modèles. Le gain dépend de la longueur de séquence, de la taille des têtes, de la précision et de la carte. Pour de courtes séquences, le surcoût de tuilage peut réduire l'avantage. Là encore, la mesure sur la charge réelle tranche.\n\n### Entraînement\n\nL'entraînement combine une passe avant et une passe arrière. La passe arrière calcule les gradients et représente souvent environ deux fois le travail de la passe avant, ce qui donne un ordre de grandeur de trois passages de calcul pour une étape complète. Ce n'est pas une règle exacte : elle dépend des couches, des activations et des optimisations.\n\nLa mémoire d'entraînement ne se limite pas aux poids. Les activations conservées pour la rétropropagation peuvent dominer, surtout avec de longues séquences et de grands lots. Le gradient checkpointing échange du calcul contre de la mémoire. La précision mixte modifie à la fois le toit de calcul et le volume des données, ce qui déplace le point de crête.\n\nLe lotissement en entraînement augmente l'intensité arithmétique, mais il est limité par la mémoire et peut changer la dynamique d'apprentissage. L'accumulation de gradients simule un plus grand lot sans stocker toutes les activations en même temps.\n\n### Ce que le roofline ne dit pas\n\nLe roofline ignore la latence des accès, l'occupation des unités, les dépendances entre instructions, les conflits de mémoire partagée, les surcoûts de synchronisation et la qualité des noyaux. Il suppose que le noyau peut atteindre le débit maximal de la mémoire ou le toit de calcul, ce qui n'est pas toujours possible. Il ne dit rien non plus de la précision numérique ni de la consommation énergétique.\n\nIl reste utile comme premier diagnostic. Si une charge a une faible intensité et que la mémoire est saturée, augmenter la puissance de calcul ne servira à rien. Si l'intensité est élevée et que le calcul est saturé, réduire les accès mémoire ne suffira pas. Le roofline aide à poser la bonne question avant d'optimiser.\n\n### Un exemple de calcul\n\nLe code ci-dessous calcule l'intensité arithmétique d'une multiplication de matrices pour trois tailles de lot, avec une dimension de 4096 et des valeurs FP16. Il compte les opérations et les octets transférés pour les poids, l'entrée et la sortie. Il ne mesure aucun temps et ne suppose aucune bande passante réelle.\n\nAvec un lot de 1, l'intensité vaut environ 1 FLOP par octet : le calcul ressemble à un décodage token par token, où chaque poids est lu pour très peu d'opérations. Avec un lot de 32, elle monte à environ 31,5. Avec un lot de 1024, elle atteint environ 683. Sur la machine fictive du début, le premier cas serait limité par la mémoire, le dernier par le calcul. Ces valeurs illustrent le mécanisme, pas une carte particulière.",
+      "diagram": {
+        "title": "La courbe roofline et ses deux régimes",
+        "description": "Schéma illustratif : une pente limitée par la bande passante, un toit de calcul horizontal, un point de crête et deux points de fonctionnement. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 460\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Courbe roofline avec une pente de bande passante, un toit de calcul, un point de crête et deux points de fonctionnement\">\n  <rect width=\"800\" height=\"460\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Deux plafonds, un point de crête</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"axes\">\n    <line x1=\"90\" y1=\"360\" x2=\"730\" y2=\"360\" stroke=\"#64748b\" stroke-width=\"1.8\"/>\n    <line x1=\"90\" y1=\"360\" x2=\"90\" y2=\"90\" stroke=\"#64748b\" stroke-width=\"1.8\"/>\n    <text x=\"410\" y=\"420\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">intensité arithmétique (FLOP/octet)</text>\n    <text x=\"30\" y=\"230\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\" transform=\"rotate(-90 30 230)\">débit (FLOP/s)</text>\n  </g>\n\n  <g id=\"pente\">\n    <line x1=\"90\" y1=\"360\" x2=\"390\" y2=\"170\" stroke=\"#38bdf8\" stroke-width=\"3\"/>\n    <text x=\"215\" y=\"300\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">limite par la bande passante</text>\n  </g>\n\n  <g id=\"toit\">\n    <line x1=\"390\" y1=\"170\" x2=\"730\" y2=\"170\" stroke=\"#34d399\" stroke-width=\"3\"/>\n    <text x=\"560\" y=\"155\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">toit du calcul</text>\n  </g>\n\n  <g id=\"crete\">\n    <circle cx=\"390\" cy=\"170\" r=\"7\" fill=\"#fbbf24\" stroke=\"#fef3c7\" stroke-width=\"2\"/>\n    <text x=\"390\" y=\"145\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">point de crête</text>\n    <line x1=\"390\" y1=\"170\" x2=\"390\" y2=\"360\" stroke=\"#fbbf24\" stroke-width=\"1\" stroke-dasharray=\"4 4\"/>\n  </g>\n\n  <g id=\"decode\">\n    <circle cx=\"170\" cy=\"330\" r=\"7\" fill=\"#f472b6\" stroke=\"#fbcfe8\" stroke-width=\"2\"/>\n    <text x=\"170\" y=\"312\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">décodage</text>\n    <text x=\"170\" y=\"385\" fill=\"#f9a8d4\" font-size=\"10\" text-anchor=\"middle\">faible intensité</text>\n  </g>\n\n  <g id=\"prefill\">\n    <circle cx=\"570\" cy=\"170\" r=\"7\" fill=\"#a78bfa\" stroke=\"#ddd6fe\" stroke-width=\"2\"/>\n    <text x=\"570\" y=\"200\" fill=\"#c4b5fd\" font-size=\"11\" text-anchor=\"middle\">préremplissage</text>\n    <text x=\"570\" y=\"385\" fill=\"#c4b5fd\" font-size=\"10\" text-anchor=\"middle\">forte intensité</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. La pente mémoire",
+            "explanation": "À faible intensité, la performance est bornée par la bande passante multipliée par l'intensité. Lire moins d'octets ou réutiliser davantage les données déplace ce plafond.",
+            "highlight": [
+              "axes",
+              "pente",
+              "decode"
+            ]
+          },
+          {
+            "title": "2. Le toit du calcul",
+            "explanation": "À forte intensité, la performance est bornée par la puissance de calcul. Les Tensor Cores peuvent relever ce toit ; une meilleure occupation aide à s'en approcher.",
+            "highlight": [
+              "toit",
+              "prefill"
+            ]
+          },
+          {
+            "title": "3. Le point de crête",
+            "explanation": "Le point de crête marque le passage d'un régime à l'autre. Il dépend du rapport entre la puissance de calcul et la bande passante de la machine.",
+            "highlight": [
+              "crete"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Le script calcule l'intensité arithmétique d'une multiplication de matrices de 4096 par 4096 en FP16, pour trois tailles de lot. Il compte les opérations et les octets transférés pour les poids, l'entrée et la sortie, sans mesurer de temps.",
+        "code": "def gemm_intensity(m, k, n, bytes_per_value=2):\n    flops = 2 * m * n * k\n    weights = n * k * bytes_per_value\n    activations = (m * k + m * n) * bytes_per_value\n    return flops / (weights + activations)\n\nfor m in (1, 32, 1024):\n    print(f\"lot de {m:>4} : {gemm_intensity(m, 4096, 4096):8.1f} FLOP/octet\")",
+        "output": "lot de    1 :      1.0 FLOP/octet\nlot de   32 :     31.5 FLOP/octet\nlot de 1024 :    682.7 FLOP/octet",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Comment définit-on l'intensité arithmétique ?",
+          "options": [
+            "Le nombre d'opérations divisé par le nombre d'octets transférés",
+            "Le nombre d'octets divisé par le nombre d'opérations",
+            "La fréquence du processeur divisée par sa mémoire",
+            "Le nombre de cœurs multiplié par la taille du cache"
+          ],
+          "correctIndex": 0,
+          "explanation": "L'intensité arithmétique vaut F divisé par Q, opérations sur octets. Elle indique combien de calcul est effectué pour chaque octet amené jusqu'aux unités."
+        },
+        {
+          "question": "En décodage autorégressif avec un lot modeste, quel est le goulot le plus fréquent ?",
+          "options": [
+            "La lecture des poids et du cache KV",
+            "Le nombre de tokens du vocabulaire",
+            "La vitesse du disque dur",
+            "Le calcul du softmax uniquement"
+          ],
+          "correctIndex": 0,
+          "explanation": "Chaque token généré demande de lire les poids et le cache KV pour peu de calcul. La phase est souvent limitée par la bande passante mémoire."
+        },
+        {
+          "question": "Que change FlashAttention par rapport à une attention standard ?",
+          "options": [
+            "Il approxime le softmax pour aller plus vite",
+            "Il réduit le trafic mémoire en tuilant le calcul, sans approximation algorithmique, avec des écarts d'arrondi possibles",
+            "Il supprime la phase de décodage",
+            "Il divise le nombre de paramètres du modèle"
+          ],
+          "correctIndex": 1,
+          "explanation": "FlashAttention calcule l'attention par blocs et évite de matérialiser toute la matrice des scores. Le résultat reste exact, mais le trafic mémoire diminue."
+        },
+        {
+          "question": "Que fournit le modèle roofline ?",
+          "options": [
+            "Le temps exact d'un noyau sur une carte donnée",
+            "Le prix d'une carte graphique",
+            "Le nombre de tokens qu'un modèle peut générer",
+            "Une borne supérieure de performance, pas une prédiction exacte"
+          ],
+          "correctIndex": 3,
+          "explanation": "Le roofline combine un toit de calcul et une limite de bande passante. Il borne la performance, mais ne capture ni la latence ni l'occupation réelle."
+        },
+        {
+          "question": "Pourquoi le préremplissage d'un long prompt est-il souvent plus proche du régime limité par le calcul que le décodage ?",
+          "options": [
+            "Parce qu'il traite beaucoup de tokens en parallèle et réutilise davantage les poids",
+            "Parce qu'il n'utilise pas de matrices",
+            "Parce qu'il ne lit jamais la mémoire",
+            "Parce qu'il produit un seul token"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le préremplissage traite le prompt entier en parallèle, avec des produits matriciels plus grands. Le décodage, lui, produit un token à la fois et lit beaucoup pour peu de calcul."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Roofline",
+          "definition": "Modèle qui borne la performance d'un noyau par le minimum entre la puissance de calcul et la bande passante multipliée par l'intensité arithmétique."
+        },
+        {
+          "term": "Intensité arithmétique",
+          "definition": "Rapport entre le nombre d'opérations et le nombre d'octets transférés. Une faible intensité rapproche une charge du régime limité par la mémoire."
+        },
+        {
+          "term": "Point de crête",
+          "definition": "Intensité à laquelle la limite de bande passante rejoint le toit de calcul. Elle vaut le rapport entre la puissance de calcul et la bande passante."
+        },
+        {
+          "term": "Préremplissage",
+          "definition": "Phase d'inférence qui traite le prompt entier en parallèle avant de générer les tokens suivants."
+        },
+        {
+          "term": "Décodage",
+          "definition": "Phase d'inférence qui produit les tokens un par un. Elle lit souvent les poids et le cache KV pour relativement peu de calcul."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Lire un point de crête",
+          "prompt": "Une machine fictive a un toit de calcul de 60 TFLOP/s et une bande passante de 1,5 To/s. Calculez son point de crête en FLOP par octet. Un noyau d'intensité 8 FLOP/octet et un noyau d'intensité 200 FLOP/octet sont-ils limités par la mémoire ou par le calcul ? Que faut-il optimiser dans chaque cas ?",
+          "solution": "Le point de crête vaut P / β = 60 / 1,5 = 40 FLOP par octet. À 8 FLOP/octet, la limite mémoire donne 1,5 × 8 = 12 TFLOP/s, très en dessous du toit : le noyau est limité par la mémoire. Il faut réduire les octets lus ou réutiliser davantage les données, par exemple en augmentant le lot. À 200 FLOP/octet, la limite mémoire dépasse le toit : le noyau est limité par le calcul, et c'est l'occupation des unités et la qualité des noyaux qu'il faut améliorer. Le roofline reste une borne, pas une mesure."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Williams, Waterman et Patterson, Roofline: An Insightful Visual Performance Model for Multicore Architectures, 2009.",
+          "href": "https://doi.org/10.1145/1498765.1498785"
+        },
+        {
+          "label": "Dao et al., FlashAttention, 2022.",
+          "href": "https://arxiv.org/abs/2205.14135"
+        },
+        {
+          "label": "Kwon et al., Efficient Memory Management for Large Language Model Serving with PagedAttention, 2023.",
+          "href": "https://arxiv.org/abs/2309.06180"
+        }
+      ]
+    },
+    {
+      "id": "cuda-avenir",
+      "title": "CUDA, TPU, Groq et avenir du silicium",
+      "keyTakeaways": [
+        "CUDA est un modèle de programmation et un ensemble d'outils pour les GPU NVIDIA, pas un composant matériel isolé.",
+        "La pile logicielle, des bibliothèques comme cuBLAS et cuDNN jusqu'aux frameworks, compte autant que le matériel dans l'usage quotidien d'un GPU.",
+        "Les accélérateurs spécialisés comme les TPU privilégient les opérations matricielles prises en charge par leur compilateur, au prix d'une flexibilité moindre.",
+        "La SRAM intégrée est rapide mais petite et coûteuse par bit ; la HBM est plus grande et plus lente. Ce compromis structure les architectures.",
+        "Le choix d'un accélérateur dépend de la charge, de la mémoire, du contexte, de la portabilité et du coût, pas d'un classement général."
+      ],
+      "theory": "### CUDA est un modèle de programmation\n\nCUDA n'est pas une puce. C'est un modèle de programmation et une plateforme logicielle créés par NVIDIA pour exécuter du code généraliste sur ses GPU. Un programme CUDA décrit des noyaux, c'est-à-dire des fonctions exécutées par de nombreux threads. Les threads sont regroupés en blocs, et les blocs en une grille. Les threads d'un bloc peuvent partager de la mémoire et se synchroniser ; les blocs sont indépendants et peuvent être ordonnancés dans un ordre quelconque.\n\nLe guide de programmation CUDA décrit cette hiérarchie, les espaces mémoire et les mécanismes de synchronisation. Il montre aussi pourquoi l'écriture d'un noyau efficace demande de penser à l'accès mémoire, à l'occupation et à la divergence. Un programme naïf peut être correct et lent ; les bibliothèques spécialisées existent précisément pour éviter de réinventer ces optimisations.\n\n### La pile logicielle\n\nAu-dessus du matériel, plusieurs couches se superposent. Le pilote expose la carte au système. Le runtime CUDA fournit les appels de lancement et de gestion de la mémoire. Les bibliothèques spécialisées implémentent les opérations courantes : cuBLAS pour les multiplications de matrices, cuDNN pour les primitives d'apprentissage profond, NCCL pour les communications entre plusieurs GPU. Les frameworks comme PyTorch utilisent ces bibliothèques pour exécuter les opérations d'un modèle.\n\nCette pile explique pourquoi une même carte peut être facile à utiliser dans un framework et difficile à programmer directement. Le framework choisit les noyaux, gère les tenseurs et enchaîne les opérations. L'utilisateur écrit du Python ou du code de haut niveau, et les noyaux CUDA sont appelés en dessous. Les extensions personnalisées et les langages de noyaux comme Triton permettent de descendre d'un niveau quand une opération manque.\n\n### Pourquoi l'écosystème compte\n\nL'avantage de CUDA ne se réduit pas à une instruction matérielle. Il vient de l'ensemble formé par les bibliothèques, les profileurs, les débogueurs, la documentation, les exemples et le support des frameworks. Un développeur qui trouve un noyau optimisé pour sa couche, un profileur pour comprendre un ralentissement et une communauté pour répondre à une erreur gagne du temps. Cet avantage est qualitatif et dépend des usages ; il ne se mesure pas par un seul chiffre.\n\nL'écosystème a aussi un coût de portabilité. Un code écrit avec les bibliothèques CUDA ne fonctionne pas directement sur un autre accélérateur. Les alternatives proposent des couches de compatibilité, mais elles ne garantissent pas les mêmes performances ni la même couverture. Le choix d'une plateforme engage donc au-delà du matériel.\n\n### Les alternatives\n\nAMD propose ROCm et HIP, une plateforme et une interface proches de CUDA dans leur esprit, avec un travail de portage à prévoir. Intel propose oneAPI pour ses accélérateurs ; son implémentation DPC++ s'appuie sur le standard SYCL. Apple propose Metal pour ses puces. Ces plateformes couvrent des besoins différents et ne se substituent pas toujours les unes aux autres.\n\nGoogle a conçu les TPU autour d'unités matricielles et d'un compilateur, XLA. Un TPU n'est pas un GPU généraliste : il est optimisé pour les charges d'apprentissage et d'inférence prises en charge par son compilateur et ses frameworks. Il peut être très efficace sur les opérations matricielles qui lui conviennent, mais il demande des opérations compatibles et une certaine discipline de compilation. Son intérêt dépend de la charge, pas d'une supériorité générale.\n\nGroq commercialise des accélérateurs d'inférence dont l'argument central, présenté par la société, est de garder les données dans une mémoire SRAM sur puce et de s'appuyer sur un ordonnancement déterministe. Cette approche privilégie la prévisibilité et la bande passante locale, au prix d'une capacité mémoire plus faible et d'une flexibilité moindre qu'un GPU. Là encore, il faut mesurer sur la charge visée.\n\n### SRAM contre HBM\n\nLa SRAM est une mémoire rapide, intégrée au voisinage des unités de calcul. Elle est chère par bit et occupe une surface importante, donc sa capacité reste limitée. La HBM offre une grande capacité et une bande passante élevée, mais elle est plus lente que la SRAM et se trouve à distance des unités. Les caches et la mémoire partagée sont des formes de SRAM ; la VRAM des accélérateurs de calcul est souvent de la HBM, mais beaucoup de cartes grand public utilisent de la GDDR.\n\nCe compromis structure les architectures. Garder les données en SRAM réduit le temps d'accès et la consommation des transferts, mais limite la taille des tenseurs et des lots. Utiliser la HBM permet de stocker de grands modèles, au prix de transferts plus fréquents. Les stratégies de tuilage, de fusion de noyaux et de réutilisation cherchent à maximiser le temps passé à calculer sur des données déjà chargées.\n\nUn accélérateur qui mise beaucoup sur la SRAM, comme l'approche décrite par Groq, accepte une capacité plus faible pour éviter les accès à une mémoire plus lente. Un GPU mise sur une grande HBM et sur des caches pour absorber les accès. Les deux choix ne répondent pas aux mêmes contraintes.\n\n### Ce qui vient ensuite\n\nPlusieurs directions cohabitent : empilement de mémoire HBM, découpage des puces en chiplets, interconnexions plus rapides entre accélérateurs, exploitation de la parcimonie, formats de précision plus courts, compilation plus agressive et accélérateurs dédiés à l'inférence. Aucune ne résume à elle seule l'avenir du silicium. Les gains dépendent de la charge, du logiciel et du coût énergétique.\n\nL'énergie devient une contrainte de premier ordre. Déplacer des données coûte de l'énergie, et un accélérateur qui réduit les transferts peut être plus sobre même s'il n'est pas le plus rapide en pointe. Le cours sur l'IA et l'environnement détaille ces questions. Le calculateur de coûts du site aide, lui, à relier un usage à un budget, sans se substituer à une mesure.\n\n### Choisir sans se tromper\n\nPour choisir un accélérateur, il faut partir de la charge réelle : types de modèles, formes de tenseurs, taille des lots, longueur de contexte, précision acceptée, latence visée et débit attendu. Il faut vérifier que les opérations sont disponibles dans le framework, que la mémoire tient, que les outils de mesure existent et que la portabilité future est acceptable.\n\nUn banc d'essai sur un seul modèle ne suffit pas. Un classement général ne dit rien d'une charge particulière. La bonne démarche est de mesurer, de comparer à mémoire et précision égales, et de vérifier le coût complet, matériel, énergie et exploitation. C'est moins spectaculaire qu'un tableau de nombres, mais c'est la seule comparaison qui tienne.",
+      "diagram": {
+        "title": "La pile CUDA et les alternatives",
+        "description": "Schéma illustratif : matériel, pilote, runtime, bibliothèques, framework, puis quelques alternatives spécialisées. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 470\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Pile logicielle CUDA du matériel au framework, avec les alternatives ROCm, oneAPI, Metal, TPU et Groq\">\n  <rect width=\"800\" height=\"470\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Du silicium au framework</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"pile\">\n    <rect id=\"framework\" x=\"60\" y=\"90\" width=\"400\" height=\"54\" rx=\"8\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"260\" y=\"122\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">framework, par exemple PyTorch</text>\n    <rect id=\"bibliotheques\" x=\"60\" y=\"155\" width=\"400\" height=\"54\" rx=\"8\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"260\" y=\"187\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">bibliothèques, cuBLAS, cuDNN, NCCL</text>\n    <rect id=\"runtime\" x=\"60\" y=\"220\" width=\"400\" height=\"54\" rx=\"8\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"260\" y=\"252\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">runtime CUDA</text>\n    <rect id=\"pilote\" x=\"60\" y=\"285\" width=\"400\" height=\"54\" rx=\"8\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"260\" y=\"317\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">pilote</text>\n    <rect id=\"materiel\" x=\"60\" y=\"350\" width=\"400\" height=\"54\" rx=\"8\" fill=\"#111827\" stroke=\"#34d399\" stroke-width=\"2.5\"/>\n    <text x=\"260\" y=\"382\" fill=\"#d1fae5\" font-size=\"12\" text-anchor=\"middle\">GPU NVIDIA</text>\n    <g stroke=\"#64748b\" stroke-width=\"1.5\">\n      <line x1=\"260\" y1=\"144\" x2=\"260\" y2=\"155\"/>\n      <line x1=\"260\" y1=\"209\" x2=\"260\" y2=\"220\"/>\n      <line x1=\"260\" y1=\"274\" x2=\"260\" y2=\"285\"/>\n      <line x1=\"260\" y1=\"339\" x2=\"260\" y2=\"350\"/>\n    </g>\n  </g>\n\n  <g id=\"alternatives\">\n    <rect x=\"520\" y=\"90\" width=\"220\" height=\"314\" rx=\"12\" fill=\"#0b1220\" stroke=\"#a78bfa\" stroke-width=\"2\" stroke-dasharray=\"7 5\"/>\n    <text x=\"630\" y=\"118\" fill=\"#ddd6fe\" font-size=\"12\" text-anchor=\"middle\">autres approches</text>\n    <text x=\"630\" y=\"155\" fill=\"#c4b5fd\" font-size=\"11\" text-anchor=\"middle\">ROCm et HIP, AMD</text>\n    <text x=\"630\" y=\"185\" fill=\"#c4b5fd\" font-size=\"11\" text-anchor=\"middle\">oneAPI, Intel</text>\n    <text x=\"630\" y=\"215\" fill=\"#c4b5fd\" font-size=\"11\" text-anchor=\"middle\">Metal, Apple</text>\n    <text x=\"630\" y=\"245\" fill=\"#c4b5fd\" font-size=\"11\" text-anchor=\"middle\">TPU et XLA, Google</text>\n    <text x=\"630\" y=\"275\" fill=\"#c4b5fd\" font-size=\"11\" text-anchor=\"middle\">Groq, inférence</text>\n    <text x=\"630\" y=\"330\" fill=\"#94a3b8\" font-size=\"10\" text-anchor=\"middle\">compromis différents</text>\n    <text x=\"630\" y=\"350\" fill=\"#94a3b8\" font-size=\"10\" text-anchor=\"middle\">de capacité et de flexibilité</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Le matériel et le pilote",
+            "explanation": "Le GPU exécute les noyaux. Le pilote expose la carte et permet au runtime de lui envoyer du travail.",
+            "highlight": [
+              "materiel",
+              "pilote"
+            ]
+          },
+          {
+            "title": "2. Les bibliothèques",
+            "explanation": "cuBLAS, cuDNN et NCCL fournissent des opérations optimisées. Le framework les appelle sans que l'utilisateur écrive chaque noyau.",
+            "highlight": [
+              "runtime",
+              "bibliotheques",
+              "framework"
+            ]
+          },
+          {
+            "title": "3. Les alternatives",
+            "explanation": "ROCm, oneAPI, Metal, les TPU et les accélérateurs d'inférence comme Groq proposent d'autres compromis. Aucun n'est universel.",
+            "highlight": [
+              "alternatives"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Quel est l'avantage principal de CUDA pour un développeur ?",
+          "options": [
+            "Il rend tous les calculs plus rapides, quelle que soit la carte",
+            "Il remplace le système d'exploitation",
+            "Un écosystème de bibliothèques, d'outils et de frameworks qui réduit le travail d'intégration",
+            "Il garantit la portabilité vers tous les accélérateurs"
+          ],
+          "correctIndex": 2,
+          "explanation": "CUDA apporte un modèle de programmation et un ensemble d'outils et de bibliothèques. L'avantage est logiciel et écosystémique, pas une garantie de vitesse."
+        },
+        {
+          "question": "Quel compromis décrit le mieux un accélérateur spécialisé comme le TPU ?",
+          "options": [
+            "Il est plus flexible qu'un GPU sur toutes les charges",
+            "Il excelle sur les charges matricielles prises en charge, au prix d'une flexibilité et d'une portabilité moindres",
+            "Il ne peut exécuter que des additions",
+            "Il remplace la mémoire HBM par un disque"
+          ],
+          "correctIndex": 1,
+          "explanation": "Un TPU est conçu autour d'unités matricielles et d'un compilateur. Il peut être efficace sur les charges adaptées, mais demande des opérations et des frameworks compatibles."
+        },
+        {
+          "question": "Pourquoi la SRAM intégrée est-elle un compromis ?",
+          "options": [
+            "Elle est rapide mais petite et coûteuse par bit, ce qui limite la taille des données résidentes",
+            "Elle est lente mais illimitée",
+            "Elle remplace la HBM sans inconvénient",
+            "Elle ne peut stocker que des nombres entiers"
+          ],
+          "correctIndex": 0,
+          "explanation": "La SRAM réduit le temps d'accès et les transferts, mais sa capacité est faible et son coût par bit élevé. Les architectures doivent choisir ce qu'elles y gardent."
+        },
+        {
+          "question": "Un GPU est-il toujours le bon choix pour l'IA ?",
+          "options": [
+            "Oui, pour tout modèle et toute requête",
+            "Oui, parce qu'un CPU ne peut pas faire de multiplications",
+            "Non, parce que les GPU ne savent pas faire d'inférence",
+            "Non, cela dépend de la régularité du travail, de la taille du lot et du coût des transferts"
+          ],
+          "correctIndex": 3,
+          "explanation": "Le bon accélérateur dépend de la charge. Un petit modèle, une requête isolée ou un traitement très branchu peuvent être mieux servis par un CPU."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "CUDA",
+          "definition": "Modèle de programmation et plateforme logicielle de NVIDIA pour exécuter des noyaux généralistes sur ses GPU."
+        },
+        {
+          "term": "Noyau",
+          "definition": "Fonction exécutée en parallèle par de nombreux threads sur un GPU."
+        },
+        {
+          "term": "cuDNN",
+          "definition": "Bibliothèque de primitives d'apprentissage profond, comme les convolutions et les normalisations, optimisée pour les GPU NVIDIA."
+        },
+        {
+          "term": "TPU",
+          "definition": "Accélérateur conçu par Google autour d'unités matricielles et d'un compilateur, destiné aux charges d'apprentissage et d'inférence prises en charge."
+        },
+        {
+          "term": "SRAM",
+          "definition": "Mémoire statique rapide et de faible capacité, utilisée pour les caches et la mémoire partagée des processeurs."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "CUDA n’est pas une puce",
+          "prompt": "Que désigne CUDA, et pourquoi la pile logicielle compte-t-elle autant que le matériel dans le choix d’un accélérateur ?",
+          "solution": "CUDA est un modèle de programmation et une plateforme logicielle de NVIDIA, pas un composant isolé. Les bibliothèques et les frameworks déterminent l’usage réel. Un accélérateur se choisit sur la charge, la mémoire, la portabilité et le coût, pas sur un classement général."
+        }
+      ],
+      "sources": [
+        {
+          "label": "NVIDIA, CUDA Programming Guide, consulté le 21 octobre 2026.",
+          "href": "https://docs.nvidia.com/cuda/cuda-programming-guide/"
+        },
+        {
+          "label": "NVIDIA, Tensor Cores, consulté le 21 octobre 2026.",
+          "href": "https://www.nvidia.com/en-us/data-center/tensor-cores/"
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "label": "NVIDIA, CUDA Programming Guide, consulté le 21 octobre 2026.",
+      "href": "https://docs.nvidia.com/cuda/cuda-programming-guide/"
+    },
+    {
+      "label": "NVIDIA, Tensor Cores, consulté le 21 octobre 2026.",
+      "href": "https://www.nvidia.com/en-us/data-center/tensor-cores/"
+    },
+    {
+      "label": "Williams, Waterman et Patterson, Roofline: An Insightful Visual Performance Model for Multicore Architectures, 2009.",
+      "href": "https://doi.org/10.1145/1498765.1498785"
+    },
+    {
+      "label": "PyTorch, Automatic Mixed Precision, consulté le 21 octobre 2026.",
+      "href": "https://docs.pytorch.org/docs/stable/amp.html"
+    },
+    {
+      "label": "Dao et al., FlashAttention, 2022.",
+      "href": "https://arxiv.org/abs/2205.14135"
+    },
+    {
+      "label": "Kwon et al., Efficient Memory Management for Large Language Model Serving with PagedAttention, 2023.",
+      "href": "https://arxiv.org/abs/2309.06180"
+    }
+  ],
+  "related": [
+    {
+      "to": "/cours/ia-environnement",
+      "title": "Cours : IA et environnement",
+      "description": "L'empreinte environnementale du numérique et de l'IA, et les leviers pour une IA plus sobre."
+    },
+    {
+      "to": "/calculateur-couts-ia",
+      "title": "Calculateur de coûts d'API IA",
+      "description": "Estimer le coût d'usage des API de modèles d'IA selon le volume de tokens, avec des tarifs indicatifs à vérifier."
+    },
+    {
+      "to": "/glossaire",
+      "title": "Glossaire de l'IA",
+      "description": "Définitions du vocabulaire technique et éthique de l'intelligence artificielle."
+    }
+  ]
+}

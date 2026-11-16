@@ -1,0 +1,1072 @@
+{
+  "slug": "fine-tuning",
+  "title": "Fine-tuning : LoRA, QLoRA et Full FT, quand utiliser quoi",
+  "subtitle": "Choisir un mode d'adaptation, comprendre ce qu'il coûte en mémoire et vérifier ce qu'il apporte",
+  "level": "Intermédiaire",
+  "tags": [
+    "Fine-tuning",
+    "LoRA",
+    "QLoRA",
+    "PEFT",
+    "SFT",
+    "Apprentissage"
+  ],
+  "summary": "Le fine-tuning adapte un modèle pré-entraîné à une tâche ou à un comportement. Ce cours compare le full fine-tuning, LoRA et QLoRA, détaille la préparation des données SFT, l'évaluation et la mise en production, avec des configurations PEFT commentées et des calculs de paramètres explicitement hypothétiques.",
+  "introduction": "Un modèle pré-entraîné ne connaît ni vos formats, ni votre vocabulaire métier, ni la manière dont vous voulez qu'il réponde. Le fine-tuning consiste à poursuivre son entraînement sur des exemples choisis pour modifier ses poids. Cette définition simple recouvre des pratiques très différentes : mettre à jour tous les paramètres, n'entraîner que quelques matrices ajoutées, ou combiner une base quantifiée avec des adaptateurs.\n\nLe choix entre ces méthodes ne se réduit pas à une préférence technique. Il dépend de la tâche, de la quantité et de la qualité des données, de la mémoire disponible, du mode de service et surtout de la capacité à mesurer un progrès. Une configuration qui tient dans une carte graphique ne prouve pas que le modèle sera meilleur. Un adaptateur qui réduit le nombre de paramètres entraînables ne supprime pas la mémoire des activations.\n\nÀ la fin, le lecteur saura expliquer la différence entre full fine-tuning, LoRA et QLoRA, estimer l'ordre de grandeur des paramètres entraînables avec des hypothèses explicites, préparer un jeu de données SFT avec un masquage de la perte, construire une évaluation et décider comment servir le résultat. Aucune recette universelle n'est proposée : les configurations sont des points de départ à vérifier sur vos données.",
+  "prerequisites": [
+    "Savoir ce qu'est un LLM",
+    "Connaître les bases d'un réseau de neurones",
+    "Avoir déjà lancé un entraînement simple",
+    "Notions de mémoire GPU"
+  ],
+  "checkedOn": "2026-10-26",
+  "cover": {
+    "src": "pics/cours/fine-tuning.webp",
+    "alt": "Réseau gelé et petit module lumineux connecté, métaphore du fine-tuning par adaptateurs."
+  },
+  "modules": [
+    {
+      "id": "quand",
+      "title": "Quand le fine-tuning est le bon outil",
+      "keyTakeaways": [
+        "Le prompt, le RAG et le fine-tuning n'agissent pas sur le même objet : instructions et contexte à l'inférence, documents externes, puis poids du modèle.",
+        "Le fine-tuning est particulièrement adapté à un format, un style, une procédure ou une frontière de décision stable ; il ne remplace pas une base de connaissances à jour et citable.",
+        "Le RAG reste préférable quand l'information change souvent, doit être tracée ou provient de documents nombreux ; le fine-tuning n'ajoute pas de citations fiables.",
+        "La décision se prend sur un jeu d'évaluation et une analyse d'erreurs, pas sur une intuition ni sur la taille du modèle.",
+        "Commencer par la solution la plus simple, mesurer l'écart, puis fine-tuner seulement si le besoin persiste après des essais sérieux de prompt et de récupération."
+      ],
+      "theory": "### Trois leviers, trois objets\n\nLe mot « adaptation » recouvre des méthodes qui ne modifient pas le même objet. Le **prompt** agit à l'inférence : on change les instructions, les exemples ou le format demandé, sans toucher aux poids. Le **RAG** ajoute au contexte des passages récupérés dans des documents externes. Le **fine-tuning** poursuit l'entraînement sur des exemples et modifie les paramètres du modèle. Le **pré-entraînement**, enfin, construit les capacités générales à partir de corpus massifs et n'est pas un outil de correction d'une tâche précise.\n\nCette distinction évite une confusion fréquente. Un modèle qui ne connaît pas une information récente n'a pas besoin d'un fine-tuning pour l'apprendre : il a besoin d'un accès à cette information, par recherche documentaire ou par un outil. Un modèle qui répond dans le mauvais format peut souvent être corrigé par une consigne précise et quelques exemples. Un modèle qui doit appliquer une procédure maison à des cas variés, avec un vocabulaire stable et des sorties contrôlées, est un candidat plus sérieux au fine-tuning.\n\n### Ce que fait le prompt\n\nLe prompt est la première solution à essayer, parce qu'il est réversible, rapide à modifier et peu coûteux à comparer. Une consigne claire, un schéma de sortie, des exemples représentatifs et une liste de cas limites peuvent résoudre une partie des problèmes. La limite est double : le contexte est fini, et le modèle peut ignorer une instruction ou l'interpréter différemment selon les entrées. Allonger le prompt pour couvrir tous les cas dégrade la lisibilité et consomme des tokens à chaque appel. Quand la consigne devient un document de plusieurs pages répété à chaque requête, le fine-tuning peut devenir une alternative, à condition de mesurer ce qu'il apporte.\n\n### Ce que fait le RAG\n\nLe RAG récupère des passages dans une base documentaire, puis les insère dans le contexte du modèle. Il permet de mettre à jour les connaissances sans réentraîner, de citer les sources et de limiter les réponses au corpus autorisé. Il ne dispense pas de vérifier la qualité de la récupération : un mauvais classement fournit de mauvais passages, et le modèle peut mal les exploiter. Le RAG ne change pas non plus la manière dont le modèle écrit, sauf si les consignes ou les exemples le font. Pour une connaissance qui évolue, un catalogue de produits ou une documentation interne, il est généralement plus adapté qu'un fine-tuning.\n\n### Ce que fait le fine-tuning supervisé\n\nLe fine-tuning supervisé, souvent appelé **SFT** pour *supervised fine-tuning*, entraîne le modèle à produire une réponse cible à partir d'une entrée. Les exemples sont des paires instruction-réponse, des conversations, des paires question-réponse ou des exemples de classification. La perte compare la distribution prédite à la réponse attendue, puis la rétropropagation met à jour les paramètres. Le modèle apprend des régularités dans les données : un format, un ton, une structure de raisonnement, une correspondance entre une entrée et une sortie, ou une procédure répétée.\n\nCette capacité a des limites. Le modèle peut mémoriser des faits présents dans les exemples, mais rien ne garantit qu'il les restituera correctement sur une formulation nouvelle. Il peut aussi apprendre des corrélations indésirables ou reproduire des erreurs présentes dans les données. Le fine-tuning n'est donc pas un moyen fiable d'ajouter une base de connaissances ; c'est un moyen de façonner un comportement, avec les risques de généralisation que cela implique.\n\n### Les cas où il est pertinent\n\nLe fine-tuning est un bon candidat dans plusieurs situations. La première est un **format de sortie strict** que le prompt ne garantit pas assez souvent : structure JSON, champs obligatoires, conventions de nommage. La deuxième est un **style ou un ton** stable, par exemple des réponses courtes et factuelles pour un service interne. La troisième est une **tâche de classification ou d'extraction** disposant de nombreux exemples étiquetés : le modèle apprend une frontière de décision propre à votre domaine. La quatrième est la **compression d'une longue consigne** en un comportement appris, lorsque répéter cette consigne à chaque appel coûte cher ou reste fragile. La cinquième est l'adaptation d'un **petit modèle local** à un usage précis, quand un modèle plus grand serait trop lourd à servir.\n\nIl existe aussi des cas de **comportement** : refus d'un type de requête, respect d'une politique de réponse, usage systématique d'un outil. Le fine-tuning peut renforcer ces régularités, mais il ne remplace pas un garde-fou déterministe pour les cas critiques. Un modèle entraîné à refuser ne garantit pas un refus à tous les coups.\n\n### Les cas où il ne suffit pas\n\nLe fine-tuning est un mauvais choix quand l'information change souvent, quand la réponse doit citer des sources, quand les données sont rares ou juridiquement incertaines, ou quand aucun jeu d'évaluation n'existe. Il est également inutile si un prompt bien construit atteint déjà le niveau attendu. Dans ces cas, le RAG, une meilleure recherche, un schéma de sortie contraint ou un simple changement de consigne sont plus directs.\n\nLa décision doit être empirique. On définit une tâche, un jeu de test représentatif et un critère de succès. On mesure la solution de départ, puis on compare prompt, RAG et fine-tuning sur le même jeu. Si le gain du fine-tuning ne se reproduit pas sur des exemples non vus, ou s'il dégrade des capacités générales, il ne vaut pas son coût de maintenance. Le reste de ce cours suppose que ce premier tri a été fait et détaille les méthodes, leur mémoire et leur évaluation.",
+      "diagram": {
+        "title": "Choisir le levier avant d'entraîner",
+        "description": "Schéma illustratif : un besoin d'adaptation se ramifie vers le prompt, le RAG, le fine-tuning ou le pré-entraînement selon la nature du problème. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 430\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Arbre de décision entre prompt, RAG, fine-tuning et pré-entraînement\">\n  <defs>\n    <marker id=\"ft-quand-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"430\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Le besoin décide du levier</text>\n  <text x=\"410\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n  <g id=\"besoin\">\n    <rect x=\"300\" y=\"86\" width=\"220\" height=\"62\" rx=\"12\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"410\" y=\"114\" fill=\"#e0f2fe\" font-size=\"13\" text-anchor=\"middle\">Quel est le problème</text>\n    <text x=\"410\" y=\"134\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">connaissance, format ou comportement</text>\n  </g>\n  <g stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#ft-quand-arrow)\">\n    <line x1=\"340\" y1=\"148\" x2=\"180\" y2=\"206\"/>\n    <line x1=\"480\" y1=\"148\" x2=\"640\" y2=\"206\"/>\n    <line x1=\"390\" y1=\"148\" x2=\"300\" y2=\"286\"/>\n    <line x1=\"430\" y1=\"148\" x2=\"520\" y2=\"286\"/>\n  </g>\n  <g id=\"prompt\">\n    <rect x=\"70\" y=\"208\" width=\"220\" height=\"76\" rx=\"10\" fill=\"#111827\" stroke=\"#818cf8\" stroke-width=\"1.8\"/>\n    <text x=\"180\" y=\"234\" fill=\"#e0e7ff\" font-size=\"12\" text-anchor=\"middle\">Prompt et exemples</text>\n    <text x=\"180\" y=\"254\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">consigne, format, ton</text>\n    <text x=\"180\" y=\"272\" fill=\"#a5b4fc\" font-size=\"11\" text-anchor=\"middle\">aucun poids modifié</text>\n  </g>\n  <g id=\"rag\">\n    <rect x=\"530\" y=\"208\" width=\"220\" height=\"76\" rx=\"10\" fill=\"#111827\" stroke=\"#34d399\" stroke-width=\"1.8\"/>\n    <text x=\"640\" y=\"234\" fill=\"#d1fae5\" font-size=\"12\" text-anchor=\"middle\">RAG</text>\n    <text x=\"640\" y=\"254\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">documents récupérés</text>\n    <text x=\"640\" y=\"272\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">connaissance fraîche et citable</text>\n  </g>\n  <g id=\"fine-tuning\">\n    <rect x=\"190\" y=\"300\" width=\"220\" height=\"82\" rx=\"10\" fill=\"#111827\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <text x=\"300\" y=\"326\" fill=\"#fef3c7\" font-size=\"12\" text-anchor=\"middle\">Fine-tuning</text>\n    <text x=\"300\" y=\"346\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">format stable, procédure</text>\n    <text x=\"300\" y=\"364\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">données et évaluation requises</text>\n  </g>\n  <g id=\"pre-entrainement\">\n    <rect x=\"450\" y=\"300\" width=\"220\" height=\"82\" rx=\"10\" fill=\"#111827\" stroke=\"#f472b6\" stroke-width=\"1.8\"/>\n    <text x=\"560\" y=\"326\" fill=\"#fce7f3\" font-size=\"12\" text-anchor=\"middle\">Pré-entraînement</text>\n    <text x=\"560\" y=\"346\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">capacités générales</text>\n    <text x=\"560\" y=\"364\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">corpus massif, autre échelle</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Nommer le besoin",
+            "explanation": "Le point de départ n'est pas une méthode mais un problème : information manquante, format instable, comportement à corriger ou capacité générale à construire.",
+            "highlight": [
+              "besoin"
+            ]
+          },
+          {
+            "title": "2. Vérifier le prompt et le RAG",
+            "explanation": "Une consigne mieux écrite ou une récupération documentaire résout souvent le problème sans modifier les poids. Ces solutions restent faciles à réviser.",
+            "highlight": [
+              "prompt",
+              "rag"
+            ]
+          },
+          {
+            "title": "3. Réserver le fine-tuning au comportement",
+            "explanation": "Le fine-tuning devient pertinent quand un format, un style ou une procédure stable doit être appris, avec des exemples et un jeu d'évaluation.",
+            "highlight": [
+              "fine-tuning"
+            ]
+          },
+          {
+            "title": "4. Ne pas confondre avec le pré-entraînement",
+            "explanation": "Le pré-entraînement construit les capacités générales sur de grands corpus. Il ne sert pas à corriger un cas précis dans une application.",
+            "highlight": [
+              "pre-entrainement"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Dans quel cas le fine-tuning est-il le plus pertinent ?",
+          "options": [
+            "Ajouter une information qui change chaque semaine",
+            "Garantir la citation exacte d'un document interne",
+            "Apprendre un format de sortie et un style stables à partir d'exemples",
+            "Répondre à une question unique sans données d'entraînement"
+          ],
+          "correctIndex": 2,
+          "explanation": "Le fine-tuning façonne un comportement à partir d'exemples. Pour une information changeante ou citable, le RAG est plus direct."
+        },
+        {
+          "question": "Pourquoi le fine-tuning ne remplace-t-il pas une base documentaire pour les connaissances factuelles ?",
+          "options": [
+            "Parce qu'il ne peut jamais mémoriser un fait",
+            "Parce qu'il modifie les poids sans garantir une restitution fiable ni une source",
+            "Parce qu'il supprime le prompt",
+            "Parce qu'il ne fonctionne que sur des images"
+          ],
+          "correctIndex": 1,
+          "explanation": "Un fait présent dans les données peut être mémorisé, mais rien ne garantit sa restitution sur une nouvelle formulation, et le modèle ne fournit pas de citation fiable."
+        },
+        {
+          "question": "Quelle est la première étape d'une décision sérieuse ?",
+          "options": [
+            "Choisir le plus grand modèle disponible",
+            "Commencer par un fine-tuning complet",
+            "Définir un jeu d'évaluation et mesurer la solution de départ",
+            "Supprimer le RAG pour simplifier"
+          ],
+          "correctIndex": 2,
+          "explanation": "Sans jeu de test représentatif, aucun gain ne peut être vérifié. La comparaison des leviers doit se faire sur les mêmes exemples."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Fine-tuning",
+          "definition": "Poursuite de l'entraînement d'un modèle pré-entraîné sur des exemples ciblés, afin de modifier son comportement ou ses sorties."
+        },
+        {
+          "term": "SFT",
+          "definition": "Fine-tuning supervisé sur des paires entrée-réponse, où la perte compare la sortie du modèle à une réponse attendue."
+        },
+        {
+          "term": "RAG",
+          "definition": "Génération augmentée par récupération : des documents sont cherchés puis insérés dans le contexte du modèle avant la réponse."
+        },
+        {
+          "term": "PEFT",
+          "definition": "Famille de méthodes d'adaptation qui n'entraînent qu'une petite partie des paramètres, la base restant généralement gelée."
+        }
+      ],
+      "example": {
+        "title": "RAG ou fine-tuning pour une base de connaissances",
+        "text": "**Scénario illustratif.** Une équipe veut répondre sur des procédures internes qui changent souvent. Le RAG apporte les passages à jour au modèle ; un fine-tuning sur les anciennes procédures figerait des informations périmées. Le fine-tuning devient pertinent pour apprendre un format, un style ou un comportement stable. Les deux peuvent coexister : le modèle adapté rédige, le RAG fournit les faits."
+      },
+      "exercises": [
+        {
+          "title": "Séparer les besoins",
+          "prompt": "Une équipe veut un assistant qui réponde à partir de procédures internes mises à jour chaque mois, cite ses sources et produise un JSON strict. Elle envisage un fine-tuning unique pour tout résoudre. Expliquez quels besoins relèvent du RAG, lesquels peuvent relever du fine-tuning, et comment vérifier que ce dernier apporte quelque chose.",
+          "solution": "Les procédures changeantes et la citation des sources relèvent du RAG : il apporte les passages à jour et permet de tracer leur origine, ce qu'un fine-tuning sur des exemples figés ne garantit pas. Le format JSON strict peut justifier un fine-tuning si une consigne et un schéma de sortie ne suffisent pas, car il s'agit d'un comportement stable. Les deux peuvent coexister : le modèle adapté rédige, la récupération fournit les faits. La vérification exige un jeu d'évaluation commun, avec les mêmes prompts et critères, et une comparaison des erreurs hors format sur des exemples non vus."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Hu et al., LoRA : Low-Rank Adaptation of Large Language Models, 2021.",
+          "href": "https://arxiv.org/abs/2106.09685"
+        },
+        {
+          "label": "Hugging Face, PEFT, documentation, consultée le 21 octobre 2026.",
+          "href": "https://huggingface.co/docs/peft/index"
+        }
+      ]
+    },
+    {
+      "id": "full-ft",
+      "title": "Full fine-tuning et catastrophique oubli",
+      "keyTakeaways": [
+        "Le full fine-tuning met à jour tous les paramètres ; la mémoire nécessaire couvre les poids, les gradients, les états de l'optimiseur et les activations.",
+        "Le coût ne se réduit pas au nombre de paramètres : les états d'Adam, la précision mixte et la longueur des séquences changent l'empreinte réelle.",
+        "Le catastrophique oubli désigne la dégradation de capacités générales après un entraînement trop étroit ; il se mesure avec des tests de régression.",
+        "Mélanger des données générales, baisser le taux d'apprentissage, arrêter tôt ou choisir une méthode PEFT atténue le risque, sans le supprimer.",
+        "Le full fine-tuning reste pertinent quand le comportement à changer est large et que les données, la mémoire et le temps sont disponibles."
+      ],
+      "theory": "### Tous les poids, pas seulement une couche\n\nLe full fine-tuning reprend un modèle pré-entraîné et poursuit l'entraînement sur l'ensemble de ses paramètres. À chaque lot, la passe avant calcule une perte, la rétropropagation calcule les gradients de tous les poids, puis l'optimiseur les met à jour. Rien n'est gelé : les matrices d'attention, les couches feed-forward, les embeddings et les normalisations peuvent tous bouger.\n\nCette liberté explique l'intérêt de la méthode. Elle permet d'adapter le modèle en profondeur, pas seulement à la marge. Si la tâche exige un changement de distribution important, un nouveau vocabulaire, une nouvelle langue ou une procédure très différente, un full fine-tuning dispose de plus de capacité qu'un adaptateur de rang faible. Il produit aussi un seul jeu de poids, ce qui simplifie le service : pas d'adaptateur à charger, pas de fusion à prévoir.\n\n### Où passe la mémoire\n\nL'empreinte mémoire d'un entraînement ne se limite pas aux poids. Pour un modèle de $P$ paramètres, il faut stocker les poids eux-mêmes, leurs gradients, et souvent plusieurs états par paramètre pour l'optimiseur. Adam maintient par exemple une moyenne des gradients et une moyenne des gradients au carré, ce qui ajoute deux tenseurs de la taille des poids. On peut écrire une estimation grossière :\n\n$$ M \\approx P \\times b_p + P \\times b_g + k \\times P \\times b_o + M_{\\text{activations}} $$\n\noù $b_p$, $b_g$ et $b_o$ sont les octets par valeur pour les poids, les gradients et les états de l'optimiseur, et $k$ le nombre d'états par paramètre. Cette formule est un point de départ, pas une mesure : la précision mixte, l'accumulation de gradients, le *gradient checkpointing* et l'optimiseur choisi changent les valeurs. Les activations, elles, dépendent de la taille du lot, de la longueur des séquences et de l'architecture. Sur un modèle de langage, elles peuvent dominer la consommation, surtout avec de longues séquences.\n\nLa précision mixte stocke souvent les poids en basse précision et certains calculs en haute précision, avec des copies pour l'optimiseur. Le *gradient checkpointing* recalcule des activations pendant la passe arrière au lieu de les conserver, ce qui réduit la mémoire au prix de calcul supplémentaire. Ces techniques déplacent le compromis, elles ne le suppriment pas.\n\n### Le catastrophique oubli\n\nQuand un réseau est entraîné sur une distribution étroite, ses poids s'éloignent de ceux qui portaient les capacités générales. Les performances sur la nouvelle tâche peuvent progresser tandis que d'autres compétences se dégradent. C'est le **catastrophique oubli**. Il ne se manifeste pas forcément par une perte d'identité du modèle : il peut rendre les réponses plus rigides, dégrader le raisonnement, faire oublier une langue ou pousser le modèle à reproduire le style des données d'entraînement.\n\nLe phénomène dépend des données, du taux d'apprentissage, du nombre d'étapes et de la proximité entre la tâche cible et les capacités d'origine. Un entraînement court sur des exemples variés risque moins qu'un entraînement long sur un seul format répétitif. Mais aucune règle simple ne permet de prédire l'ampleur de la dégradation : il faut la mesurer.\n\n### Atténuer le risque\n\nPlusieurs pratiques réduisent le risque sans l'éliminer. La première consiste à **mélanger** les données cibles avec des données générales ou des exemples de la tâche d'origine, afin que le modèle ne voie pas uniquement la nouvelle distribution. La deuxième est de **baisser le taux d'apprentissage** et d'**arrêter tôt**, en sélectionnant le checkpoint sur un jeu de validation. La troisième est de **surveiller des tests de régression** : questions générales, tâches annexes, formats déjà maîtrisés. La quatrième est de choisir une méthode **PEFT** lorsque le changement visé est compatible avec une capacité d'adaptation plus faible.\n\nCes méthodes ne sont pas interchangeables. Mélanger des données générales peut diluer la tâche cible si la proportion est mal choisie. Un taux d'apprentissage trop bas ralentit l'apprentissage. L'arrêt précoce dépend de la qualité du jeu de validation. Le fine-tuning reste un compromis à régler sur votre cas.\n\n### Quand le full fine-tuning se justifie\n\nLe full fine-tuning se justifie lorsque le comportement à obtenir diffère beaucoup de la base, lorsque les données sont abondantes et propres, et lorsque l'infrastructure permet de stocker et de servir un modèle complet. Il peut aussi être nécessaire si l'on veut un seul artefact, sans mécanisme d'adaptateurs. À l'inverse, pour un format, un ton ou une tâche étroite, LoRA ou QLoRA offrent souvent un meilleur rapport entre le contrôle obtenu et le coût d'exploitation.\n\nLe code ci-dessous montre la boucle minimale, sans prétendre à une recette de production. Il suppose un modèle, un tokenizer, un chargeur de données et un optimiseur déjà définis. Les étiquettes sont fournies au modèle, qui calcule sa perte de langage. La boucle ne montre ni la préparation des données, ni l'évaluation, ni la sauvegarde, qui sont traitées plus loin.",
+      "code": {
+        "language": "python",
+        "explanation": "Boucle d'entraînement minimale pour un modèle de langage causal. Le modèle et le chargeur de données sont supposés définis ; l'optimiseur est créé ci-dessous. Aucune sortie n'est affichée : le résultat dépend du modèle et des données.",
+        "code": "import torch\nfrom transformers import get_linear_schedule_with_warmup\n\nmodele.train()\noptimiseur = torch.optim.AdamW(modele.parameters(), lr=1e-5)\nplanificateur = get_linear_schedule_with_warmup(\n    optimiseur,\n    num_warmup_steps=100,\n    num_training_steps=len(chargeur) * epochs,\n)\n\nfor epoch in range(epochs):\n    for lot in chargeur:\n        lot = {cle: valeur.to(device) for cle, valeur in lot.items()}\n        sortie = modele(**lot)\n        perte = sortie.loss\n        perte.backward()\n        torch.nn.utils.clip_grad_norm_(modele.parameters(), 1.0)\n        optimiseur.step()\n        planificateur.step()\n        optimiseur.zero_grad(set_to_none=True)"
+      },
+      "diagram": {
+        "title": "Tous les poids bougent, les capacités doivent être surveillées",
+        "description": "Schéma illustratif : un réseau entièrement mis à jour, les postes de mémoire d'un entraînement et la dérive possible des capacités générales. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Réseau entièrement mis à jour, mémoire d'entraînement et dérive des capacités\">\n  <defs>\n    <marker id=\"ft-full-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"440\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Le full fine-tuning met tout à jour</text>\n  <text x=\"410\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n  <g id=\"poids\">\n    <text x=\"190\" y=\"92\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">tous les poids</text>\n    <g fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"2\">\n      <rect x=\"70\" y=\"108\" width=\"70\" height=\"40\" rx=\"7\"/>\n      <rect x=\"155\" y=\"108\" width=\"70\" height=\"40\" rx=\"7\"/>\n      <rect x=\"240\" y=\"108\" width=\"70\" height=\"40\" rx=\"7\"/>\n      <rect x=\"70\" y=\"164\" width=\"70\" height=\"40\" rx=\"7\"/>\n      <rect x=\"155\" y=\"164\" width=\"70\" height=\"40\" rx=\"7\"/>\n      <rect x=\"240\" y=\"164\" width=\"70\" height=\"40\" rx=\"7\"/>\n    </g>\n    <g fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">\n      <text x=\"105\" y=\"133\">W</text><text x=\"190\" y=\"133\">W</text><text x=\"275\" y=\"133\">W</text>\n      <text x=\"105\" y=\"189\">W</text><text x=\"190\" y=\"189\">W</text><text x=\"275\" y=\"189\">W</text>\n    </g>\n  </g>\n  <g id=\"memoire\">\n    <text x=\"460\" y=\"92\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">mémoire d'entraînement</text>\n    <rect x=\"340\" y=\"108\" width=\"240\" height=\"34\" rx=\"6\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"1.6\"/>\n    <text x=\"460\" y=\"130\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">poids</text>\n    <rect x=\"340\" y=\"150\" width=\"240\" height=\"34\" rx=\"6\" fill=\"#0f172a\" stroke=\"#818cf8\" stroke-width=\"1.6\"/>\n    <text x=\"460\" y=\"172\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">gradients</text>\n    <rect x=\"340\" y=\"192\" width=\"240\" height=\"34\" rx=\"6\" fill=\"#0f172a\" stroke=\"#f472b6\" stroke-width=\"1.6\"/>\n    <text x=\"460\" y=\"214\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">états de l'optimiseur</text>\n    <rect x=\"340\" y=\"234\" width=\"240\" height=\"34\" rx=\"6\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"1.6\"/>\n    <text x=\"460\" y=\"256\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">activations</text>\n  </g>\n  <g id=\"oubli\">\n    <rect x=\"70\" y=\"300\" width=\"680\" height=\"100\" rx=\"12\" fill=\"#111827\" stroke=\"#fb7185\" stroke-width=\"1.8\"/>\n    <text x=\"410\" y=\"328\" fill=\"#fecdd3\" font-size=\"12\" text-anchor=\"middle\">capacités générales à surveiller</text>\n    <path d=\"M130 360 C 260 330, 330 385, 430 360 C 530 335, 610 380, 690 350\" fill=\"none\" stroke=\"#fb7185\" stroke-width=\"2.5\"/>\n    <text x=\"410\" y=\"386\" fill=\"#fda4af\" font-size=\"11\" text-anchor=\"middle\">une dégradation possible, à mesurer sur des tests de régression</text>\n  </g>\n  <line x1=\"315\" y1=\"160\" x2=\"334\" y2=\"160\" stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#ft-full-arrow)\"/>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Tous les paramètres",
+            "explanation": "Le full fine-tuning ne gèle rien. Chaque matrice peut être modifiée par la rétropropagation, ce qui donne une grande capacité d'adaptation.",
+            "highlight": [
+              "poids"
+            ]
+          },
+          {
+            "title": "2. La mémoire complète",
+            "explanation": "Aux poids s'ajoutent les gradients, les états de l'optimiseur et les activations. La formule d'estimation doit préciser la précision et la taille des lots.",
+            "highlight": [
+              "memoire"
+            ]
+          },
+          {
+            "title": "3. Le risque d'oubli",
+            "explanation": "Un entraînement trop étroit peut dégrader des capacités générales. Des tests de régression et un mélange de données servent à détecter et à limiter cette dérive.",
+            "highlight": [
+              "oubli"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Quels postes de mémoire le full fine-tuning mobilise-t-il en plus des poids ?",
+          "options": [
+            "Uniquement les étiquettes du jeu de test",
+            "Les gradients, les états de l'optimiseur et les activations",
+            "Seulement le tokenizer",
+            "Uniquement les fichiers de configuration"
+          ],
+          "correctIndex": 1,
+          "explanation": "La rétropropagation produit des gradients et l'optimiseur maintient des états. Les activations intermédiaires sont conservées ou recalculées selon les techniques employées."
+        },
+        {
+          "question": "Qu'est-ce que le catastrophique oubli ?",
+          "options": [
+            "La suppression des données d'entraînement",
+            "La dégradation de capacités générales après un entraînement trop étroit",
+            "Une erreur de tokenisation qui bloque l'entraînement",
+            "Un modèle qui refuse de démarrer"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le modèle se spécialise et peut perdre des compétences acquises auparavant. Le phénomène se mesure avec des tests sur des tâches non ciblées par l'entraînement."
+        },
+        {
+          "question": "Quand le full fine-tuning peut-il se justifier face à LoRA ?",
+          "options": [
+            "Quand on veut seulement changer le ton d'une réponse",
+            "Quand on dispose de peu de données et de mémoire",
+            "Quand le comportement à obtenir diffère beaucoup de la base et que les moyens suivent",
+            "Quand on ne veut surtout pas évaluer le résultat"
+          ],
+          "correctIndex": 2,
+          "explanation": "Un changement profond peut demander plus de capacité d'adaptation qu'un rang faible. Le choix dépend des données, de l'infrastructure et de l'évaluation, pas d'une préférence abstraite."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Full fine-tuning",
+          "definition": "Entraînement qui met à jour l'ensemble des paramètres du modèle pré-entraîné, sans gel ni adaptateur."
+        },
+        {
+          "term": "Catastrophique oubli",
+          "definition": "Dégradation de capacités acquises auparavant lorsqu'un modèle est entraîné sur une distribution étroite."
+        },
+        {
+          "term": "État de l'optimiseur",
+          "definition": "Valeurs internes conservées par l'optimiseur, par exemple les moyennes des gradients et de leurs carrés pour Adam."
+        },
+        {
+          "term": "Gradient checkpointing",
+          "definition": "Technique qui recalcule des activations pendant la passe arrière pour économiser la mémoire, au prix de calcul supplémentaire."
+        }
+      ],
+      "example": {
+        "title": "Ce que coûte un full fine-tuning",
+        "text": "**Exemple de calcul.** Pour un modèle de 7 milliards de paramètres en float16, les poids occupent 14 Go. Les gradients ajoutent 14 Go, et Adam deux moments de 14 Go chacun, soit 56 Go avant les activations. Le full fine-tuning demande donc beaucoup plus que la taille du modèle. LoRA et QLoRA réduisent cette empreinte en n'entraînant qu'une partie des paramètres."
+      },
+      "exercises": [
+        {
+          "title": "Estimer la mémoire d'un full fine-tuning",
+          "prompt": "Un modèle de 3 milliards de paramètres est entraîné en full fine-tuning avec des poids et des gradients en float16 et Adam. Estimez la mémoire des poids, des gradients et des deux moments de l'optimiseur, avant les activations. Expliquez ensuite ce que LoRA changerait dans ce total.",
+          "solution": "En float16, 3 milliards de paramètres occupent environ 6 Go. Les gradients ajoutent 6 Go, et les deux moments d'Adam 12 Go, soit 24 Go avant les activations. Ce total suppose des moments en float16 : une copie maîtresse en float32 et les activations augmentent encore l'empreinte. Avec LoRA, la base reste chargée, donc ses 6 Go demeurent, mais les gradients et les états d'optimiseur ne portent que sur les petites matrices A et B. Le poste des activations, lui, ne disparaît pas et dépend du lot et de la longueur des séquences."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Hugging Face, PEFT, documentation, consultée le 21 octobre 2026.",
+          "href": "https://huggingface.co/docs/peft/index"
+        },
+        {
+          "label": "Hugging Face, TRL SFTTrainer, documentation, consultée le 21 octobre 2026.",
+          "href": "https://huggingface.co/docs/trl/sft_trainer"
+        }
+      ]
+    },
+    {
+      "id": "lora",
+      "title": "LoRA, rang faible et fusion",
+      "keyTakeaways": [
+        "LoRA gèle la matrice de poids et apprend une mise à jour de rang faible $\\Delta W = BA$, ce qui réduit fortement le nombre de paramètres entraînables.",
+        "Pour une couche de $d$ entrées et $k$ sorties, LoRA entraîne $r(d+k)$ paramètres au lieu de $dk$ ; l'écart dépend des dimensions et du rang choisi.",
+        "Le facteur d'échelle $\\alpha/r$ règle l'amplitude de la mise à jour ; le rang, le taux d'apprentissage et les modules ciblés sont des hyperparamètres à évaluer.",
+        "La fusion $W + (\\alpha/r)BA$ supprime le surcoût d'inférence, mais un adaptateur non fusionné permet de changer de tâche ou de servir plusieurs adaptateurs.",
+        "LoRA réduit les paramètres et les états d'optimiseur entraînables, pas la mémoire des poids de base ni celle des activations."
+      ],
+      "theory": "### L'hypothèse du rang faible\n\nLoRA repose sur une hypothèse simple : la mise à jour nécessaire pour adapter un grand modèle à une tâche peut être décrite par une matrice de rang faible. Plutôt que de modifier librement une matrice de poids $W$ de taille $d \\times k$, on apprend deux petites matrices $A$ et $B$ dont le produit forme la mise à jour. La matrice d'origine reste gelée.\n\nPour une couche qui calcule $h = Wx$, LoRA ajoute une branche parallèle :\n\n$$ h = Wx + \\frac{\\alpha}{r} BAx. $$\n\nIci, $A$ a la forme $r \\times k$ et $B$ la forme $d \\times r$. Le produit $BA$ a la même forme que $W$, mais son rang est au plus $r$. Le facteur $\\alpha/r$ ajuste l'échelle de la branche. Quand $r$ est petit devant $d$ et $k$, le nombre de paramètres entraînables devient bien inférieur à celui de la matrice complète.\n\n### Combien de paramètres ?\n\nPrenons une couche linéaire de 4096 entrées et 4096 sorties, avec un rang $r = 8$. La matrice complète contient $4096 \\times 4096 = 16\\,777\\,216$ paramètres. La branche LoRA contient $4096 \\times 8$ paramètres pour $A$ et $8 \\times 4096$ pour $B$, soit $2 \\times 4096 \\times 8 = 65\\,536$ paramètres. Le rapport vaut environ 0,39 % de la matrice complète, hors biais.\n\nCe calcul est une illustration arithmétique, pas une mesure de qualité. Il montre seulement l'ordre de grandeur pour ces dimensions et ce rang. Si $r$ double, le nombre de paramètres de la branche double. Si la couche est plus petite, le rapport change. Le chiffre ne dit rien sur la performance de l'adaptateur : il faut l'entraîner et l'évaluer.\n\n### Initialisation et échelle\n\nUne initialisation courante tire $A$ au hasard et met $B$ à zéro. La branche commence donc par une mise à jour nulle : le modèle se comporte comme la base au premier pas. Ensuite, les gradients modifient $A$ et $B$ ensemble. Le facteur $\\alpha/r$ permet de garder une mise à jour d'amplitude comparable lorsque $r$ change, mais il ne rend pas les rangs équivalents pour autant.\n\nLe choix de $\\alpha$ et de $r$ dépend de la tâche et du taux d'apprentissage. Un rang trop faible peut limiter la capacité d'adaptation ; un rang trop élevé augmente le nombre de paramètres et le risque de surapprentissage. Il n'existe pas de valeur universelle. Les configurations publiées sont des points de départ, pas des garanties.\n\n### Quels modules cibler ?\n\nLoRA peut s'appliquer à différentes matrices : projections d'attention, couches feed-forward, embeddings, têtes de sortie. L'article original cible notamment les projections d'attention et montre que ce choix suffit sur ses expériences. En pratique, le bon ensemble de modules dépend de l'architecture et de la tâche. Cibler davantage de modules augmente le nombre de paramètres entraînables et la mémoire des états d'optimiseur. Cibler trop peu peut limiter l'effet.\n\nLes bibliothèques PEFT permettent de nommer les modules par leur suffixe, par exemple `q_proj` et `v_proj`. Il faut vérifier les noms exacts dans le modèle utilisé, car ils varient d'une architecture à l'autre. Une configuration copiée sans vérification peut ne cibler aucun module ou en cibler trop.\n\n### Fusion et service\n\nAprès l'entraînement, on peut fusionner l'adaptateur dans la base :\n\n$$ W' = W + \\frac{\\alpha}{r} BA. $$\n\nLe modèle fusionné a la même architecture que l'original et ne nécessite aucune branche supplémentaire à l'inférence. En revanche, l'adaptateur disparaît en tant qu'objet séparé : on ne peut plus le désactiver ni le remplacer sans recharger un autre modèle. Un service qui doit basculer entre plusieurs tâches peut préférer garder la base et charger des adaptateurs à la demande. Ce choix a des conséquences sur la mémoire, la latence et la complexité du déploiement.\n\nLa fusion doit être faite avec soin. Si la base est quantifiée, il faut généralement déquantifier ou fusionner dans un format compatible, puis éventuellement requantifier. Une fusion approximative peut dégrader le modèle. Il faut aussi conserver la trace de la base, du rang, de $\\alpha$ et des modules ciblés pour pouvoir reproduire l'adaptateur.\n\n### Ce que LoRA ne réduit pas\n\nLoRA réduit le nombre de paramètres entraînables et, en pratique, la mémoire des gradients et des états d'optimiseur associés. Il ne réduit pas automatiquement la mémoire des activations, qui dépend des séquences et des lots. Il ne réduit pas non plus la mémoire des poids de base, puisque celle-ci reste chargée. Sur un petit GPU, c'est souvent l'activation ou la base qui limite, pas l'adaptateur. QLoRA s'attaque précisément à la mémoire de la base en la quantifiant.\n\nEnfin, LoRA n'est pas une garantie de qualité. Un adaptateur peut apprendre un format, mais aussi reproduire des biais ou des erreurs des données. L'évaluation reste indispensable, et la comparaison avec un prompt ou un RAG doit être faite sur les mêmes exemples. Le code ci-dessous montre une configuration PEFT typique ; les valeurs sont des exemples, pas des recommandations universelles.",
+      "code": {
+        "language": "python",
+        "explanation": "Configuration LoRA avec PEFT. Le modèle de base et le tokenizer sont supposés chargés. Les valeurs de rang, d'alpha et de dropout sont des exemples à ajuster.",
+        "code": "from peft import LoraConfig, get_peft_model\n\nconfig = LoraConfig(\n    r=8,\n    lora_alpha=16,\n    lora_dropout=0.05,\n    target_modules=[\"q_proj\", \"v_proj\"],\n    bias=\"none\",\n    task_type=\"CAUSAL_LM\",\n)\n\nmodele = get_peft_model(modele_base, config)\nmodele.print_trainable_parameters()"
+      },
+      "diagram": {
+        "title": "Une matrice gelée et deux petites matrices",
+        "description": "Schéma illustratif : l'entrée traverse la matrice gelée et une branche LoRA composée de A puis B ; les deux sorties s'additionnent et peuvent être fusionnées. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Branche LoRA avec matrices A et B en parallèle de la matrice gelée, puis fusion\">\n  <defs>\n    <marker id=\"ft-lora-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"440\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">La mise à jour passe par un goulot de rang r</text>\n  <text x=\"410\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n  <g id=\"entree\">\n    <rect x=\"40\" y=\"190\" width=\"92\" height=\"62\" rx=\"10\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"86\" y=\"216\" fill=\"#e0f2fe\" font-size=\"12\" text-anchor=\"middle\">entrée</text>\n    <text x=\"86\" y=\"236\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">x</text>\n  </g>\n  <g id=\"gele\">\n    <rect x=\"190\" y=\"120\" width=\"150\" height=\"82\" rx=\"10\" fill=\"#111827\" stroke=\"#64748b\" stroke-width=\"2\" stroke-dasharray=\"6 4\"/>\n    <text x=\"265\" y=\"150\" fill=\"#cbd5e1\" font-size=\"12\" text-anchor=\"middle\">W gelée</text>\n    <text x=\"265\" y=\"170\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">d x k</text>\n    <text x=\"265\" y=\"188\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">aucun gradient</text>\n  </g>\n  <g id=\"a\">\n    <rect x=\"190\" y=\"250\" width=\"150\" height=\"64\" rx=\"10\" fill=\"#111827\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <text x=\"265\" y=\"276\" fill=\"#fef3c7\" font-size=\"12\" text-anchor=\"middle\">A</text>\n    <text x=\"265\" y=\"296\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">r x k</text>\n  </g>\n  <g id=\"b\">\n    <rect x=\"390\" y=\"250\" width=\"150\" height=\"64\" rx=\"10\" fill=\"#111827\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"465\" y=\"276\" fill=\"#fce7f3\" font-size=\"12\" text-anchor=\"middle\">B</text>\n    <text x=\"465\" y=\"296\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">d x r</text>\n  </g>\n  <g id=\"sortie\">\n    <rect x=\"620\" y=\"190\" width=\"150\" height=\"62\" rx=\"10\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"695\" y=\"216\" fill=\"#d1fae5\" font-size=\"12\" text-anchor=\"middle\">sortie</text>\n    <text x=\"695\" y=\"236\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">Wx + alpha sur r BAx</text>\n  </g>\n  <g stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#ft-lora-arrow)\">\n    <line x1=\"132\" y1=\"221\" x2=\"188\" y2=\"168\"/>\n    <line x1=\"132\" y1=\"221\" x2=\"188\" y2=\"278\"/>\n    <line x1=\"340\" y1=\"161\" x2=\"618\" y2=\"214\"/>\n    <line x1=\"340\" y1=\"282\" x2=\"386\" y2=\"282\"/>\n    <line x1=\"540\" y1=\"282\" x2=\"618\" y2=\"226\"/>\n  </g>\n  <g id=\"fusion\">\n    <rect x=\"560\" y=\"330\" width=\"210\" height=\"70\" rx=\"10\" fill=\"#111827\" stroke=\"#818cf8\" stroke-width=\"1.8\"/>\n    <text x=\"665\" y=\"356\" fill=\"#e0e7ff\" font-size=\"12\" text-anchor=\"middle\">fusion possible</text>\n    <text x=\"665\" y=\"376\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">W + alpha sur r BA</text>\n  </g>\n  <line x1=\"695\" y1=\"252\" x2=\"665\" y2=\"328\" stroke=\"#818cf8\" stroke-width=\"2\" stroke-dasharray=\"5 4\" marker-end=\"url(#ft-lora-arrow)\"/>\n</svg>",
+        "steps": [
+          {
+            "title": "1. L'entrée",
+            "explanation": "Le même vecteur alimente la matrice d'origine et la branche d'adaptation. La base reste la référence.",
+            "highlight": [
+              "entree"
+            ]
+          },
+          {
+            "title": "2. La matrice gelée",
+            "explanation": "La matrice W n'est pas mise à jour. Elle conserve les capacités acquises pendant le pré-entraînement.",
+            "highlight": [
+              "gele"
+            ]
+          },
+          {
+            "title": "3. Le goulot de rang r",
+            "explanation": "A projette l'entrée dans un espace de petite dimension, puis B revient vers la dimension de sortie. Le produit BA forme la mise à jour.",
+            "highlight": [
+              "a",
+              "b"
+            ]
+          },
+          {
+            "title": "4. Somme puis fusion",
+            "explanation": "Les deux branches s'additionnent. Après entraînement, la fusion dans W supprime la branche à l'inférence, au prix de la perte de l'adaptateur séparé.",
+            "highlight": [
+              "sortie",
+              "fusion"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Que contient la mise à jour LoRA pour une matrice W ?",
+          "options": [
+            "Une copie complète de W",
+            "Le produit de deux matrices A et B de rang faible",
+            "Un vecteur de biais uniquement",
+            "Une table de correspondance des tokens"
+          ],
+          "correctIndex": 1,
+          "explanation": "LoRA apprend une mise à jour de rang faible, le produit des matrices A et B. Le rang de cette mise à jour est au plus r, ce qui limite le nombre de paramètres entraînables."
+        },
+        {
+          "question": "Quel est l'effet du facteur alpha sur r dans LoRA ?",
+          "options": [
+            "Il change la taille du vocabulaire",
+            "Il règle l'amplitude de la branche d'adaptation",
+            "Il gèle la matrice B",
+            "Il supprime la nécessité d'un taux d'apprentissage"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le facteur d'échelle alpha/r multiplie la sortie de la branche. Il ajuste son échelle par rapport à la matrice d'origine, sans remplacer le réglage du taux d'apprentissage."
+        },
+        {
+          "question": "Que perd-on en fusionnant un adaptateur LoRA dans la base ?",
+          "options": [
+            "La possibilité de désactiver ou de remplacer l'adaptateur séparément",
+            "Toutes les capacités du modèle de base",
+            "Le tokenizer",
+            "La possibilité d'utiliser le modèle en inférence"
+          ],
+          "correctIndex": 0,
+          "explanation": "La fusion produit un seul jeu de poids. Elle simplifie le service mais rend l'adaptateur indissociable de la base fusionnée."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "LoRA",
+          "definition": "Méthode qui gèle les poids du modèle et apprend une mise à jour de rang faible sous la forme de deux matrices A et B."
+        },
+        {
+          "term": "Rang",
+          "definition": "Dimension de l'espace intermédiaire de la branche LoRA. Un rang plus élevé augmente le nombre de paramètres entraînables."
+        },
+        {
+          "term": "Alpha",
+          "definition": "Facteur d'échelle de la branche LoRA, souvent divisé par le rang dans la mise à jour effective."
+        },
+        {
+          "term": "Fusion",
+          "definition": "Opération qui ajoute la mise à jour de l'adaptateur à la matrice de base pour produire un modèle unique."
+        }
+      ],
+      "example": {
+        "title": "Combien de paramètres ajoute LoRA ?",
+        "text": "**Exemple de calcul.** Une matrice de 4 096 × 4 096 possède 16,8 millions de paramètres. LoRA de rang 8 ajoute deux matrices de 4 096 × 8, soit 65 536 paramètres. Le rang 16 double ce nombre. Le gain de mémoire dépend aussi des activations, du lot et de la longueur de séquence. Un rang plus élevé n'est pas automatiquement meilleur : il faut mesurer sur le jeu de validation."
+      },
+      "exercises": [
+        {
+          "title": "Compter les paramètres d'un adaptateur",
+          "prompt": "Une couche linéaire a 2 048 entrées et 2 048 sorties. Calculez le nombre de paramètres de la matrice complète, puis celui d'un adaptateur LoRA de rang 16 et celui d'un rang 8. Donnez les rapports, puis expliquez ce qui se passe pour l'amplitude de la mise à jour si le rang double alors que alpha reste fixé.",
+          "solution": "La matrice complète contient 2 048 × 2 048 = 4 194 304 paramètres. Un LoRA de rang 16 ajoute 16 × (2 048 + 2 048) = 65 536 paramètres, soit environ 1,56 % du total. Au rang 8, la branche compte 32 768 paramètres, soit environ 0,78 %. Si le rang double avec le même alpha, le facteur alpha/r est divisé par deux : l'amplitude de la branche baisse, alors que sa capacité augmente. Il faut donc régler alpha et r ensemble et évaluer sur le jeu de validation, sans supposer qu'un rang plus élevé est meilleur."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Hu et al., LoRA : Low-Rank Adaptation of Large Language Models, 2021.",
+          "href": "https://arxiv.org/abs/2106.09685"
+        },
+        {
+          "label": "Hugging Face, PEFT, documentation, consultée le 21 octobre 2026.",
+          "href": "https://huggingface.co/docs/peft/index"
+        }
+      ]
+    },
+    {
+      "id": "qlora",
+      "title": "QLoRA, quantification 4 bits et mémoire",
+      "keyTakeaways": [
+        "QLoRA charge la base en 4 bits, effectue les calculs en haute précision et entraîne des adaptateurs LoRA dans un format de calcul adapté.",
+        "La quantification NF4 range les poids par blocs avec des échelles adaptées à une distribution approximativement normale ; la double quantification réduit encore le coût des constantes.",
+        "QLoRA réduit la mémoire des poids de base, pas celle des activations ; la longueur des séquences et la taille des lots restent déterminantes.",
+        "Les optimiseurs paginés déplacent temporairement des états vers la mémoire centrale lors des pics, au prix de transferts.",
+        "Une configuration QLoRA est une recette d'entraînement, pas une preuve de qualité : il faut évaluer le modèle obtenu et vérifier la fusion ou le service."
+      ],
+      "theory": "### Quantifier pour stocker moins\n\nUn modèle de langage stocke ses poids dans un format numérique, souvent 16 bits ou 32 bits par valeur. La quantification consiste à représenter ces valeurs avec moins de bits, par exemple 4 bits, en acceptant une perte de précision. Cette réduction diminue la mémoire nécessaire pour charger la base, mais elle ne rend pas le calcul gratuit : les valeurs doivent être ramenées dans un format de calcul avant d'être utilisées.\n\nQLoRA combine deux idées. La première est de charger les poids de la base en 4 bits et de les garder dans ce format au repos. La seconde est d'entraîner des adaptateurs LoRA en haute précision, avec des calculs qui déquantifient les poids au vol. La base reste gelée ; seuls les adaptateurs reçoivent des gradients. Le résultat est un modèle de base peu encombrant, accompagné d'un petit adaptateur.\n\n### NF4 et les blocs\n\nLa quantification classique utilise des paliers régulièrement espacés. NF4, pour *NormalFloat 4-bit*, utilise des paliers choisis pour une distribution approximativement normale. L'idée est que les poids d'un réseau pré-entraîné sont souvent concentrés autour de zéro, avec des valeurs extrêmes plus rares. Des paliers adaptés à cette forme représentent mieux les valeurs fréquentes qu'une grille uniforme.\n\nLes poids sont traités par blocs. Pour chaque bloc, on calcule une échelle (le maximum absolu du bloc), puis on range les valeurs sur les paliers disponibles. Le choix de la taille de bloc est un compromis : un bloc plus petit suit mieux les variations locales, mais stocke davantage de constantes. Ces constantes occupent elles aussi de la mémoire.\n\n### La double quantification\n\nLa double quantification consiste à quantifier les constantes de quantification. Au lieu de stocker chaque échelle en haute précision, on les regroupe et on les quantifie à leur tour. Cette étape réduit la mémoire occupée par les échelles, sans modifier les poids eux-mêmes. Elle ajoute un peu de calcul et de complexité, et son intérêt dépend de la taille du modèle et du format choisi.\n\n### Les optimiseurs paginés\n\nMême avec une base en 4 bits, l'entraînement peut connaître des pics de mémoire, par exemple lors d'un lot plus long ou d'une activation inhabituelle. Les optimiseurs paginés déplacent temporairement des états de l'optimiseur vers la mémoire centrale lorsque la mémoire graphique manque, puis les ramènent. Cette technique évite certains échecs, mais elle introduit des transferts et peut ralentir l'entraînement. Elle ne remplace pas un dimensionnement correct des lots.\n\n### Où va la mémoire\n\nUne estimation QLoRA doit distinguer plusieurs postes : la base quantifiée, les constantes de quantification, les adaptateurs, les gradients et états d'optimiseur des adaptateurs, les activations et les tampons temporaires. La base est plus petite qu'en 16 bits, mais les activations restent en haute précision et dépendent de la longueur des séquences. Un modèle qui tient en mémoire au repos peut donc échouer pendant l'entraînement.\n\nIl faut aussi compter la mémoire du tokenizer, des métadonnées et du framework. Les chiffres annoncés dans un article ou un billet de blog correspondent à un modèle, une longueur de séquence, un lot et une version de bibliothèque précis. Ils ne se transposent pas directement à votre configuration. La bonne pratique est de mesurer avec un profil mémoire et de noter les hypothèses.\n\n### Qualité et compromis\n\nLa quantification introduit une erreur. Cette erreur peut être faible sur certaines tâches et plus visible sur d'autres, notamment lorsque le modèle doit produire des détails fins ou respecter un format strict. QLoRA n'est donc pas équivalent à un entraînement en 16 bits par construction. Les auteurs de QLoRA rapportent des résultats proches de ceux d'un fine-tuning complet en 16 bits sur leurs évaluations, mais ces résultats ne garantissent pas votre cas. Il faut comparer la base quantifiée, la base non quantifiée et l'adaptateur sur un jeu de validation représentatif.\n\nLe choix du format de calcul compte aussi. Les calculs en BF16 ou en FP16 n'ont pas les mêmes plages et les mêmes risques d'instabilité. La disponibilité matérielle et le support de la bibliothèque déterminent ce qui est réellement possible. Une configuration copiée d'un exemple peut échouer sur une autre carte ou une autre version de bibliothèque.\n\n### Fusion et service\n\nPour servir le modèle, plusieurs options existent. On peut conserver la base quantifiée et charger l'adaptateur séparément, ce qui permet de changer d'adaptateur sans recharger la base. On peut aussi déquantifier la base, fusionner l'adaptateur, puis éventuellement requantifier pour l'inférence. La fusion simplifie le service mais peut nécessiter beaucoup de mémoire au moment de l'opération. Il faut vérifier que la bibliothèque utilisée produit bien le résultat attendu et conserver les versions des composants.\n\nQLoRA est donc une méthode d'entraînement économe en mémoire de base, pas une baguette magique. Il réduit un poste précis et laisse les autres visibles. Le code ci-dessous montre une configuration typique avec `bitsandbytes` et PEFT. Les valeurs sont des exemples : le type de quantification, le rang et les modules ciblés doivent être adaptés au modèle et évalués.",
+      "code": {
+        "language": "python",
+        "explanation": "Configuration QLoRA : base chargée en 4 bits NF4 avec double quantification, préparation pour l'entraînement en k bits, puis adaptateur LoRA. Le nom du modèle est volontairement absent.",
+        "code": "import torch\nfrom transformers import AutoModelForCausalLM, BitsAndBytesConfig\nfrom peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training\n\nbnb_config = BitsAndBytesConfig(\n    load_in_4bit=True,\n    bnb_4bit_quant_type=\"nf4\",\n    bnb_4bit_use_double_quant=True,\n    bnb_4bit_compute_dtype=torch.bfloat16,\n)\n\nbase = AutoModelForCausalLM.from_pretrained(\n    nom_du_modele,\n    quantization_config=bnb_config,\n    device_map=\"auto\",\n)\nbase = prepare_model_for_kbit_training(base)\nlora = LoraConfig(\n    r=16,\n    lora_alpha=32,\n    lora_dropout=0.05,\n    target_modules=[\"q_proj\", \"v_proj\"],\n    bias=\"none\",\n    task_type=\"CAUSAL_LM\",\n)\nmodele = get_peft_model(base, lora)\nmodele.print_trainable_parameters()"
+      },
+      "diagram": {
+        "title": "Une base en 4 bits, des adaptateurs en haute précision",
+        "description": "Schéma illustratif : les blocs de la base quantifiée sont déquantifiés pour le calcul, tandis que les adaptateurs restent en haute précision et reçoivent les gradients. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Base quantifiée en 4 bits, déquantification, adaptateurs en haute précision et mise à jour\">\n  <defs>\n    <marker id=\"ft-qlora-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"440\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">La base reste quantifiée, les adaptateurs apprennent</text>\n  <text x=\"410\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n  <g id=\"base-quantifiee\">\n    <rect x=\"40\" y=\"100\" width=\"300\" height=\"110\" rx=\"12\" fill=\"#111827\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"190\" y=\"126\" fill=\"#e0f2fe\" font-size=\"12\" text-anchor=\"middle\">base gelée en 4 bits</text>\n    <g fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"1.4\">\n      <rect x=\"66\" y=\"144\" width=\"54\" height=\"38\" rx=\"5\"/>\n      <rect x=\"132\" y=\"144\" width=\"54\" height=\"38\" rx=\"5\"/>\n      <rect x=\"198\" y=\"144\" width=\"54\" height=\"38\" rx=\"5\"/>\n      <rect x=\"264\" y=\"144\" width=\"54\" height=\"38\" rx=\"5\"/>\n    </g>\n    <g fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">\n      <text x=\"93\" y=\"168\">NF4</text><text x=\"159\" y=\"168\">NF4</text><text x=\"225\" y=\"168\">NF4</text><text x=\"291\" y=\"168\">NF4</text>\n    </g>\n  </g>\n  <g id=\"dequantification\">\n    <rect x=\"390\" y=\"118\" width=\"150\" height=\"74\" rx=\"10\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <text x=\"465\" y=\"146\" fill=\"#fef3c7\" font-size=\"12\" text-anchor=\"middle\">déquantification</text>\n    <text x=\"465\" y=\"166\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">pour le calcul</text>\n  </g>\n  <g id=\"adaptateurs\">\n    <rect x=\"590\" y=\"100\" width=\"190\" height=\"110\" rx=\"12\" fill=\"#111827\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"685\" y=\"126\" fill=\"#fce7f3\" font-size=\"12\" text-anchor=\"middle\">adaptateurs LoRA</text>\n    <text x=\"685\" y=\"148\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">haute précision</text>\n    <text x=\"685\" y=\"168\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">gradients conservés</text>\n    <text x=\"685\" y=\"188\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">optimiseur paginé possible</text>\n  </g>\n  <g id=\"mise-a-jour\">\n    <rect x=\"250\" y=\"300\" width=\"320\" height=\"86\" rx=\"12\" fill=\"#111827\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"410\" y=\"328\" fill=\"#d1fae5\" font-size=\"12\" text-anchor=\"middle\">mise à jour des adaptateurs</text>\n    <text x=\"410\" y=\"350\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">la base quantifiée reste inchangée</text>\n    <text x=\"410\" y=\"370\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">la mémoire des activations dépend des lots</text>\n  </g>\n  <g stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#ft-qlora-arrow)\">\n    <line x1=\"340\" y1=\"155\" x2=\"386\" y2=\"155\"/>\n    <line x1=\"540\" y1=\"155\" x2=\"586\" y2=\"155\"/>\n    <line x1=\"685\" y1=\"212\" x2=\"500\" y2=\"298\"/>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. La base quantifiée",
+            "explanation": "Les poids de base sont stockés en 4 bits, par blocs, avec des constantes de quantification. Ils restent gelés pendant l'entraînement.",
+            "highlight": [
+              "base-quantifiee"
+            ]
+          },
+          {
+            "title": "2. La déquantification",
+            "explanation": "Pour calculer, les valeurs sont ramenées dans un format de calcul de plus haute précision. Ce passage a un coût et introduit une approximation.",
+            "highlight": [
+              "dequantification"
+            ]
+          },
+          {
+            "title": "3. Les adaptateurs",
+            "explanation": "Les matrices LoRA restent en haute précision. Ce sont elles qui reçoivent les gradients et les états de l'optimiseur.",
+            "highlight": [
+              "adaptateurs"
+            ]
+          },
+          {
+            "title": "4. La mise à jour",
+            "explanation": "Seuls les adaptateurs sont mis à jour. La base quantifiée ne bouge pas, ce qui réduit la mémoire des poids mais pas celle des activations.",
+            "highlight": [
+              "mise-a-jour"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Que fait NF4 dans une configuration QLoRA ?",
+          "options": [
+            "Il supprime les adaptateurs",
+            "Il choisit des paliers de quantification adaptés à une distribution approximativement normale",
+            "Il remplace la fonction de perte",
+            "Il augmente la longueur des séquences"
+          ],
+          "correctIndex": 1,
+          "explanation": "NF4 est un format de quantification 4 bits dont les paliers sont conçus pour les poids distribués autour de zéro. Il ne change ni l'architecture ni la perte."
+        },
+        {
+          "question": "Quel poste de mémoire QLoRA ne réduit-il pas directement ?",
+          "options": [
+            "Les poids de la base",
+            "Les constantes de quantification",
+            "Les activations",
+            "Les adaptateurs"
+          ],
+          "correctIndex": 2,
+          "explanation": "QLoRA réduit la mémoire de stockage de la base. Les activations dépendent des lots et des séquences et restent un poste important pendant l'entraînement."
+        },
+        {
+          "question": "Pourquoi une configuration QLoRA n'est-elle pas une garantie de qualité ?",
+          "options": [
+            "Parce que la quantification introduit une approximation et que le résultat dépend de la tâche et des données",
+            "Parce que QLoRA ne fonctionne que sur des images",
+            "Parce qu'elle interdit toute évaluation",
+            "Parce qu'elle supprime le modèle de base"
+          ],
+          "correctIndex": 0,
+          "explanation": "La quantification et les hyperparamètres influencent le résultat. Il faut comparer les variantes sur un jeu de validation représentatif."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "NF4",
+          "definition": "Format de quantification 4 bits dont les paliers sont adaptés à une distribution de poids approximativement normale."
+        },
+        {
+          "term": "Double quantification",
+          "definition": "Technique qui quantifie à leur tour les constantes de quantification afin de réduire la mémoire qu'elles occupent."
+        },
+        {
+          "term": "Optimiseur paginé",
+          "definition": "Optimiseur capable de déplacer temporairement ses états vers la mémoire centrale lorsque la mémoire graphique est insuffisante."
+        },
+        {
+          "term": "Type de calcul",
+          "definition": "Format numérique utilisé pour les opérations, par exemple BF16 ou FP16, distinct du format de stockage des poids."
+        }
+      ],
+      "example": {
+        "title": "Quantification et mémoire",
+        "text": "**Exemple de calcul.** Un modèle de 7 milliards de paramètres occupe environ 28 Go en float32, 14 Go en float16 et 3,5 Go en 4 bits, sans les activations ni l'état de l'optimiseur. La quantification réduit la mémoire des poids, mais peut dégrader certaines couches. QLoRA combine une base quantifiée et des adaptateurs entraînés dans une précision plus élevée. Il faut mesurer la qualité après quantification."
+      },
+      "exercises": [
+        {
+          "title": "Ce que QLoRA ne réduit pas",
+          "prompt": "Un modèle de 13 milliards de paramètres est chargé en 4 bits pour un entraînement QLoRA. Estimez la mémoire des poids de base, puis expliquez pourquoi l'entraînement peut encore manquer de mémoire sur une carte de 24 Go avec des séquences longues. Citez deux leviers disponibles.",
+          "solution": "En 4 bits, les poids bruts représentent environ 13 milliards × 0,5 octet = 6,5 Go, auxquels s'ajoutent les constantes de quantification et les tampons. Les adaptateurs, leurs gradients et leurs états d'optimiseur restent petits. Mais les activations sont conservées en haute précision et croissent avec la longueur des séquences et la taille du lot. Avec des séquences longues, elles peuvent dépasser la mémoire restante, surtout en présence de fragmentation. Deux leviers : réduire le lot ou la longueur de séquence, et activer le gradient checkpointing ou un optimiseur paginé."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Dettmers et al., QLoRA : Efficient Finetuning of Quantized LLMs, 2023.",
+          "href": "https://arxiv.org/abs/2305.14314"
+        },
+        {
+          "label": "Hugging Face, PEFT, documentation, consultée le 21 octobre 2026.",
+          "href": "https://huggingface.co/docs/peft/index"
+        }
+      ]
+    },
+    {
+      "id": "variantes",
+      "title": "DoRA, LoRA+ et autres variantes",
+      "keyTakeaways": [
+        "DoRA sépare une composante de magnitude et une composante de direction ; la direction est adaptée par LoRA et la magnitude est entraînée à part.",
+        "Les auteurs de DoRA rapportent un gain sur leurs expériences, notamment à faible rang ; ce résultat n'est pas une garantie sur votre tâche et ajoute un coût de calcul.",
+        "LoRA+ utilise des taux d'apprentissage différents pour les matrices A et B ; le rapport entre les deux est un hyperparamètre à régler, pas une constante universelle.",
+        "Les variantes modifient la paramétrisation ou l'optimisation, pas la logique de base : la base reste gelée et les paramètres entraînables restent limités.",
+        "Comparer les variantes exige la même base, les mêmes données et le même jeu d'évaluation ; un chiffre publié hors de ce cadre ne suffit pas."
+      ],
+      "theory": "### Pourquoi des variantes ?\n\nLoRA a introduit une paramétrisation simple, mais elle n'est pas la seule façon de réduire les paramètres entraînables. Les variantes cherchent à améliorer la qualité pour un budget donné, à stabiliser l'entraînement ou à mieux utiliser le rang disponible. Elles ne changent pas la contrainte principale : la base reste gelée et l'on entraîne un petit ensemble de paramètres. Choisir une variante revient donc à choisir une paramétrisation et des réglages, pas à changer de famille de méthode.\n\n### DoRA : magnitude et direction\n\nDoRA, pour *Weight-Decomposed Low-Rank Adaptation*, part d'une observation sur la structure des mises à jour. Une matrice de poids peut être vue comme le produit d'une magnitude et d'une direction normalisée. DoRA entraîne une magnitude séparée et applique LoRA à la direction. Une écriture simplifiée est :\n\n$$ W' = m \\, \\frac{W + BA}{\\lVert W + BA \\rVert}. $$\n\nIci, $m$ est un vecteur de magnitude et la fraction représente la direction normalisée. La base $W$ reste gelée, $A$ et $B$ sont les matrices LoRA, et $m$ est entraîné. La normalisation couple les paramètres et rend le calcul un peu plus lourd qu'un LoRA standard. Les auteurs rapportent que cette décomposition améliore les résultats sur leurs benchmarks, en particulier à faible rang. Ces chiffres appartiennent à leur protocole ; ils ne disent pas ce que vous obtiendrez avec un autre modèle, un autre jeu de données ou un autre budget.\n\nDoRA ajoute donc un paramètre de magnitude par dimension de sortie et un calcul de norme. Le surcoût vient de ce calcul et des paramètres supplémentaires, pas seulement du nombre de paramètres entraînables. Il peut être intéressant lorsque le rang est très contraint, mais il faut vérifier le surcoût et le gain sur votre évaluation. Ce n'est pas une amélioration gratuite ni universelle : le résultat dépend de la base, du jeu de données et du budget.\n\n### LoRA+ : deux taux d'apprentissage\n\nLoRA+ part d'une asymétrie entre les matrices $A$ et $B$. Dans l'initialisation courante, $A$ est aléatoire et $B$ est nulle. Les deux matrices n'ont donc pas le même rôle au début de l'entraînement, et leur mise à jour peut profiter de vitesses différentes. LoRA+ propose d'utiliser un taux d'apprentissage plus élevé pour $B$ que pour $A$, avec un rapport $\\eta_B = \\lambda \\eta_A$.\n\nLe paramètre $\\lambda$ dépend de la tâche, de l'architecture et du rang. Les auteurs proposent une valeur dans leur cadre expérimental, mais ce n'est pas une constante à recopier partout. Un rapport trop élevé peut déstabiliser l'entraînement ; un rapport trop faible revient à ignorer l'idée. Il faut régler $\\eta_A$ et $\\lambda$ ensemble, puis comparer sur le jeu de validation.\n\n### Autres variantes\n\nD'autres variantes modifient l'échelle, l'initialisation ou le choix des paramètres. Certaines stabilisent le facteur d'échelle lorsque le rang augmente, d'autres initialisent les matrices à partir d'une décomposition de la base, ou partagent des matrices aléatoires pour réduire encore le nombre de paramètres. Ces méthodes ne sont pas toutes équivalentes et leurs avantages dépendent du régime d'entraînement. Ce cours se limite à DoRA et LoRA+ parce que les sources citées les documentent, mais l'existence d'autres variantes doit être gardée en tête.\n\n### Ce qu'il faut comparer\n\nComparer des variantes demande de fixer les autres facteurs : même modèle de base, mêmes données, même format de conversation, même nombre d'étapes ou même budget de calcul, même tokenizer et même jeu d'évaluation. Si l'on change le rang, le taux d'apprentissage et la variante en même temps, le résultat ne permet pas d'attribuer le gain. Il faut aussi répéter les expériences ou au moins vérifier la stabilité du résultat, car l'entraînement est sensible aux graines et à l'ordre des données.\n\nLes métriques doivent être choisies avant l'expérience. Une variante peut améliorer une moyenne et dégrader les cas rares qui comptent pour l'application. Il faut regarder les exemples, pas seulement le score agrégé. Enfin, le coût de la variante compte : un gain de qualité obtenu au prix d'un calcul beaucoup plus long ou d'une mémoire supplémentaire peut ne pas être rentable.\n\nLe code ci-dessous active DoRA dans une configuration PEFT. La présence de l'option ne garantit pas que la version installée de PEFT la prenne en charge : il faut vérifier la documentation et la version. Les valeurs restent des exemples.",
+      "code": {
+        "language": "python",
+        "explanation": "Activation de DoRA dans une configuration LoRA existante. Le reste de la configuration est identique à un LoRA standard ; le coût et le gain doivent être mesurés.",
+        "code": "from peft import LoraConfig\n\nconfig = LoraConfig(\n    r=8,\n    lora_alpha=16,\n    lora_dropout=0.05,\n    target_modules=[\"q_proj\", \"v_proj\"],\n    bias=\"none\",\n    task_type=\"CAUSAL_LM\",\n    use_dora=True,\n)\n\n# Vérifier la version de PEFT et la prise en charge de use_dora\n# avant de lancer un entraînement long."
+      },
+      "diagram": {
+        "title": "Séparer la magnitude de la direction",
+        "description": "Schéma illustratif : DoRA entraîne une magnitude et une direction issue de LoRA ; LoRA+ applique des taux d'apprentissage distincts à A et à B. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Décomposition d'un poids en magnitude et direction, avec taux d'apprentissage séparés\">\n  <defs>\n    <marker id=\"ft-var-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"440\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Deux façons de paramétrer l'adaptation</text>\n  <text x=\"410\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n  <g id=\"poids-dora\">\n    <rect x=\"330\" y=\"86\" width=\"160\" height=\"60\" rx=\"10\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"410\" y=\"112\" fill=\"#e0f2fe\" font-size=\"12\" text-anchor=\"middle\">poids W</text>\n    <text x=\"410\" y=\"132\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">base gelée</text>\n  </g>\n  <g id=\"magnitude\">\n    <rect x=\"90\" y=\"200\" width=\"220\" height=\"80\" rx=\"10\" fill=\"#111827\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <text x=\"200\" y=\"228\" fill=\"#fef3c7\" font-size=\"12\" text-anchor=\"middle\">magnitude m</text>\n    <text x=\"200\" y=\"248\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">entraînée séparément</text>\n    <text x=\"200\" y=\"266\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">DoRA</text>\n  </g>\n  <g id=\"direction\">\n    <rect x=\"510\" y=\"200\" width=\"220\" height=\"80\" rx=\"10\" fill=\"#111827\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"620\" y=\"228\" fill=\"#fce7f3\" font-size=\"12\" text-anchor=\"middle\">direction</text>\n    <text x=\"620\" y=\"248\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">W + BA normalisée</text>\n    <text x=\"620\" y=\"266\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">DoRA</text>\n  </g>\n  <g id=\"taux\">\n    <rect x=\"90\" y=\"330\" width=\"640\" height=\"76\" rx=\"10\" fill=\"#111827\" stroke=\"#34d399\" stroke-width=\"1.8\"/>\n    <text x=\"410\" y=\"356\" fill=\"#d1fae5\" font-size=\"12\" text-anchor=\"middle\">LoRA+ sépare les taux d'apprentissage de A et de B</text>\n    <text x=\"410\" y=\"378\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">le rapport entre les deux se règle sur le jeu de validation</text>\n    <text x=\"410\" y=\"396\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">aucune valeur universelle</text>\n  </g>\n  <g stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#ft-var-arrow)\">\n    <line x1=\"330\" y1=\"146\" x2=\"220\" y2=\"198\"/>\n    <line x1=\"490\" y1=\"146\" x2=\"600\" y2=\"198\"/>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Un poids décomposé",
+            "explanation": "DoRA ne traite pas la matrice comme un bloc unique. Il sépare une magnitude et une direction, ce qui permet de les entraîner différemment.",
+            "highlight": [
+              "poids-dora"
+            ]
+          },
+          {
+            "title": "2. La magnitude",
+            "explanation": "Un vecteur de magnitude est appris pour chaque dimension de sortie. Il module l'échelle de la direction.",
+            "highlight": [
+              "magnitude"
+            ]
+          },
+          {
+            "title": "3. La direction",
+            "explanation": "La direction combine la base gelée et une mise à jour LoRA, puis elle est normalisée. Ce calcul supplémentaire a un coût.",
+            "highlight": [
+              "direction"
+            ]
+          },
+          {
+            "title": "4. Les taux séparés",
+            "explanation": "LoRA+ agit sur l'optimisation : A et B reçoivent des taux d'apprentissage différents, dont le rapport doit être évalué.",
+            "highlight": [
+              "taux"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Que sépare DoRA dans une matrice de poids ?",
+          "options": [
+            "Les tokens d'entrée et de sortie",
+            "La magnitude et la direction",
+            "Le jeu d'entraînement et le jeu de test",
+            "Les couches d'attention et les embeddings"
+          ],
+          "correctIndex": 1,
+          "explanation": "DoRA entraîne une magnitude séparée et applique LoRA à la direction normalisée. La décomposition ajoute un calcul de norme."
+        },
+        {
+          "question": "Que propose LoRA+ pour l'optimisation ?",
+          "options": [
+            "Supprimer la matrice B",
+            "Utiliser des taux d'apprentissage différents pour A et B",
+            "Geler les deux matrices",
+            "Remplacer la perte par une accuracy"
+          ],
+          "correctIndex": 1,
+          "explanation": "LoRA+ repose sur l'asymétrie entre A et B. Le rapport entre les taux est un hyperparamètre à régler, pas une constante universelle."
+        },
+        {
+          "question": "Pourquoi un gain publié pour une variante ne se transpose-t-il pas automatiquement ?",
+          "options": [
+            "Parce que les articles sont toujours faux",
+            "Parce que le résultat dépend du modèle, des données, du budget et du protocole d'évaluation",
+            "Parce que les variantes ne fonctionnent que sur des images",
+            "Parce que LoRA interdit les benchmarks"
+          ],
+          "correctIndex": 1,
+          "explanation": "Un chiffre publié correspond à un cadre précis. Votre tâche, votre base et votre budget diffèrent, d'où la nécessité de comparer sur votre propre jeu."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "DoRA",
+          "definition": "Variante de LoRA qui sépare la magnitude et la direction du poids, entraîne la magnitude et applique LoRA à la direction normalisée."
+        },
+        {
+          "term": "LoRA+",
+          "definition": "Variante qui utilise des taux d'apprentissage distincts pour les matrices A et B de la branche LoRA."
+        },
+        {
+          "term": "Décomposition magnitude-direction",
+          "definition": "Écriture d'une matrice comme le produit d'une échelle et d'une direction normalisée, utilisée par DoRA."
+        },
+        {
+          "term": "Hyperparamètre",
+          "definition": "Valeur de configuration choisie avant l'entraînement, par exemple le rang, le taux d'apprentissage ou le dropout."
+        }
+      ],
+      "example": {
+        "title": "Choisir une variante sans se perdre",
+        "text": "**Scénario illustratif.** DoRA, LoRA+ et rsLoRA modifient l'entraînement ou la paramétrisation des adaptateurs. Ils peuvent améliorer la stabilité ou la qualité sur certains réglages, mais ajoutent des hyperparamètres. Une équipe doit d'abord obtenir une base LoRA ou QLoRA reproductible, puis tester une variante à la fois sur le même jeu. La nouveauté n'est pas une preuve."
+      },
+      "exercises": [
+        {
+          "title": "DoRA et LoRA+, deux objets différents",
+          "prompt": "DoRA et LoRA+ sont présentés comme des variantes de LoRA. Expliquez ce que chacune modifie concrètement, quel surcoût elle introduit, et pourquoi une comparaison sérieuse doit fixer la base, les données, le budget et le jeu d'évaluation.",
+          "solution": "DoRA change la paramétrisation : il sépare une magnitude apprise par dimension de sortie et une direction normalisée, adaptée par LoRA. Il ajoute donc un vecteur de magnitude et un calcul de norme, ce qui alourdit un peu le calcul. LoRA+ agit sur l'optimisation : il applique des taux d'apprentissage différents à A et à B, avec un rapport lambda à régler. Le surcoût est surtout un hyperparamètre supplémentaire. Si l'on change à la fois la variante, le rang et le taux, aucun gain ne peut être attribué. Il faut fixer base, données, budget et évaluation, puis tester une variante à la fois."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Liu et al., DoRA : Weight-Decomposed Low-Rank Adaptation, 2024.",
+          "href": "https://arxiv.org/abs/2402.09353"
+        },
+        {
+          "label": "Hayou et al., LoRA+ : Efficient Low Rank Adaptation of Large Models, 2024.",
+          "href": "https://arxiv.org/abs/2402.12354"
+        }
+      ]
+    },
+    {
+      "id": "donnees",
+      "title": "Préparer les données et le SFT",
+      "keyTakeaways": [
+        "Le SFT apprend à partir de paires instruction-réponse ; le masquage de la perte empêche le prompt de contribuer à l'objectif lorsque l'on veut seulement apprendre la réponse.",
+        "Le modèle de chat et les tokens spéciaux doivent correspondre à ceux utilisés à l'inférence ; un écart de template dégrade silencieusement le résultat.",
+        "La qualité, la déduplication, la couverture, la licence et l'absence de données personnelles comptent davantage que le volume brut.",
+        "Le packing et la troncature changent ce que le modèle voit : il faut vérifier les frontières des exemples et les étiquettes.",
+        "Un jeu de validation distinct, contrôlé contre la contamination, est nécessaire avant de lancer l'entraînement."
+      ],
+      "theory": "### L'objectif du SFT\n\nLe fine-tuning supervisé apprend au modèle à produire une réponse attendue. Pour un modèle de langage causal, la perte est calculée token par token : à chaque position, le modèle prédit un token et compare sa distribution à la cible. La somme ou la moyenne de ces pertes guide la mise à jour. Le modèle ne reçoit pas une vérité abstraite ; il reçoit une séquence de tokens et apprend à en prédire la suite.\n\nCette formulation a une conséquence pratique. La manière dont les données sont formatées, tokenisées et masquées fait partie de l'objectif. Deux jeux de données qui contiennent les mêmes réponses peuvent produire des comportements différents s'ils n'utilisent pas le même template, les mêmes tokens de fin ou la même politique de masquage.\n\n### Le format des exemples\n\nUn exemple de conversation contient souvent une liste de messages avec un rôle et un contenu : système, utilisateur, assistant. Le modèle de base a été entraîné avec un format particulier, et le tokenizer fournit généralement une fonction qui applique ce format. Il faut utiliser cette fonction plutôt que concaténer des chaînes à la main, sous peine de produire des séquences que le modèle n'a jamais vues.\n\nUn exemple minimal peut ressembler à ceci :\n\n```json\n{\"messages\": [{\"role\": \"user\", \"content\": \"Classe ce ticket.\"}, {\"role\": \"assistant\", \"content\": \"Catégorie: facturation.\"}]}\n```\n\nLe champ système est optionnel selon les modèles. Certains templates ajoutent des tokens de début et de fin, d'autres non. Il faut lire la documentation du modèle et vérifier le rendu exact du template avant de tokeniser des milliers d'exemples.\n\n### Masquer la perte du prompt\n\nSi l'on entraîne le modèle à prédire toute la séquence, y compris la question, une partie du gradient sert à apprendre à reproduire le prompt. Ce n'est pas toujours souhaitable. Pour une tâche instruction-réponse, on préfère souvent calculer la perte uniquement sur les tokens de la réponse. On met alors les étiquettes du prompt à `-100`, valeur ignorée par la perte de PyTorch. Le modèle voit le prompt comme contexte, mais seuls les tokens de la réponse contribuent au gradient.\n\nLe masquage doit être cohérent avec le template. Si l'on oublie le token de fin de réponse, le modèle n'apprend pas à s'arrêter. Si l'on masque aussi une partie de la réponse, l'objectif devient différent de celui que l'on croit. Il faut inspecter quelques exemples tokenisés, pas seulement le texte brut.\n\n### Packing et troncature\n\nPour éviter de gaspiller de la place, on peut assembler plusieurs exemples courts dans une même séquence, c'est le *packing*. Les exemples sont concaténés jusqu'à atteindre la longueur maximale. Cette technique améliore l'utilisation des lots, mais elle peut mélanger des contextes si l'on ne réinitialise pas l'attention aux frontières. Elle complique aussi le masquage. Une alternative plus simple consiste à ajouter des jetons de remplissage aux séquences, au prix d'un gaspillage de calcul.\n\nLa troncature coupe les séquences trop longues. Elle peut supprimer la fin d'une réponse, le début d'une instruction ou un exemple entier. Il faut décider où couper et vérifier la proportion d'exemples touchés. Une longueur maximale choisie trop basse réduit le coût mais peut rendre la tâche impossible à apprendre.\n\n### La qualité avant le volume\n\nUn jeu de données SFT n'est pas un corpus quelconque. Les exemples doivent représenter les cas que le modèle rencontrera, avec leurs variantes, leurs cas limites et leurs réponses attendues. Il faut dédupliquer les exemples proches, retirer les réponses ambiguës, vérifier les faits et documenter les sources. Un exemple faux ou contradictoire apprend au modèle à se tromper.\n\nLa licence et la confidentialité comptent aussi. Un jeu de données peut contenir des données personnelles, des secrets industriels ou des contenus dont la redistribution est interdite. Le fine-tuning ne rend pas ces problèmes invisibles : le modèle peut mémoriser des séquences et les restituer. Il faut filtrer, pseudonymiser ou exclure selon le cadre applicable.\n\nLe déséquilibre entre catégories peut biaiser le comportement. Si 95 % des exemples concernent une seule tâche, le modèle peut devenir excellent sur cette tâche et moins bon ailleurs. La composition du jeu est un choix éditorial et technique, pas un détail.\n\n### Données synthétiques et contamination\n\nLes données synthétiques peuvent compléter un jeu rare, mais elles doivent être filtrées et vérifiées. Un modèle qui apprend les erreurs d'un autre modèle les reproduit. Il faut mesurer l'apport sur un jeu réel et ne pas remplacer entièrement des exemples humains par des générations non contrôlées.\n\nLa contamination est l'autre risque : un exemple du jeu de test peut se retrouver dans l'entraînement, ce qui gonfle les résultats. Il faut rechercher les doublons exacts et les variantes proches entre entraînement et validation. Un jeu de validation pris dans la même distribution que l'entraînement mesure la généralisation à des exemples nouveaux de cette distribution, mais pas la robustesse à un changement de distribution.\n\nLe code ci-dessous montre un tokenizer qui applique le template, puis masque les tokens du prompt. Il suppose un tokenizer déjà chargé et un exemple au format messages. Aucune sortie n'est affichée : elle dépend du tokenizer et du template du modèle.",
+      "code": {
+        "language": "python",
+        "explanation": "Application du template de chat et masquage de la perte sur le prompt. Les tokens de la réponse et le token de fin restent actifs. Le tokenizer est supposé chargé.",
+        "code": "def tokeniser_exemple(exemple, tokenizer, max_length=1024):\n    messages = exemple[\"messages\"]\n    prompt = tokenizer.apply_chat_template(\n        messages[:-1],\n        tokenize=False,\n        add_generation_prompt=True,\n    )\n    reponse = messages[-1][\"content\"] + tokenizer.eos_token\n\n    prompt_ids = tokenizer(prompt, add_special_tokens=False)[\"input_ids\"]\n    reponse_ids = tokenizer(reponse, add_special_tokens=False)[\"input_ids\"]\n\n    input_ids = (prompt_ids + reponse_ids)[:max_length]\n    labels = ([-100] * len(prompt_ids) + reponse_ids)[:max_length]\n    return {\"input_ids\": input_ids, \"labels\": labels}"
+      },
+      "diagram": {
+        "title": "Du message au masque de perte",
+        "description": "Schéma illustratif : des messages passent dans un template de chat, deviennent des tokens, puis les tokens du prompt sont masqués pour ne garder que la réponse dans la perte. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Messages, template de chat, tokens et masque de perte\">\n  <defs>\n    <marker id=\"ft-data-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"440\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Le format fait partie de l'objectif</text>\n  <text x=\"410\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n  <g id=\"messages\">\n    <rect x=\"40\" y=\"100\" width=\"190\" height=\"150\" rx=\"12\" fill=\"#111827\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"135\" y=\"126\" fill=\"#e0f2fe\" font-size=\"12\" text-anchor=\"middle\">messages</text>\n    <text x=\"135\" y=\"150\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">système</text>\n    <text x=\"135\" y=\"170\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">utilisateur</text>\n    <text x=\"135\" y=\"190\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">assistant</text>\n    <text x=\"135\" y=\"222\" fill=\"#94a3b8\" font-size=\"10\" text-anchor=\"middle\">rôles et contenus</text>\n  </g>\n  <g id=\"template\">\n    <rect x=\"280\" y=\"120\" width=\"180\" height=\"110\" rx=\"12\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <text x=\"370\" y=\"148\" fill=\"#fef3c7\" font-size=\"12\" text-anchor=\"middle\">template de chat</text>\n    <text x=\"370\" y=\"170\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">tokens spéciaux</text>\n    <text x=\"370\" y=\"190\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">début et fin</text>\n    <text x=\"370\" y=\"210\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">identique à l'inférence</text>\n  </g>\n  <g id=\"tokens\">\n    <rect x=\"510\" y=\"120\" width=\"270\" height=\"110\" rx=\"12\" fill=\"#111827\" stroke=\"#818cf8\" stroke-width=\"2\"/>\n    <text x=\"645\" y=\"146\" fill=\"#e0e7ff\" font-size=\"12\" text-anchor=\"middle\">tokens</text>\n    <g fill=\"#111827\" stroke=\"#818cf8\" stroke-width=\"1.2\">\n      <rect x=\"528\" y=\"162\" width=\"38\" height=\"30\" rx=\"4\"/>\n      <rect x=\"574\" y=\"162\" width=\"38\" height=\"30\" rx=\"4\"/>\n      <rect x=\"620\" y=\"162\" width=\"38\" height=\"30\" rx=\"4\"/>\n      <rect x=\"666\" y=\"162\" width=\"38\" height=\"30\" rx=\"4\"/>\n      <rect x=\"712\" y=\"162\" width=\"38\" height=\"30\" rx=\"4\"/>\n    </g>\n    <text x=\"645\" y=\"214\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">prompt puis réponse</text>\n  </g>\n  <g id=\"masque\">\n    <rect x=\"120\" y=\"310\" width=\"580\" height=\"96\" rx=\"12\" fill=\"#111827\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"410\" y=\"338\" fill=\"#d1fae5\" font-size=\"12\" text-anchor=\"middle\">étiquettes de la perte</text>\n    <g fill=\"#111827\" stroke=\"#fb7185\" stroke-width=\"1.3\">\n      <rect x=\"160\" y=\"354\" width=\"52\" height=\"30\" rx=\"4\"/>\n      <rect x=\"220\" y=\"354\" width=\"52\" height=\"30\" rx=\"4\"/>\n      <rect x=\"280\" y=\"354\" width=\"52\" height=\"30\" rx=\"4\"/>\n      <rect x=\"340\" y=\"354\" width=\"52\" height=\"30\" rx=\"4\"/>\n    </g>\n    <g fill=\"#fda4af\" font-size=\"10\" text-anchor=\"middle\">\n      <text x=\"186\" y=\"374\">-100</text><text x=\"246\" y=\"374\">-100</text><text x=\"306\" y=\"374\">-100</text><text x=\"366\" y=\"374\">-100</text>\n    </g>\n    <g fill=\"#111827\" stroke=\"#34d399\" stroke-width=\"1.3\">\n      <rect x=\"410\" y=\"354\" width=\"52\" height=\"30\" rx=\"4\"/>\n      <rect x=\"470\" y=\"354\" width=\"52\" height=\"30\" rx=\"4\"/>\n      <rect x=\"530\" y=\"354\" width=\"52\" height=\"30\" rx=\"4\"/>\n      <rect x=\"590\" y=\"354\" width=\"52\" height=\"30\" rx=\"4\"/>\n    </g>\n    <g fill=\"#a7f3d0\" font-size=\"10\" text-anchor=\"middle\">\n      <text x=\"436\" y=\"374\">tok</text><text x=\"496\" y=\"374\">tok</text><text x=\"556\" y=\"374\">tok</text><text x=\"616\" y=\"374\">fin</text>\n    </g>\n    <text x=\"410\" y=\"400\" fill=\"#94a3b8\" font-size=\"10\" text-anchor=\"middle\">seule la réponse contribue à la perte</text>\n  </g>\n  <g stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#ft-data-arrow)\">\n    <line x1=\"230\" y1=\"175\" x2=\"276\" y2=\"175\"/>\n    <line x1=\"460\" y1=\"175\" x2=\"506\" y2=\"175\"/>\n    <line x1=\"645\" y1=\"230\" x2=\"450\" y2=\"308\"/>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Les messages",
+            "explanation": "Un exemple contient des rôles et des contenus. La réponse attendue est distinguée de l'instruction qui la précède.",
+            "highlight": [
+              "messages"
+            ]
+          },
+          {
+            "title": "2. Le template",
+            "explanation": "Le template ajoute les tokens spéciaux attendus par le modèle. Il doit être identique à celui utilisé à l'inférence.",
+            "highlight": [
+              "template"
+            ]
+          },
+          {
+            "title": "3. Les tokens",
+            "explanation": "Le prompt et la réponse deviennent une séquence d'entiers. La longueur maximale et la troncature s'appliquent ici.",
+            "highlight": [
+              "tokens"
+            ]
+          },
+          {
+            "title": "4. Le masque",
+            "explanation": "Les étiquettes du prompt sont ignorées par la perte. Les tokens de la réponse et le token de fin restent actifs pour apprendre à répondre et à s'arrêter.",
+            "highlight": [
+              "masque"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Pourquoi masque-t-on souvent la perte sur les tokens du prompt ?",
+          "options": [
+            "Pour réduire la taille du tokenizer",
+            "Pour que seuls les tokens de la réponse contribuent au gradient",
+            "Pour empêcher le modèle de lire le prompt",
+            "Pour supprimer le token de fin de réponse"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le masquage à -100 empêche la perte de compter les tokens du prompt. Le prompt reste dans le contexte, mais il ne définit pas l'objectif d'apprentissage."
+        },
+        {
+          "question": "Pourquoi le template de chat doit-il être le même à l'entraînement et à l'inférence ?",
+          "options": [
+            "Parce que le tokenizer refuse les autres formats",
+            "Parce que des tokens spéciaux différents changent la séquence vue par le modèle",
+            "Parce que le template fixe le taux d'apprentissage",
+            "Parce que le template remplace la fonction de perte"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le modèle apprend sur une forme précise. Un décalage de tokens de début, de fin ou de rôle crée une distribution différente de celle vue à l'entraînement."
+        },
+        {
+          "question": "Quel contrôle est indispensable avant l'entraînement ?",
+          "options": [
+            "Supprimer tous les exemples difficiles",
+            "Vérifier la qualité, les doublons, les droits et la contamination avec la validation",
+            "Choisir le plus grand nombre possible d'époques",
+            "Retirer le token de fin de réponse"
+          ],
+          "correctIndex": 1,
+          "explanation": "Un jeu de validation contaminé ou des données douteuses faussent l'évaluation. La qualité et la séparation des jeux comptent avant le réglage fin."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "SFT",
+          "definition": "Fine-tuning supervisé sur des exemples de réponses attendues, souvent des conversations instruction-réponse."
+        },
+        {
+          "term": "Masquage de la perte",
+          "definition": "Technique qui met certaines étiquettes à -100 pour qu'elles ne contribuent pas à la perte, par exemple les tokens du prompt."
+        },
+        {
+          "term": "Template de chat",
+          "definition": "Format qui ajoute les rôles et les tokens spéciaux attendus par un modèle de conversation."
+        },
+        {
+          "term": "Packing",
+          "definition": "Assemblage de plusieurs exemples courts dans une même séquence pour mieux remplir les lots, avec des précautions aux frontières."
+        }
+      ],
+      "example": {
+        "title": "Masquer les tokens du prompt",
+        "text": "**Scénario illustratif.** Un exemple de dialogue contient une consigne et une réponse. On entraîne le modèle à produire la réponse, pas à répéter la consigne. Le masquage des tokens de la consigne, souvent avec la valeur -100, empêche de les compter dans la perte. Un masquage incorrect apprend au modèle à prédire le prompt ou vide une partie de l'exemple. Il faut vérifier quelques exemples à la main."
+      },
+      "exercises": [
+        {
+          "title": "Deux erreurs de préparation",
+          "prompt": "Un script de préparation applique le template de chat, mais oublie le token de fin de réponse dans les étiquettes. Un autre concatène les messages à la main, sans utiliser la fonction de template du tokenizer. Décrivez la conséquence de chaque erreur sur l'apprentissage, puis indiquez le contrôle qui permet de les repérer.",
+          "solution": "Sans token de fin dans les étiquettes, le modèle n'apprend pas à s'arrêter : il peut enchaîner les réponses ou dépasser la longueur attendue. Une concaténation manuelle peut produire des tokens de rôle et des délimiteurs différents de ceux vus au pré-entraînement, ce qui crée une distribution que le modèle n'a jamais rencontrée et dégrade les réponses sans erreur visible. Dans les deux cas, il faut inspecter quelques exemples tokenisés, pas seulement le texte brut, et vérifier que les étiquettes du prompt sont bien à -100 et que le token de fin reste actif."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Hugging Face, TRL SFTTrainer, documentation, consultée le 21 octobre 2026.",
+          "href": "https://huggingface.co/docs/trl/sft_trainer"
+        },
+        {
+          "label": "Axolotl, documentation, consultée le 21 octobre 2026.",
+          "href": "https://docs.axolotl.ai/"
+        }
+      ]
+    },
+    {
+      "id": "evaluation",
+      "title": "Évaluer, éviter le surapprentissage et mettre en production",
+      "keyTakeaways": [
+        "La perte d'entraînement ne mesure pas la qualité en production ; il faut un jeu de validation représentatif et des critères liés à la tâche.",
+        "Les tests de régression sur des capacités générales détectent le catastrophique oubli et les dégradations invisibles sur la tâche cible.",
+        "Le surapprentissage se repère par un écart croissant entre entraînement et validation, de la mémorisation ou des répétitions ; l'arrêt précoce et la sélection du checkpoint sont des outils.",
+        "La fusion ou le service d'adaptateurs sont deux stratégies différentes : la première simplifie l'inférence, la seconde facilite le multi-tâches.",
+        "Une mise en production versionne la base, l'adaptateur, le tokenizer, le template et les données, et prévoit une surveillance et un retour arrière."
+      ],
+      "theory": "### La perte ne suffit pas\n\nPendant l'entraînement, la perte diminue souvent. Cela signifie que le modèle prédit mieux les exemples vus, pas qu'il répond mieux aux cas nouveaux. Un modèle peut mémoriser des réponses, reproduire le style des données ou exploiter des régularités propres au jeu d'entraînement. Pour savoir s'il progresse, il faut un jeu de validation distinct, représentatif de l'usage réel, et des critères qui ont du sens pour la tâche.\n\nLe choix des critères dépend de ce que l'on attend. Pour une classification, on peut mesurer l'exactitude, la précision, le rappel ou une matrice de confusion. Pour une extraction, on peut vérifier la validité du schéma et l'exactitude des champs. Pour une génération, l'évaluation est plus difficile : similarité avec une référence, respect d'une checklist, jugement humain ou modèle juge. Aucune métrique unique ne résume la qualité d'un assistant.\n\n### Construire le jeu d'évaluation\n\nUn bon jeu de validation contient des exemples non vus, issus de la distribution cible, avec les cas fréquents et les cas limites. Il doit être assez grand pour que les différences ne soient pas dues au hasard, et assez précis pour que l'on sache quoi corriger. Il faut vérifier qu'aucun exemple de validation ne figure dans l'entraînement, y compris sous une forme proche. La contamination peut venir d'un doublon exact, d'une reformulation ou d'un document partagé.\n\nIl est utile de séparer plusieurs ensembles : un jeu de validation pour régler les hyperparamètres et choisir le checkpoint, un jeu de test gardé pour la décision finale, et éventuellement un jeu de cas difficiles connus. Si l'on utilise le même jeu pour tout, on finit par optimiser dessus et l'on perd la mesure de la généralisation. Les exemples de production peuvent ensuite alimenter une revue, avec les précautions de confidentialité nécessaires.\n\n### Les juges automatiques\n\nLes modèles juges peuvent comparer une réponse à une référence ou appliquer une grille. Ils sont pratiques pour traiter beaucoup d'exemples, mais ils ont leurs biais : préférence pour un style, sensibilité à l'ordre des réponses, difficulté à vérifier un fait. Il faut les calibrer sur un échantillon jugé par des humains et documenter leur protocole. Un score de juge n'est pas une vérité ; c'est un indicateur parmi d'autres.\n\nLes tests déterministes restent précieux lorsque la sortie peut être vérifiée : un JSON valide, un champ présent, un calcul correct, une citation qui existe. Ces tests ne couvrent pas la qualité rédactionnelle, mais ils attrapent des régressions nettes. Il faut les combiner avec une revue humaine des cas importants.\n\n### Les tests de régression\n\nLe fine-tuning peut dégrader des capacités générales sans que la tâche cible ne baisse. Une série de tests de régression aide à détecter cette dérive : questions générales, tâches déjà maîtrisées, formats existants, langues, refus de sécurité. Ces tests doivent être stables et versionnés. Un écart sur un test ne prouve pas à lui seul une régression, mais une baisse répétée sur plusieurs cas est un signal.\n\nLe surapprentissage se manifeste parfois par des réponses rigides, des répétitions, une tendance à recopier le style des données ou une perte de diversité. La courbe de validation peut plafonner puis se dégrader. L'arrêt précoce consiste à conserver le checkpoint qui maximise le critère de validation, pas celui qui minimise la perte d'entraînement. Il faut aussi regarder des exemples, car une moyenne peut cacher une dégradation sur une catégorie.\n\n### Fusion ou service d'adaptateurs\n\nAprès l'entraînement, deux stratégies principales existent. La fusion ajoute l'adaptateur à la base et produit un modèle unique, plus simple à servir. Elle convient lorsque l'on a une seule tâche par modèle et que l'on veut éviter la logique d'adaptateurs. La fusion doit être testée : elle peut introduire des différences numériques, surtout si la base est quantifiée.\n\nLe service d'adaptateurs garde la base et charge un ou plusieurs adaptateurs selon la requête. Il permet de servir plusieurs tâches avec une base partagée et de basculer sans recharger le modèle complet. En contrepartie, il faut gérer le routage, la mémoire des adaptateurs et la latence. Les bibliothèques de service ne se comportent pas toutes de la même manière : certaines fusionnent à la volée, d'autres gardent les branches séparées.\n\n### Versionner et surveiller\n\nUne mise en production doit versionner la base, l'adaptateur, le tokenizer, le template de chat, les données et le code d'entraînement. Un modèle sans ces informations n'est pas reproductible. Il faut aussi consigner les hyperparamètres, la graine, la date et le jeu d'évaluation utilisé. Si un incident survient, ces éléments permettent de revenir à une version connue.\n\nLa surveillance porte sur les erreurs, les sorties vides, les formats invalides, les refus anormaux et la dérive des données d'entrée. Les retours utilisateurs et un échantillon de réponses revus régulièrement complètent les métriques automatiques. Un déploiement progressif, avec un retour arrière prévu, limite l'impact d'une régression. Le fine-tuning n'est pas un événement unique : c'est un cycle de données, d'entraînement, d'évaluation et de correction.",
+      "diagram": {
+        "title": "Un cycle d'évaluation et de service",
+        "description": "Schéma illustratif : le jeu de validation sélectionne le checkpoint, les tests de régression contrôlent les capacités, puis la fusion ou le service et la supervision ferment la boucle. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Validation, tests de régression, fusion ou service et supervision\">\n  <defs>\n    <marker id=\"ft-eval-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"440\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Évaluer avant de servir, servir avant de figer</text>\n  <text x=\"410\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n  <g id=\"validation\">\n    <rect x=\"40\" y=\"110\" width=\"220\" height=\"110\" rx=\"12\" fill=\"#111827\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"150\" y=\"138\" fill=\"#e0f2fe\" font-size=\"12\" text-anchor=\"middle\">jeu de validation</text>\n    <text x=\"150\" y=\"160\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">exemples non vus</text>\n    <text x=\"150\" y=\"180\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">critères de la tâche</text>\n    <text x=\"150\" y=\"200\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">choix du checkpoint</text>\n  </g>\n  <g id=\"regression\">\n    <rect x=\"300\" y=\"110\" width=\"220\" height=\"110\" rx=\"12\" fill=\"#111827\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <text x=\"410\" y=\"138\" fill=\"#fef3c7\" font-size=\"12\" text-anchor=\"middle\">tests de régression</text>\n    <text x=\"410\" y=\"160\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">capacités générales</text>\n    <text x=\"410\" y=\"180\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">formats déjà maîtrisés</text>\n    <text x=\"410\" y=\"200\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">détection de l'oubli</text>\n  </g>\n  <g id=\"fusion-service\">\n    <rect x=\"560\" y=\"110\" width=\"220\" height=\"110\" rx=\"12\" fill=\"#111827\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"670\" y=\"138\" fill=\"#fce7f3\" font-size=\"12\" text-anchor=\"middle\">fusion ou adaptateur</text>\n    <text x=\"670\" y=\"160\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">un modèle unique</text>\n    <text x=\"670\" y=\"180\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">ou plusieurs tâches</text>\n    <text x=\"670\" y=\"200\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">choix de service</text>\n  </g>\n  <g id=\"service\">\n    <rect x=\"180\" y=\"290\" width=\"240\" height=\"84\" rx=\"12\" fill=\"#111827\" stroke=\"#818cf8\" stroke-width=\"2\"/>\n    <text x=\"300\" y=\"318\" fill=\"#e0e7ff\" font-size=\"12\" text-anchor=\"middle\">service</text>\n    <text x=\"300\" y=\"340\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">version de base et d'adaptateur</text>\n    <text x=\"300\" y=\"360\" fill=\"#a5b4fc\" font-size=\"11\" text-anchor=\"middle\">template et tokenizer figés</text>\n  </g>\n  <g id=\"supervision\">\n    <rect x=\"480\" y=\"290\" width=\"260\" height=\"84\" rx=\"12\" fill=\"#111827\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"610\" y=\"318\" fill=\"#d1fae5\" font-size=\"12\" text-anchor=\"middle\">supervision</text>\n    <text x=\"610\" y=\"340\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">erreurs, formats, dérive</text>\n    <text x=\"610\" y=\"360\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">retour arrière prévu</text>\n  </g>\n  <g stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#ft-eval-arrow)\">\n    <line x1=\"260\" y1=\"165\" x2=\"296\" y2=\"165\"/>\n    <line x1=\"520\" y1=\"165\" x2=\"556\" y2=\"165\"/>\n    <line x1=\"670\" y1=\"220\" x2=\"610\" y2=\"288\"/>\n    <line x1=\"480\" y1=\"332\" x2=\"424\" y2=\"332\"/>\n    <path d=\"M300 288 C 120 250, 100 180, 40 165\" fill=\"none\"/>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. La validation",
+            "explanation": "Le jeu de validation sert à choisir le checkpoint et les hyperparamètres. Il doit rester distinct des exemples d'entraînement.",
+            "highlight": [
+              "validation"
+            ]
+          },
+          {
+            "title": "2. Les régressions",
+            "explanation": "Des tests sur les capacités générales et les formats existants détectent une dégradation que la tâche cible ne montre pas.",
+            "highlight": [
+              "regression"
+            ]
+          },
+          {
+            "title": "3. La fusion ou le service",
+            "explanation": "Un modèle fusionné simplifie l'inférence. Un service d'adaptateurs facilite plusieurs tâches, avec une gestion supplémentaire.",
+            "highlight": [
+              "fusion-service",
+              "service"
+            ]
+          },
+          {
+            "title": "4. La supervision",
+            "explanation": "La surveillance des erreurs et de la dérive, avec un retour arrière prévu, ferme le cycle. Un modèle déployé reste à évaluer.",
+            "highlight": [
+              "supervision"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Pourquoi la perte d'entraînement ne suffit-elle pas à décider du déploiement ?",
+          "options": [
+            "Parce qu'elle est toujours égale à zéro",
+            "Parce qu'elle mesure les exemples vus et pas la qualité sur des cas nouveaux",
+            "Parce qu'elle ne dépend pas des données",
+            "Parce qu'elle remplace les tests de régression"
+          ],
+          "correctIndex": 1,
+          "explanation": "Une perte basse peut accompagner de la mémorisation. La validation, les tests de régression et une revue des sorties sont nécessaires."
+        },
+        {
+          "question": "Quel signe peut révéler un surapprentissage ?",
+          "options": [
+            "Une perte de validation qui se dégrade alors que la perte d'entraînement continue de baisser",
+            "Un tokenizer qui change de vocabulaire",
+            "Une augmentation du nombre de fichiers de configuration",
+            "Un modèle qui répond trop vite"
+          ],
+          "correctIndex": 0,
+          "explanation": "L'écart croissant entre entraînement et validation, les répétitions et la mémorisation sont des signaux. Le checkpoint doit être choisi sur la validation."
+        },
+        {
+          "question": "Que faut-il versionner avec un adaptateur ?",
+          "options": [
+            "Uniquement le nom du fichier",
+            "La base, le tokenizer, le template, les données et les hyperparamètres",
+            "Seulement la date du jour",
+            "Le nom du fournisseur de la carte graphique"
+          ],
+          "correctIndex": 1,
+          "explanation": "Sans la base, le template et les données, l'adaptateur n'est pas reproductible. Ces éléments permettent aussi de revenir à une version connue."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Jeu de validation",
+          "definition": "Ensemble d'exemples non utilisés pour l'entraînement, servant à choisir les hyperparamètres et le checkpoint."
+        },
+        {
+          "term": "Surapprentissage",
+          "definition": "Situation où le modèle apprend les exemples d'entraînement, y compris leur bruit, au détriment de la généralisation."
+        },
+        {
+          "term": "Test de régression",
+          "definition": "Test stable qui vérifie qu'une capacité existante ne se dégrade pas après une modification du modèle."
+        },
+        {
+          "term": "Fusion",
+          "definition": "Intégration d'un adaptateur dans les poids de base pour produire un modèle unique, plus simple à servir."
+        }
+      ],
+      "example": {
+        "title": "Comparer avant et après",
+        "text": "**Scénario illustratif.** Une équipe évalue le modèle de base et le modèle adapté sur le même jeu de test, avec les mêmes prompts et les mêmes critères. Elle mesure la qualité de la tâche, la fréquence des réponses hors format et les régressions sur des cas généraux. Un gain sur les exemples d'entraînement ne suffit pas. Le jeu de test doit rester séparé et représentatif."
+      },
+      "exercises": [
+        {
+          "title": "Avant de déployer un adaptateur",
+          "prompt": "Une équipe a entraîné un adaptateur LoRA. La perte d'entraînement baisse, la perte de validation aussi, et elle veut déployer. Citez quatre contrôles à faire avant la mise en production, en expliquant ce que chacun peut révéler, puis indiquez ce qu'il faut versionner.",
+          "solution": "Il faut d'abord vérifier l'absence de contamination entre entraînement et validation, sinon la baisse ne mesure rien. Ensuite, choisir le checkpoint sur le critère de validation, pas sur la perte d'entraînement, et regarder des exemples pour repérer répétitions et rigidité. Des tests de régression sur des capacités générales détectent un catastrophique oubli invisible sur la tâche cible. Enfin, tester la fusion ou le service de l'adaptateur, car les résultats numériques peuvent changer. Il faut versionner la base, l'adaptateur, le tokenizer, le template, les données et les hyperparamètres."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Hugging Face, TRL SFTTrainer, documentation, consultée le 21 octobre 2026.",
+          "href": "https://huggingface.co/docs/trl/sft_trainer"
+        },
+        {
+          "label": "Axolotl, documentation, consultée le 21 octobre 2026.",
+          "href": "https://docs.axolotl.ai/"
+        }
+      ]
+    },
+    {
+      "id": "dimensionner",
+      "title": "Dimensionner et choisir : VRAM, rang et matrice de décision",
+      "keyTakeaways": [
+        "La mémoire d’un fine-tuning dépend des poids, des gradients, de l’optimiseur et des activations, pas seulement du modèle.",
+        "LoRA et QLoRA réduisent le nombre de paramètres entraînés, mais ne suppriment ni les activations ni le coût des données.",
+        "Le rang, la longueur de séquence et la taille du lot se règlent ensemble ; un rang élevé n’est pas une garantie.",
+        "La matrice de décision compare RAG, LoRA, QLoRA et full fine-tuning sur la tâche, les données et le matériel.",
+        "L’évaluation doit comparer le modèle adapté au modèle de base sur un jeu de test séparé."
+      ],
+      "theory": "### Ce qui occupe la mémoire\n\nUn fine-tuning ne charge pas seulement les poids. Il conserve les gradients, l'état de l'optimiseur et les activations nécessaires à la rétropropagation. Pour un modèle de 7 milliards de paramètres en float16, les poids occupent environ 14 Go. Les gradients ajoutent 14 Go. Adam ajoute deux moments par paramètre, soit 28 Go, et l'état de l'optimiseur peut encore augmenter. Les activations dépendent du lot, de la longueur de séquence et de l'architecture.\n\nLe full fine-tuning met à jour tous les paramètres. LoRA ajoute des matrices de rang faible et n'entraîne que celles-ci. QLoRA quantifie la base et entraîne des adaptateurs dans une précision plus élevée. Ces méthodes réduisent la mémoire des paramètres entraînés et de l'optimiseur, mais les activations restent souvent le facteur limitant. Le checkpointing des activations échange du calcul contre de la mémoire.\n\n### Rang, cible et hyperparamètres\n\nLe rang d'une adaptation LoRA contrôle la capacité de la correction. Un rang faible ajoute peu de paramètres ; un rang élevé peut mieux ajuster la tâche, mais coûte plus cher et risque de surapprendre. Le choix du rang dépend de la tâche, de la quantité de données et des couches ciblées. Les couches d'attention et les projections sont des cibles fréquentes, mais il n'existe pas de recette universelle.\n\nLa longueur de séquence multiplie les activations. Un lot de 8 séquences de 4 096 tokens coûte beaucoup plus qu'un lot de 8 séquences de 512 tokens. Le gradient accumulation peut simuler un plus grand lot sans augmenter la mémoire du lot, au prix de plusieurs passes. Il faut mesurer la mémoire réelle, pas seulement l'estimer.\n\n### La matrice de décision\n\nQuatre options reviennent. Le RAG apporte des connaissances externes sans modifier les poids. Le full fine-tuning adapte tous les paramètres et demande beaucoup de mémoire. LoRA adapte une partie des paramètres avec une empreinte réduite. QLoRA réduit encore la mémoire en quantifiant la base. Le choix dépend de la tâche : connaissance mise à jour, style, format, comportement ou raisonnement spécialisé.\n\nLe RAG est souvent le premier essai pour une base documentaire changeante. Le fine-tuning est plus pertinent pour un format ou un comportement stable, ou quand les exemples sont nombreux et de bonne qualité. Un modèle adapté peut aussi être combiné avec un RAG. La combinaison ne dispense pas de mesurer les erreurs de chaque partie.\n\n### Dimensionner avant d'entraîner\n\nUn calcul de mémoire commence par les poids, puis les gradients et l'optimiseur, puis les activations. Il faut choisir une précision, un lot, une longueur et une méthode. Un modèle qui tient en mémoire peut être trop lent pour la durée disponible. Un petit lot peut tenir mais produire un entraînement instable. Le gradient accumulation et le checkpointing sont des compromis, pas des solutions gratuites.\n\nLe coût complet inclut les GPU, l'électricité, le stockage des données et des points de contrôle, l'évaluation et le temps humain. Un fine-tuning réussi mais impossible à reproduire n'est pas un actif. Il faut journaliser la configuration, les données, la version du modèle et les résultats.\n\n### Évaluer et décider\n\nL'évaluation compare le modèle de base et le modèle adapté sur le même jeu de test, avec les mêmes prompts et les mêmes critères. Elle mesure la tâche, le format, les régressions et la calibration. Un gain sur les exemples d'entraînement ne suffit pas. Le jeu de test doit être séparé et représentatif.\n\nLa décision doit être réversible. On conserve le modèle de base, les adaptateurs, la configuration et les données de test. Si le modèle adapté dérive, on peut revenir à la version précédente. Un déploiement sans version ni retour arrière est fragile.\n\n### Reproduire un entraînement\n\nUn fine-tuning reproductible note la version du modèle de base, la révision du jeu de données, le rang, la cible, la longueur, le lot, le taux d'apprentissage, la précision et la graine. Il conserve les adaptateurs, la configuration et le jeu de test. Sans ces éléments, une équipe ne peut pas distinguer un gain dû aux données d'un gain dû au hasard. Un résultat sur un seul essai ne suffit pas : plusieurs graines et une moyenne avec variance donnent une image plus honnête. Le coût de cette discipline est faible comparé au coût d'un modèle impossible à reproduire.\n\n> **Repère.** Le bon réglage n'est pas le plus gros rang ni le plus petit modèle. C'est celui qui tient dans le budget, s'évalue sur des données séparées et se reproduit.",
+      "diagram": {
+        "title": "Choisir et dimensionner un fine-tuning",
+        "description": "Schéma illustratif : RAG, full fine-tuning, LoRA et QLoRA se comparent sur la tâche et la mémoire.",
+        "svg": "<svg viewBox=\"0 0 900 380\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Schéma illustratif : choix entre RAG, full fine-tuning, LoRA et QLoRA\">\n  <rect width=\"900\" height=\"380\" rx=\"16\" fill=\"#0f172a\" />\n  <text x=\"450\" y=\"32\" fill=\"#7dd3fc\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"16\" text-anchor=\"middle\">Quatre options, un budget</text>\n  <g id=\"ft8-rag\"><rect x=\"30\" y=\"62\" width=\"200\" height=\"120\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" /><text x=\"130\" y=\"90\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">RAG</text><text x=\"130\" y=\"116\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">connaissances à jour</text><text x=\"130\" y=\"136\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">pas de poids modifiés</text><text x=\"130\" y=\"158\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">index et recherche</text></g>\n  <g id=\"ft8-full\"><rect x=\"245\" y=\"62\" width=\"200\" height=\"120\" rx=\"10\" fill=\"#1c1420\" stroke=\"#f87171\" /><text x=\"345\" y=\"90\" fill=\"#fecaca\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Full FT</text><text x=\"345\" y=\"116\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">tous les poids</text><text x=\"345\" y=\"136\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">gradients et optimiseur</text><text x=\"345\" y=\"158\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">mémoire maximale</text></g>\n  <g id=\"ft8-lora\"><rect x=\"460\" y=\"62\" width=\"200\" height=\"120\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#34d399\" /><text x=\"560\" y=\"90\" fill=\"#a7f3d0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">LoRA</text><text x=\"560\" y=\"116\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">adaptateurs de rang</text><text x=\"560\" y=\"136\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">base gelée</text><text x=\"560\" y=\"158\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">mémoire réduite</text></g>\n  <g id=\"ft8-qlora\"><rect x=\"675\" y=\"62\" width=\"190\" height=\"120\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#a78bfa\" /><text x=\"770\" y=\"90\" fill=\"#ede9fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">QLoRA</text><text x=\"770\" y=\"116\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">base quantifiée</text><text x=\"770\" y=\"136\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">adaptateurs</text><text x=\"770\" y=\"158\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">mesurer la qualité</text></g>\n  <g id=\"ft8-memory\"><rect x=\"85\" y=\"230\" width=\"730\" height=\"100\" rx=\"10\" fill=\"#0d1f2d\" stroke=\"#38bdf8\" /><text x=\"450\" y=\"258\" fill=\"#bae6fd\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Mémoire = poids + gradients + optimiseur + activations</text><text x=\"450\" y=\"284\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Le rang, le lot, la longueur et le checkpointing déplacent le compromis.</text><text x=\"450\" y=\"306\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Toujours comparer au modèle de base sur un test séparé.</text></g>\n</svg>",
+        "steps": [
+          {
+            "title": "La connaissance",
+            "explanation": "Pour une base documentaire qui change, le RAG est souvent le premier essai. Il ne modifie pas les poids.",
+            "highlight": [
+              "ft8-rag"
+            ]
+          },
+          {
+            "title": "L’adaptation",
+            "explanation": "Full fine-tuning, LoRA et QLoRA n’ont pas la même empreinte. Le choix dépend de la tâche, de la mémoire et du temps.",
+            "highlight": [
+              "ft8-full",
+              "ft8-lora",
+              "ft8-qlora"
+            ]
+          },
+          {
+            "title": "La mémoire",
+            "explanation": "Les activations et l’optimiseur peuvent dominer. Il faut dimensionner, mesurer et comparer sur des données séparées.",
+            "highlight": [
+              "ft8-memory"
+            ]
+          }
+        ]
+      },
+      "example": {
+        "title": "Dimensionner un adaptateur pour un modèle 7B",
+        "text": "**Scénario illustratif.** Une équipe dispose d'un GPU de 24 Go et veut adapter un modèle de 7 milliards de paramètres à un format de réponse. Un full fine-tuning en float16 ne tient pas avec l'optimiseur et les activations. QLoRA avec un rang 8 et une longueur de 2 048 tokens est un point de départ, à mesurer. Si la qualité ne suffit pas, l'équipe augmente le rang ou la longueur, puis vérifie la mémoire. Elle compare toujours au modèle de base sur un jeu de test séparé."
+      },
+      "quiz": [
+        {
+          "question": "Pourquoi le full fine-tuning demande-t-il beaucoup plus de mémoire que la taille des poids ?",
+          "options": [
+            "Parce que les poids sont doublés",
+            "Parce qu’il faut aussi les gradients, l’état de l’optimiseur et les activations",
+            "Parce que le modèle change de langue",
+            "Parce que le GPU est plus lent"
+          ],
+          "correctIndex": 1,
+          "explanation": "Les gradients, les moments de l’optimiseur et les activations s’ajoutent aux poids. Les activations dépendent du lot et de la longueur."
+        },
+        {
+          "question": "Que réduit QLoRA par rapport à LoRA ?",
+          "options": [
+            "La mémoire des poids de la base par quantification",
+            "Le nombre de données nécessaires à zéro",
+            "La longueur du prompt",
+            "Le nombre de classes"
+          ],
+          "correctIndex": 0,
+          "explanation": "QLoRA quantifie la base et entraîne des adaptateurs. Cela réduit la mémoire des poids, mais les activations restent à mesurer."
+        },
+        {
+          "question": "Quand le RAG est-il souvent préférable à un fine-tuning ?",
+          "options": [
+            "Quand les connaissances changent souvent",
+            "Quand on veut figer une procédure",
+            "Quand on n’a aucune donnée",
+            "Quand on veut modifier tous les poids"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le RAG apporte des passages à jour sans réentraîner. Le fine-tuning est plus adapté à un comportement ou un format stable."
+        },
+        {
+          "question": "Que faut-il comparer après un fine-tuning ?",
+          "options": [
+            "Uniquement la perte d’entraînement",
+            "Le modèle adapté et le modèle de base sur un jeu de test séparé",
+            "Uniquement la taille du fichier",
+            "Le nombre de GPU"
+          ],
+          "correctIndex": 1,
+          "explanation": "La perte d’entraînement ne mesure pas la généralisation. Il faut comparer sur des données non vues et vérifier les régressions."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Activation",
+          "definition": "Tenseur intermédiaire produit par une couche, souvent conservé pour la rétropropagation."
+        },
+        {
+          "term": "Checkpointing",
+          "definition": "Recalcul d’activations au lieu de les stocker, pour réduire la mémoire au prix du calcul."
+        },
+        {
+          "term": "QLoRA",
+          "definition": "Fine-tuning d’adaptateurs sur une base quantifiée, destiné à réduire l’empreinte mémoire."
+        },
+        {
+          "term": "Rang LoRA",
+          "definition": "Dimension des matrices ajoutées par LoRA ; elle contrôle la capacité et le coût de l’adaptation."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Mémoire de LoRA",
+          "prompt": "Pourquoi LoRA ou QLoRA ne garantissent-ils pas qu’un fine-tuning tienne sur une carte donnée, même avec peu de paramètres entraînés ?",
+          "solution": "Les poids de base, les activations, les gradients et l’état de l’optimiseur occupent encore de la mémoire. Le rang, la longueur de séquence et la taille du lot interagissent. Il faut mesurer la VRAM réelle et comparer avec le RAG ou le modèle de base."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Dettmers et al., QLoRA : Efficient Finetuning of Quantized LLMs, 2023.",
+          "href": "https://arxiv.org/abs/2305.14314"
+        },
+        {
+          "label": "Hugging Face, PEFT, documentation, consultée le 21 octobre 2026.",
+          "href": "https://huggingface.co/docs/peft/index"
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "label": "Hu et al., LoRA : Low-Rank Adaptation of Large Language Models, 2021.",
+      "href": "https://arxiv.org/abs/2106.09685"
+    },
+    {
+      "label": "Dettmers et al., QLoRA : Efficient Finetuning of Quantized LLMs, 2023.",
+      "href": "https://arxiv.org/abs/2305.14314"
+    },
+    {
+      "label": "Hugging Face, PEFT, documentation, consultée le 21 octobre 2026.",
+      "href": "https://huggingface.co/docs/peft/index"
+    },
+    {
+      "label": "Hugging Face, TRL SFTTrainer, documentation, consultée le 21 octobre 2026.",
+      "href": "https://huggingface.co/docs/trl/sft_trainer"
+    },
+    {
+      "label": "Liu et al., DoRA : Weight-Decomposed Low-Rank Adaptation, 2024.",
+      "href": "https://arxiv.org/abs/2402.09353"
+    },
+    {
+      "label": "Hayou et al., LoRA+ : Efficient Low Rank Adaptation of Large Models, 2024.",
+      "href": "https://arxiv.org/abs/2402.12354"
+    },
+    {
+      "label": "Axolotl, documentation, consultée le 21 octobre 2026.",
+      "href": "https://docs.axolotl.ai/"
+    }
+  ],
+  "related": [
+    {
+      "to": "/cours/ia-environnement",
+      "title": "Cours : l'IA et son environnement",
+      "description": "Le cadre matériel, énergétique et économique dans lequel s'inscrit un entraînement."
+    },
+    {
+      "to": "/simulateur-ia",
+      "title": "Simulateur d'entraînement IA",
+      "description": "Observer un petit réseau apprendre dans le navigateur et manipuler les hyperparamètres."
+    },
+    {
+      "to": "/calculateur-couts-ia",
+      "title": "Calculateur de coûts d'API IA",
+      "description": "Comparer le coût d'un service par API avec celui d'un modèle adapté et servi localement."
+    }
+  ]
+}

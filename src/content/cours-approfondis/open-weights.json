@@ -1,0 +1,761 @@
+{
+  "slug": "open-weights",
+  "title": "Open weights et open source : ce que le nom cache vraiment",
+  "subtitle": "Poids téléchargeables, licences sur mesure et artefacts publiés : ce que le mot « ouvert » recouvre réellement.",
+  "level": "Débutant",
+  "tags": [
+    "Open weights",
+    "Open source",
+    "Licences",
+    "Llama",
+    "Mistral",
+    "Souveraineté"
+  ],
+  "summary": "Un modèle dont les poids se téléchargent n'est pas nécessairement open source. Ce cours distingue les artefacts publiés, les quatre libertés de l'OSAID, les licences permissives et sur mesure, les cas de Llama 3, Mistral 7B, OLMo 2 et Pythia, puis les enjeux juridiques, de sécurité et de souveraineté.",
+  "introduction": "Le mot « ouvert » est utilisé pour des réalités très différentes. Un fichier de poids accessible, un code publié sur un dépôt et un modèle dont les données, les recettes et les journaux sont disponibles ne relèvent pas du même niveau d'ouverture. Confondre ces situations conduit à surestimer ce que l'on peut vérifier, modifier ou redistribuer.\n\nCe cours part d'une distinction simple : les poids ne sont qu'un artefact parmi cinq. Il présente la définition de l'Open Source Initiative, les libertés qu'elle demande et les conditions qui les rendent effectives. Il compare ensuite des licences réelles, puis des projets qui publient davantage que des poids. Le dernier module relie ces choix aux obligations du règlement européen sur l'IA, aux risques de sécurité et aux promesses de souveraineté. Aucun module ne donne de conseil juridique : l'objectif est de lire les documents et de poser les bonnes questions.",
+  "prerequisites": [
+    "Savoir ce qu'est un modèle de langage",
+    "Notions de licence logicielle",
+    "Aucun bagage juridique requis"
+  ],
+  "checkedOn": "2026-10-26",
+  "cover": {
+    "src": "pics/cours/open-weights.webp",
+    "alt": "Un cube de verre transparent laisse voir ses rouages internes face à une boîte noire scellée, métaphore des poids ouverts et des artefacts qui restent cachés."
+  },
+  "modules": [
+    {
+      "id": "confusion",
+      "title": "Open weights n'est pas open source",
+      "keyTakeaways": [
+        "Les poids ouverts désignent des paramètres téléchargeables ; ils ne disent rien, à eux seuls, sur les données, le code ou les libertés accordées.",
+        "L'open source AI au sens de l'OSAID demande les libertés d'utiliser, étudier, modifier et partager, avec accès à la forme préférée pour modifier le système.",
+        "Un modèle peut publier ses poids et rester fermé sur les données, la recette et la licence ; un modèle peut aussi être sous licence approuvée par l'OSI sans fournir les informations sur les données.",
+        "La licence et la liste des artefacts réellement disponibles priment sur le vocabulaire de la page de présentation.",
+        "Distinguer open weights et open source n'est pas un jugement de valeur : c'est une description utile pour choisir, auditer et documenter."
+      ],
+      "theory": "### Un fichier de poids n'est pas un projet complet\n\nUn modèle de langage est souvent distribué sous la forme d'un fichier de poids accompagné d'un tokenizer et d'un fichier de configuration. Télécharger ces fichiers permet de lancer le modèle, de le quantifier, de l'adapter ou de l'héberger sur une machine. C'est ce que l'on appelle des **poids ouverts** ou *open weights* : les paramètres entraînés sont accessibles, parfois sans inscription, parfois après acceptation d'une licence. Cette accessibilité est réelle et utile. Elle ne dit rien, à elle seule, sur la manière dont le modèle a été construit ni sur les droits que l'on acquiert.\n\nUn modèle **open source**, au sens de l'Open Source AI Definition 1.0 publiée par l'Open Source Initiative, est une autre catégorie. La définition demande quatre libertés : utiliser le système pour tout usage sans demander la permission, étudier son fonctionnement et inspecter ses composants, le modifier pour tout usage, et le partager avec ou sans modifications. Elle demande aussi l'accès à la forme préférée pour modifier le système. Pour un modèle, cette forme comprend des informations sur les données d'entraînement, le code complet et les paramètres. Les poids seuls ne suffisent donc pas.\n\n### Cinq artefacts, pas un seul\n\nUn modèle complet repose sur plusieurs artefacts. Les **poids** sont les paramètres appris. Le **code** comprend l'architecture, l'inférence, l'entraînement et le prétraitement. Les **données** désignent le corpus et les informations qui permettent de le comprendre. La **recette** regroupe les hyperparamètres, l'ordre des étapes et les journaux. La **licence** fixe les droits et les obligations. Ces artefacts ne sont pas équivalents et ne sont pas toujours publiés ensemble.\n\nUne page de téléchargement peut ne proposer que les poids et le tokenizer. Le modèle fonctionne, mais le lecteur ne peut pas reconstruire l'entraînement ni vérifier la composition du corpus. Une autre page peut publier les poids, le code d'inférence et une fiche technique, sans les données ni les journaux. Une troisième peut publier l'ensemble, y compris les données et les points de contrôle intermédiaires. Ces trois situations ne relèvent pas du même niveau d'ouverture, même si les trois fichiers se téléchargent de la même manière.\n\n### Pourquoi la confusion persiste\n\nLe mot « open » est devenu un argument commercial. Une entreprise qui publie des poids peut parler de modèle ouvert sans préciser ce que couvre le mot. L'Open Source Initiative emploie le terme *openwashing*, forgé par Michelle Thorne en 2009, pour désigner l'usage du vocabulaire de l'open source sans les libertés correspondantes. La confusion ne vient pas seulement du public : elle vient aussi des licences, qui mélangent parfois des permissions larges avec des restrictions d'usage, des clauses de seuil ou des obligations de nommage.\n\nIl faut donc distinguer trois questions. La première porte sur l'accès : puis-je télécharger les fichiers ? La deuxième porte sur les droits : puis-je les utiliser, les modifier et les redistribuer, et à quelles conditions ? La troisième porte sur la connaissance : puis-je savoir comment le modèle a été entraîné et reproduire ce travail ? Les poids ouverts répondent surtout à la première. L'open source AI répond aux trois, avec les nuances de la définition.\n\n### Une grille de lecture\n\nFace à un modèle, commencez par la licence. Elle indique ce que l'auteur accorde et ce qu'il interdit. Vérifiez ensuite les artefacts réellement disponibles : poids, code, données, recette, journaux. Lisez la fiche du modèle, mais ne la confondez pas avec la licence. Cherchez la version du texte et sa date, car une licence peut changer. Enfin, demandez-vous si votre usage est couvert : usage commercial, redistribution, adaptation, publication de résultats, usage dans un produit.\n\nUn modèle peut être **open weights** sans être **open source**. Ce n'est pas une insulte ni un jugement moral : c'est une description. Un modèle peut aussi être publié sous une licence approuvée par l'OSI pour le code et les poids, tout en restant incomplet au regard de l'OSAID si les informations sur les données manquent. La licence est une condition nécessaire, pas une preuve suffisante.\n\n### Ce que cela change en pratique\n\nPour une équipe qui veut héberger un modèle, les poids ouverts suffisent souvent. Elle peut télécharger, quantifier, déployer et mesurer. Pour une équipe qui veut auditer la provenance des données, reproduire l'entraînement ou publier une analyse indépendante, les poids ne suffisent pas. Pour une administration qui veut éviter une dépendance à un fournisseur, les poids ouverts aident, mais ils ne garantissent ni la souveraineté ni la sécurité. Le dernier module revient sur ces limites.\n\nLa conclusion de ce module est simple. « Open weights » décrit ce qui est accessible. « Open source » décrit un ensemble de libertés et de conditions. Les deux expressions ne sont pas interchangeables, et un modèle peut relever de l'une sans relever de l'autre.",
+      "diagram": {
+        "title": "Cinq artefacts, un seul téléchargement",
+        "description": "Schéma illustratif : les poids, le code, les données, la recette et la licence sont représentés séparément. La publication des poids ne rend pas les autres artefacts disponibles. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 420\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Poids, code, données, recette et licence représentés comme cinq artefacts distincts\">\n  <rect width=\"820\" height=\"420\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Ce qui est publié, ce qui reste fermé</text>\n  <text x=\"410\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"poids\">\n    <rect x=\"45\" y=\"150\" width=\"130\" height=\"120\" rx=\"12\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"110\" y=\"190\" fill=\"#e0f2fe\" font-size=\"13\" text-anchor=\"middle\">Poids</text>\n    <text x=\"110\" y=\"214\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">souvent publiés</text>\n    <text x=\"110\" y=\"236\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">fichier de tenseurs</text>\n  </g>\n\n  <g id=\"code\">\n    <rect x=\"193\" y=\"150\" width=\"130\" height=\"120\" rx=\"12\" fill=\"#0f172a\" stroke=\"#818cf8\" stroke-width=\"1.8\"/>\n    <text x=\"258\" y=\"190\" fill=\"#e0e7ff\" font-size=\"13\" text-anchor=\"middle\">Code</text>\n    <text x=\"258\" y=\"214\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">inférence, entraînement</text>\n    <text x=\"258\" y=\"236\" fill=\"#a5b4fc\" font-size=\"11\" text-anchor=\"middle\">souvent partiel</text>\n  </g>\n\n  <g id=\"donnees\">\n    <rect x=\"341\" y=\"150\" width=\"130\" height=\"120\" rx=\"12\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"1.8\"/>\n    <text x=\"406\" y=\"190\" fill=\"#d1fae5\" font-size=\"13\" text-anchor=\"middle\">Données</text>\n    <text x=\"406\" y=\"214\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">corpus et provenance</text>\n    <text x=\"406\" y=\"236\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">souvent absentes</text>\n  </g>\n\n  <g id=\"recette\">\n    <rect x=\"489\" y=\"150\" width=\"130\" height=\"120\" rx=\"12\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"1.8\"/>\n    <text x=\"554\" y=\"190\" fill=\"#fef3c7\" font-size=\"13\" text-anchor=\"middle\">Recette</text>\n    <text x=\"554\" y=\"214\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">hyperparamètres</text>\n    <text x=\"554\" y=\"236\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">journaux, étapes</text>\n  </g>\n\n  <g id=\"licence\">\n    <rect x=\"637\" y=\"150\" width=\"130\" height=\"120\" rx=\"12\" fill=\"#0f172a\" stroke=\"#f472b6\" stroke-width=\"1.8\"/>\n    <text x=\"702\" y=\"190\" fill=\"#fce7f3\" font-size=\"13\" text-anchor=\"middle\">Licence</text>\n    <text x=\"702\" y=\"214\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">droits et obligations</text>\n    <text x=\"702\" y=\"236\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">version datée</text>\n  </g>\n\n  <text x=\"410\" y=\"320\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Les poids seuls ne disent rien du code, des données ni de la licence</text>\n  <text x=\"410\" y=\"344\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">Vérifier chaque artefact avant de parler d'ouverture</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Les poids",
+            "explanation": "Le fichier de paramètres permet de lancer le modèle. Sa présence ne dit rien sur les données, le code d'entraînement ou les droits accordés.",
+            "highlight": [
+              "poids"
+            ]
+          },
+          {
+            "title": "2. Le code et les données",
+            "explanation": "Le code d'entraînement et les informations sur les données manquent souvent, même quand l'inférence est possible. Ce sont pourtant des éléments de la forme préférée.",
+            "highlight": [
+              "code",
+              "donnees"
+            ]
+          },
+          {
+            "title": "3. La recette et la licence",
+            "explanation": "Les journaux, les hyperparamètres et la licence déterminent ce que l'on peut reproduire et redistribuer. Un modèle peut être téléchargeable sans être open source.",
+            "highlight": [
+              "recette",
+              "licence"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Que signifie exactement « open weights » ?",
+          "options": [
+            "Les poids sont téléchargeables, avec ou sans conditions",
+            "Les données, le code et la recette sont publics",
+            "La licence est approuvée par l'OSI",
+            "Le modèle est nécessairement open source"
+          ],
+          "correctIndex": 0,
+          "explanation": "Open weights décrit la disponibilité des paramètres. Cela ne préjuge ni des données, ni du code, ni des libertés accordées par la licence."
+        },
+        {
+          "question": "Quel élément l'OSAID 1.0 exige-t-elle en plus des poids ?",
+          "options": [
+            "Uniquement une page de téléchargement",
+            "Des informations sur les données, le code et les paramètres",
+            "Une licence commerciale",
+            "Un benchmark public"
+          ],
+          "correctIndex": 1,
+          "explanation": "La forme préférée pour modifier un modèle comprend des informations sur les données, le code complet et les paramètres, sous des termes compatibles avec la définition."
+        },
+        {
+          "question": "Pourquoi un modèle peut-il être open weights sans être open source ?",
+          "options": [
+            "Parce que les poids suffisent toujours",
+            "Parce que la licence ou les artefacts manquants peuvent restreindre les libertés et la forme préférée",
+            "Parce que l'open source interdit les poids",
+            "Parce que l'OSI n'accepte que les logiciels"
+          ],
+          "correctIndex": 1,
+          "explanation": "La publication des poids ne garantit ni les quatre libertés ni l'accès aux informations sur les données et au code complet. La licence peut aussi ajouter des restrictions."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Poids",
+          "definition": "Paramètres appris d'un modèle, souvent distribués dans un fichier de tenseurs."
+        },
+        {
+          "term": "Open weights",
+          "definition": "Publication des paramètres d'un modèle, avec ou sans code, données ou licence permissive."
+        },
+        {
+          "term": "Open source AI",
+          "definition": "Système d'IA publié sous des termes qui accordent les libertés d'utiliser, étudier, modifier et partager, avec accès à la forme préférée."
+        },
+        {
+          "term": "Openwashing",
+          "definition": "Usage du vocabulaire de l'open source pour désigner un modèle qui ne remplit pas les conditions de liberté correspondantes."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Trois questions pour un modèle « ouvert »",
+          "prompt": "Une équipe présente un modèle comme « ouvert » : les poids et le tokenizer se téléchargent, la licence interdit l’usage commercial et aucune information n’est publiée sur le corpus. Répondez aux trois questions du module (accès, droits, connaissance) et concluez sur la qualification open source au sens de l’OSAID.",
+          "solution": "L’accès est partiel : les poids et le tokenizer sont disponibles, mais ni le code d’entraînement ni les données. Les droits sont insuffisants : une licence qui interdit l’usage commercial contredit la liberté d’utiliser le système pour tout usage. La connaissance manque : sans informations sur le corpus et la recette, l’entraînement ne peut être ni compris ni reproduit. Le modèle est donc à poids ouverts, pas open source au sens de l’OSAID. Cette qualification décrit les artefacts publiés et la licence ; elle ne juge pas la qualité du modèle."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Open Source Initiative, Open Source AI Definition, consultée le 21 octobre 2026.",
+          "href": "https://opensource.org/ai/open-source-ai-definition"
+        },
+        {
+          "label": "Open Source Initiative, page IA, consultée le 21 octobre 2026.",
+          "href": "https://opensource.org/ai"
+        }
+      ]
+    },
+    {
+      "id": "definitions",
+      "title": "La définition OSI et ses quatre libertés",
+      "keyTakeaways": [
+        "L'OSAID 1.0 est une définition de l'open source appliquée aux systèmes d'IA, publiée par l'Open Source Initiative en octobre 2024.",
+        "Elle demande quatre libertés : utiliser, étudier, modifier et partager, avec accès à la forme préférée pour apporter des modifications.",
+        "La forme préférée comprend des informations sur les données, le code complet et les paramètres, pas seulement un fichier de poids.",
+        "La définition ne demande pas de publier des données personnelles ou protégées ; elle demande les informations nécessaires pour comprendre et reconstruire un système comparable.",
+        "L'Open Source Definition 1.9 reste la référence pour les logiciels ; l'OSAID traite des systèmes d'IA et ne s'y substitue pas."
+      ],
+      "theory": "### Une définition, pas une certification\n\nL'Open Source AI Definition 1.0 a été publiée par l'Open Source Initiative le 28 octobre 2024, après un processus de consultation. Elle ne décrit pas un produit ni une marque : elle propose des critères pour qu'un système d'IA puisse être qualifié d'open source. Un modèle qui ne les remplit pas n'est pas illégal pour autant. Il n'est simplement pas open source au sens de cette définition.\n\nLa définition s'appuie sur quatre libertés. La première est d'**utiliser** le système pour tout usage, sans demander la permission. La deuxième est d'**étudier** le système et d'inspecter ses composants. La troisième est de **modifier** le système pour tout usage, y compris pour changer son comportement. La quatrième est de **partager** le système, avec ou sans modifications, pour tout usage. Ces libertés doivent être accordées sous des termes qui ne les contredisent pas.\n\nCes libertés ne sont pas une déclaration d'intention : elles doivent être accordées par les termes de la distribution. L'OSAID demande que les informations sur les données et les paramètres soient disponibles sous des termes approuvés par l'OSI, et que le code le soit sous une licence approuvée. Une licence qui interdit un usage ou un secteur donné contredit la liberté d'utiliser le système pour tout usage. La définition admet en revanche des conditions de copyleft : une version modifiée peut devoir être publiée sous les mêmes termes que l'original.\n\n### La forme préférée\n\nUne liberté qui ne s'exerce pas en pratique n'est pas une liberté. La définition demande donc l'accès à la **forme préférée** pour modifier le système. Pour un logiciel, la forme préférée est le code source. Pour un modèle d'IA, elle comprend trois ensembles : des informations suffisamment détaillées sur les données utilisées pour entraîner le système, le code complet qui permet de l'entraîner et de le faire fonctionner, et les paramètres du modèle.\n\nLes informations sur les données ne signifient pas nécessairement la publication de chaque document. La définition reconnaît que certaines données peuvent être protégées, personnelles ou soumises à des droits. Elle demande des informations permettant de comprendre la composition du corpus, la provenance des données et les traitements appliqués. Elle demande aussi la liste des données publiquement disponibles et de celles obtenues auprès de tiers, avec les modalités d'accès. La nuance est importante : on peut décrire un corpus sans le redistribuer intégralement.\n\n### Ce que la définition ne demande pas\n\nL'OSAID ne demande pas que le modèle soit entraîné sur des données entièrement publiques. Elle ne demande pas non plus que tous les points de contrôle intermédiaires soient publiés. Elle ne fixe pas de seuil de performance ni de taille. Elle ne dit rien sur la qualité du modèle, sa sécurité ou son utilité. Un petit modèle peut être open source, un grand modèle peut ne pas l'être.\n\nElle ne remplace pas non plus les licences. Une licence reste le document juridique qui accorde des droits et impose des obligations. La définition fournit un cadre pour évaluer si ces droits et ces obligations correspondent à l'idée d'open source. La licence doit couvrir les quatre libertés et l'accès à la forme préférée, sans restriction discriminatoire.\n\n### De l'OSD à l'OSAID\n\nL'Open Source Definition 1.9 est la référence historique pour les logiciels. Elle exige notamment la libre redistribution, l'accès au code source, la possibilité de dériver des travaux et l'absence de discrimination contre des personnes ou des groupes. L'OSAID reprend cette logique pour les systèmes d'IA, mais elle doit traiter des artefacts qui n'existent pas dans un logiciel classique : les données et les paramètres, c'est-à-dire les poids et les configurations. La sécurité et les risques ne font pas partie de la définition.\n\nCette différence explique pourquoi les deux définitions ne sont pas interchangeables. Un modèle peut être publié sous une licence approuvée par l'OSI pour le code, tout en ne fournissant pas les informations sur les données exigées par l'OSAID. Inversement, un modèle peut publier des informations détaillées sur ses données et son code tout en restant sous une licence qui restreint certains usages. Les deux dimensions doivent être vérifiées séparément.\n\n### Une check-list raisonnable\n\nPour appliquer la définition sans jargon, posez cinq questions. Les poids sont-ils téléchargeables ? Le code d'entraînement et d'inférence est-il disponible ? Existe-t-il une description suffisante des données et de leur provenance ? Les journaux et les hyperparamètres permettent-ils de comprendre l'entraînement ? La licence accorde-t-elle les quatre libertés sans restriction d'usage discriminatoire ?\n\nSi une réponse est non, le modèle peut rester utile et légal, mais il ne remplit pas tous les critères de l'OSAID. Cette check-list ne remplace pas une analyse juridique. Elle aide à poser les bonnes questions et à éviter les raccourcis.",
+      "diagram": {
+        "title": "Les quatre libertés et leurs conditions",
+        "description": "Schéma illustratif : utiliser, étudier, modifier et partager sont reliés à la forme préférée et à la licence. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 860 430\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Les quatre libertés de l'OSAID et la forme préférée\">\n  <rect width=\"860\" height=\"430\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"430\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Quatre libertés, une condition d'exercice</text>\n  <text x=\"430\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Open Source AI Definition 1.0, schéma illustratif</text>\n\n  <g id=\"utiliser\">\n    <rect x=\"40\" y=\"100\" width=\"170\" height=\"100\" rx=\"12\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"125\" y=\"138\" fill=\"#e0f2fe\" font-size=\"14\" text-anchor=\"middle\">Utiliser</text>\n    <text x=\"125\" y=\"162\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">pour tout usage</text>\n    <text x=\"125\" y=\"182\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">sans permission</text>\n  </g>\n\n  <g id=\"etudier\">\n    <rect x=\"230\" y=\"100\" width=\"170\" height=\"100\" rx=\"12\" fill=\"#0f172a\" stroke=\"#818cf8\" stroke-width=\"2\"/>\n    <text x=\"315\" y=\"138\" fill=\"#e0e7ff\" font-size=\"14\" text-anchor=\"middle\">Étudier</text>\n    <text x=\"315\" y=\"162\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">inspecter les composants</text>\n    <text x=\"315\" y=\"182\" fill=\"#a5b4fc\" font-size=\"11\" text-anchor=\"middle\">comprendre le système</text>\n  </g>\n\n  <g id=\"modifier\">\n    <rect x=\"420\" y=\"100\" width=\"170\" height=\"100\" rx=\"12\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"505\" y=\"138\" fill=\"#d1fae5\" font-size=\"14\" text-anchor=\"middle\">Modifier</text>\n    <text x=\"505\" y=\"162\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">changer le comportement</text>\n    <text x=\"505\" y=\"182\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">pour tout usage</text>\n  </g>\n\n  <g id=\"partager\">\n    <rect x=\"610\" y=\"100\" width=\"170\" height=\"100\" rx=\"12\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <text x=\"695\" y=\"138\" fill=\"#fef3c7\" font-size=\"14\" text-anchor=\"middle\">Partager</text>\n    <text x=\"695\" y=\"162\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">avec ou sans modifications</text>\n    <text x=\"695\" y=\"182\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">pour tout usage</text>\n  </g>\n\n  <g id=\"forme\">\n    <rect x=\"170\" y=\"270\" width=\"250\" height=\"105\" rx=\"12\" fill=\"#111827\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"295\" y=\"304\" fill=\"#fce7f3\" font-size=\"13\" text-anchor=\"middle\">Forme préférée</text>\n    <text x=\"295\" y=\"328\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">informations sur les données</text>\n    <text x=\"295\" y=\"348\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">code complet, paramètres</text>\n  </g>\n\n  <g id=\"licence\">\n    <rect x=\"450\" y=\"270\" width=\"240\" height=\"105\" rx=\"12\" fill=\"#111827\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <text x=\"570\" y=\"304\" fill=\"#fef3c7\" font-size=\"13\" text-anchor=\"middle\">Licence</text>\n    <text x=\"570\" y=\"328\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">accorde les libertés</text>\n    <text x=\"570\" y=\"348\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">sans discrimination</text>\n  </g>\n\n  <line x1=\"295\" y1=\"205\" x2=\"295\" y2=\"265\" stroke=\"#64748b\" stroke-width=\"1.5\" stroke-dasharray=\"4 4\"/>\n  <line x1=\"570\" y1=\"205\" x2=\"570\" y2=\"265\" stroke=\"#64748b\" stroke-width=\"1.5\" stroke-dasharray=\"4 4\"/>\n  <text x=\"430\" y=\"408\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">La liberté sans accès à la forme préférée reste théorique</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Les quatre libertés",
+            "explanation": "Utiliser, étudier, modifier et partager doivent être possibles pour tout usage, sans permission supplémentaire.",
+            "highlight": [
+              "utiliser",
+              "etudier",
+              "modifier",
+              "partager"
+            ]
+          },
+          {
+            "title": "2. La forme préférée",
+            "explanation": "Pour modifier réellement un modèle, il faut des informations sur les données, le code complet et les paramètres.",
+            "highlight": [
+              "forme"
+            ]
+          },
+          {
+            "title": "3. La licence",
+            "explanation": "La licence doit accorder ces libertés sans restriction discriminatoire et sans contredire l'accès aux composants.",
+            "highlight": [
+              "licence"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Que signifie la liberté d'utilisation dans l'OSAID ?",
+          "options": [
+            "Utiliser le système pour tout usage, sans demander de permission",
+            "Utiliser le système uniquement pour la recherche",
+            "Utiliser le système après autorisation écrite",
+            "Utiliser le système seulement en local"
+          ],
+          "correctIndex": 0,
+          "explanation": "La liberté d'utilisation couvre tout usage et ne doit pas être limitée par une autorisation préalable ou un champ d'application restreint."
+        },
+        {
+          "question": "Les informations sur les données d'entraînement sont-elles toujours des données publiées ?",
+          "options": [
+            "Oui, l'OSAID exige la publication intégrale du corpus",
+            "Non, elles peuvent décrire la composition et la provenance sans redistribuer les données protégées",
+            "Non, les données ne sont jamais mentionnées",
+            "Oui, mais seulement pour les modèles de moins d'un milliard de paramètres"
+          ],
+          "correctIndex": 1,
+          "explanation": "L'OSAID demande des informations suffisantes pour comprendre les données, pas nécessairement leur redistribution, afin de respecter les droits et la vie privée."
+        },
+        {
+          "question": "Quel est le rapport entre l'OSD 1.9 et l'OSAID ?",
+          "options": [
+            "L'OSD remplace l'OSAID",
+            "L'OSAID est une version de l'OSD pour les logiciels",
+            "L'OSD reste la référence pour les logiciels, l'OSAID traite des systèmes d'IA",
+            "Les deux textes sont identiques"
+          ],
+          "correctIndex": 2,
+          "explanation": "L'Open Source Definition concerne les logiciels. L'OSAID adapte les principes aux systèmes d'IA et à leurs artefacts spécifiques."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "OSAID",
+          "definition": "Open Source AI Definition, publiée par l'Open Source Initiative, qui fixe les libertés et les artefacts attendus d'un système d'IA open source."
+        },
+        {
+          "term": "Forme préférée",
+          "definition": "Forme d'un système qui permet de le modifier réellement : informations sur les données, code complet et paramètres pour un modèle."
+        },
+        {
+          "term": "OSD",
+          "definition": "Open Source Definition, référence de l'Open Source Initiative pour les licences logicielles."
+        },
+        {
+          "term": "Openwashing",
+          "definition": "Usage du vocabulaire de l'open source pour un produit qui ne remplit pas les conditions de liberté correspondantes."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Appliquer la check-list de l’OSAID",
+          "prompt": "Un modèle publie ses poids, son code d’inférence et une licence Apache 2.0, mais ni le code d’entraînement, ni les hyperparamètres, ni une description du corpus. En utilisant les cinq questions du module, dites quels critères de l’OSAID sont remplis et lesquels manquent. Le modèle est-il illégal pour autant ?",
+          "solution": "Les poids sont téléchargeables et le code d’inférence est publié sous une licence permissive : l’accès et une partie des libertés sont assurés. En revanche, la forme préférée n’est pas fournie : le code d’entraînement, les hyperparamètres et les informations sur les données manquent, ce qui empêche d’étudier la construction et de reproduire un système comparable. La check-list échoue donc sur la connaissance et sur la modification de l’entraînement. Le modèle reste légal et peut être utile ; il n’est simplement pas open source au sens de l’OSAID. Une analyse juridique reste nécessaire pour l’usage prévu."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Open Source Initiative, Open Source Definition, version 1.9, consultée le 21 octobre 2026.",
+          "href": "https://opensource.org/osd"
+        },
+        {
+          "label": "Open Source Initiative, Open Source AI Definition, consultée le 21 octobre 2026.",
+          "href": "https://opensource.org/ai/open-source-ai-definition"
+        }
+      ]
+    },
+    {
+      "id": "licences",
+      "title": "Lire une licence de modèle",
+      "keyTakeaways": [
+        "Une licence de modèle fixe les droits accordés, les obligations et les restrictions ; elle ne se lit pas comme une fiche technique.",
+        "Les licences permissives accordent largement les droits, mais elles peuvent rester silencieuses sur les données ou les brevets.",
+        "Les licences sur mesure ajoutent des conditions : attribution, nommage, usage acceptable, seuil d'utilisateurs ou interdiction de certains usages.",
+        "Une clause d'usage acceptable peut restreindre des usages licites par ailleurs ; il faut vérifier si votre cas est concerné.",
+        "Ce module n'est pas un conseil juridique : pour un projet réel, faites relire la licence et le contexte par un professionnel du droit."
+      ],
+      "theory": "### Une licence est un contrat, pas une étiquette\n\nUne licence de modèle est un texte juridique qui accorde des droits sous conditions. Elle peut être courte, comme Apache 2.0, ou longue, comme la licence communautaire de Llama 3. Elle peut être présentée comme « ouverte » sans que le mot soit défini. La première lecture doit donc porter sur ce que le texte accorde, ce qu'il interdit et ce qu'il exige.\n\nTrois questions structurent cette lecture. Que puis-je faire avec les poids, le code et la documentation ? Quelles obligations accompagnent la redistribution ou la modification ? Quelles restrictions s'appliquent à certains usages, à certains acteurs ou à certaines échelles ? Les réponses ne sont pas toujours dans le même paragraphe. Il faut lire les définitions, les conditions et les annexes.\n\n### Les licences permissives\n\nUne licence permissive accorde généralement le droit d'utiliser, de modifier et de redistribuer le logiciel, avec un petit nombre d'obligations. Apache 2.0 en est un exemple courant. Elle exige de conserver les mentions de copyright et la licence, d'indiquer les modifications et de fournir une copie de la licence. Elle contient aussi une clause sur les brevets et une clause de non-garantie.\n\nUne licence permissive ne règle pas tout. Elle peut ne pas couvrir les données d'entraînement, les marques ou les droits voisins. Elle peut ne rien dire sur les sorties du modèle. Elle peut être compatible avec un usage commercial sans garantir que cet usage respecte d'autres lois. Apache 2.0 est une licence logicielle : son application aux poids doit être vérifiée dans le projet concerné.\n\n### Les licences sur mesure\n\nDe nombreux modèles utilisent une licence écrite pour l'occasion. Ces licences ajoutent des conditions qui ne figurent pas dans les licences logicielles classiques. On y trouve des obligations d'attribution, des règles de nommage des produits dérivés, des clauses d'usage acceptable, des seuils d'utilisateurs actifs ou des restrictions sectorielles.\n\nLa licence communautaire de Llama 3, dans sa version du 18 avril 2024, illustre ce type d'approche. Elle accorde des droits d'utilisation, de reproduction, de distribution et de modification, sous conditions. Elle demande notamment de conserver les mentions d'attribution, d'afficher la mention « Built with Meta Llama 3 » dans certaines interfaces, de fournir une copie de la licence et de respecter une politique d'usage acceptable. Elle encadre aussi la manière dont les sorties peuvent être utilisées pour améliorer d'autres modèles.\n\n### Le seuil et la politique d'usage\n\nLa licence Llama 3 prévoit un seuil de 700 millions d'utilisateurs actifs mensuels. Au-delà de ce seuil, une licence doit être demandée à Meta, qui l'accorde ou la refuse à sa discrétion. Ce seuil ne concerne pas la plupart des projets, mais il montre que la licence peut dépendre de l'échelle. Une petite équipe et une grande plateforme ne sont pas dans la même situation.\n\nLa politique d'usage acceptable est un autre point sensible. Elle peut interdire des usages illégaux, des atteintes aux droits, des manipulations dangereuses ou certaines pratiques de surveillance. Ces interdictions ne sont pas nécessairement des restrictions de la licence au sens de l'OSAID, mais elles peuvent limiter ce que vous pouvez faire. Il faut donc lire la politique séparément et vérifier si votre usage est visé.\n\n### Les sorties et les données\n\nUne licence de modèle ne dit pas toujours ce que vous pouvez faire des sorties. Certaines licences revendiquent des droits sur les sorties, d'autres les laissent à l'utilisateur, d'autres encore interdisent de les utiliser pour entraîner un modèle concurrent. Ces clauses peuvent avoir des conséquences importantes pour un produit qui génère du contenu.\n\nLes données d'entraînement sont souvent absentes de la licence. La licence peut porter sur les poids et le code, tandis que les données restent soumises à leurs propres droits. Un modèle peut donc être distribué avec une licence permissive et avoir été entraîné sur des données dont la redistribution n'est pas autorisée. La licence du modèle ne règle pas cette question.\n\n### Une méthode de lecture\n\nLisez d'abord la définition des parties et des artefacts couverts. Repérez ensuite les droits accordés, puis les obligations, puis les restrictions. Cherchez les mots « seuil », « usage acceptable », « sorties », « données » et « marque ». Vérifiez la date et la version du texte. Enfin, demandez à un professionnel du droit si votre usage est couvert.\n\nCe module ne donne pas de conseil juridique. Il propose une grille de lecture pour comprendre les documents et poser les bonnes questions. Une licence peut être claire sur un point et silencieuse sur un autre. C'est souvent le silence qui demande une analyse.",
+      "diagram": {
+        "title": "Quatre familles de conditions",
+        "description": "Schéma illustratif : licence permissive, licence sur mesure, clause commerciale et politique d'usage acceptable. Les catégories se cumulent souvent dans un même texte.",
+        "svg": "<svg viewBox=\"0 0 860 430\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Quatre familles de conditions dans une licence de modèle\">\n  <rect width=\"860\" height=\"430\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"430\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Lire une licence : quatre familles de conditions</text>\n  <text x=\"430\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans conseil juridique</text>\n\n  <g id=\"permissive\">\n    <rect x=\"40\" y=\"95\" width=\"180\" height=\"120\" rx=\"12\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"130\" y=\"132\" fill=\"#e0f2fe\" font-size=\"14\" text-anchor=\"middle\">Permissive</text>\n    <text x=\"130\" y=\"156\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">usage, modification</text>\n    <text x=\"130\" y=\"176\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">redistribution</text>\n    <text x=\"130\" y=\"196\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">obligations légères</text>\n  </g>\n\n  <g id=\"sur-mesure\">\n    <rect x=\"240\" y=\"95\" width=\"180\" height=\"120\" rx=\"12\" fill=\"#0f172a\" stroke=\"#818cf8\" stroke-width=\"2\"/>\n    <text x=\"330\" y=\"132\" fill=\"#e0e7ff\" font-size=\"14\" text-anchor=\"middle\">Sur mesure</text>\n    <text x=\"330\" y=\"156\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">attribution, nommage</text>\n    <text x=\"330\" y=\"176\" fill=\"#a5b4fc\" font-size=\"11\" text-anchor=\"middle\">conditions de produit</text>\n    <text x=\"330\" y=\"196\" fill=\"#a5b4fc\" font-size=\"11\" text-anchor=\"middle\">version datée</text>\n  </g>\n\n  <g id=\"commerciale\">\n    <rect x=\"440\" y=\"95\" width=\"180\" height=\"120\" rx=\"12\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <text x=\"530\" y=\"132\" fill=\"#fef3c7\" font-size=\"14\" text-anchor=\"middle\">Seuil et échelle</text>\n    <text x=\"530\" y=\"156\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">utilisateurs actifs</text>\n    <text x=\"530\" y=\"176\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">licence distincte</text>\n    <text x=\"530\" y=\"196\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">au-delà d'un seuil</text>\n  </g>\n\n  <g id=\"usage\">\n    <rect x=\"640\" y=\"95\" width=\"180\" height=\"120\" rx=\"12\" fill=\"#0f172a\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"730\" y=\"132\" fill=\"#fce7f3\" font-size=\"14\" text-anchor=\"middle\">Usage acceptable</text>\n    <text x=\"730\" y=\"156\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">usages interdits</text>\n    <text x=\"730\" y=\"176\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">politique séparée</text>\n    <text x=\"730\" y=\"196\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">à vérifier</text>\n  </g>\n\n  <g id=\"lecture\">\n    <rect x=\"180\" y=\"285\" width=\"500\" height=\"90\" rx=\"12\" fill=\"#111827\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"430\" y=\"318\" fill=\"#d1fae5\" font-size=\"13\" text-anchor=\"middle\">Méthode : droits, obligations, restrictions, silences</text>\n    <text x=\"430\" y=\"342\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">date et version du texte, artefacts couverts, cas d'usage</text>\n    <text x=\"430\" y=\"360\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">en cas de doute, faire relire par un professionnel du droit</text>\n  </g>\n\n  <line x1=\"130\" y1=\"215\" x2=\"300\" y2=\"280\" stroke=\"#475569\" stroke-width=\"1.2\"/>\n  <line x1=\"330\" y1=\"215\" x2=\"380\" y2=\"280\" stroke=\"#475569\" stroke-width=\"1.2\"/>\n  <line x1=\"530\" y1=\"215\" x2=\"490\" y2=\"280\" stroke=\"#475569\" stroke-width=\"1.2\"/>\n  <line x1=\"730\" y1=\"215\" x2=\"560\" y2=\"280\" stroke=\"#475569\" stroke-width=\"1.2\"/>\n  <text x=\"430\" y=\"408\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">Une même licence peut cumuler plusieurs familles</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Les droits accordés",
+            "explanation": "Repérez ce que la licence permet : utilisation, reproduction, modification, distribution, usage commercial.",
+            "highlight": [
+              "permissive"
+            ]
+          },
+          {
+            "title": "2. Les obligations",
+            "explanation": "Attribution, mention du modèle, copie de la licence, indication des modifications : ces obligations accompagnent souvent la redistribution.",
+            "highlight": [
+              "sur-mesure"
+            ]
+          },
+          {
+            "title": "3. Les restrictions",
+            "explanation": "Seuils d'utilisateurs, usages interdits, secteurs exclus : ces clauses peuvent limiter un projet même si les droits généraux sont larges.",
+            "highlight": [
+              "commerciale",
+              "usage"
+            ]
+          },
+          {
+            "title": "4. Les silences",
+            "explanation": "Ce que la licence ne dit pas sur les données, les sorties ou les marques demande une vérification séparée.",
+            "highlight": [
+              "lecture"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "À quoi sert une clause de seuil dans une licence de modèle ?",
+          "options": [
+            "À limiter la taille du fichier de poids",
+            "À rendre certains droits différents au-delà d'un nombre d'utilisateurs ou d'un revenu",
+            "À interdire toute utilisation commerciale",
+            "À imposer un benchmark public"
+          ],
+          "correctIndex": 1,
+          "explanation": "Une clause de seuil fait dépendre les droits de l'échelle du déploiement. La licence Llama 3 utilise par exemple un seuil de 700 millions d'utilisateurs actifs mensuels."
+        },
+        {
+          "question": "Que peut faire une politique d'usage acceptable ?",
+          "options": [
+            "Interdire des usages que la licence autorise par ailleurs",
+            "Remplacer la licence",
+            "Garantir un usage sans risque",
+            "Supprimer les obligations d'attribution"
+          ],
+          "correctIndex": 0,
+          "explanation": "La politique d'usage acceptable est un texte distinct qui peut restreindre certains usages. Il faut la lire en plus de la licence, pas à sa place."
+        },
+        {
+          "question": "Une licence permissive sur les poids garantit-elle que les données sont redistribuables ?",
+          "options": [
+            "Oui, toujours",
+            "Non, les données peuvent avoir leurs propres droits",
+            "Oui, si le modèle est commercial",
+            "Non, mais seulement en Europe"
+          ],
+          "correctIndex": 1,
+          "explanation": "La licence du modèle couvre les artefacts qu'elle désigne. Les données d'entraînement peuvent être soumises à des droits distincts et ne pas être couvertes."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Licence permissive",
+          "definition": "Licence qui accorde largement les droits d'utilisation, de modification et de redistribution, avec peu d'obligations."
+        },
+        {
+          "term": "Usage acceptable",
+          "definition": "Politique qui définit les usages autorisés ou interdits d'un modèle, souvent séparée de la licence."
+        },
+        {
+          "term": "Clause de seuil",
+          "definition": "Condition qui fait dépendre certains droits du nombre d'utilisateurs, du revenu ou de l'échelle du déploiement."
+        },
+        {
+          "term": "Attribution",
+          "definition": "Obligation de mentionner l'auteur, le modèle ou la licence d'origine lors d'une redistribution ou d'un usage public."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Quatre clauses avant de redistribuer",
+          "prompt": "Une équipe veut modifier un modèle sous licence sur mesure et redistribuer le résultat dans un produit commercial. Citez quatre clauses à vérifier dans le texte, et expliquez pourquoi une licence permissive ne règle pas la question des données d’entraînement.",
+          "solution": "Il faut vérifier les droits accordés sur les poids et le code, les obligations d’attribution et de nommage, la politique d’usage acceptable, puis les restrictions d’échelle ou de secteur, comme un seuil d’utilisateurs actifs. Les clauses sur les sorties et sur leur usage pour entraîner un concurrent comptent aussi pour un produit qui génère du contenu. Une licence permissive porte sur les artefacts qu’elle couvre : elle ne transfère pas les droits sur le corpus, qui reste soumis à ses propres licences. Un modèle peut donc être distribué sous Apache 2.0 tout en ayant été entraîné sur des données non redistribuables."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Meta, Llama 3 License, consultée le 21 octobre 2026.",
+          "href": "https://dev.meta.ai/llama/llama3/license"
+        },
+        {
+          "label": "Open Source Initiative, Open Source AI Definition, consultée le 21 octobre 2026.",
+          "href": "https://opensource.org/ai/open-source-ai-definition"
+        }
+      ]
+    },
+    {
+      "id": "llama-mistral",
+      "title": "Llama, Mistral et les licences sur mesure",
+      "keyTakeaways": [
+        "La licence communautaire de Llama 3 est une licence sur mesure : elle accorde des droits larges, avec attribution, nommage, politique d'usage acceptable et seuil d'utilisateurs.",
+        "Mistral 7B a été publié en 2023 sous licence Apache 2.0, ce qui ne dit rien des autres modèles Mistral, dont les licences peuvent différer.",
+        "Apache 2.0 est une licence logicielle permissive avec des obligations de notice et une clause de brevets ; son application aux poids doit être vérifiée.",
+        "Comparer deux modèles demande de comparer leurs licences, leurs artefacts publiés et leurs restrictions, pas seulement leur taille ou leurs performances.",
+        "Une licence plus permissive n'est pas automatiquement meilleure : elle peut être silencieuse sur des points importants pour votre projet."
+      ],
+      "theory": "### Deux modèles, deux stratégies\n\nLlama 3 et Mistral 7B sont souvent cités comme des exemples de modèles « ouverts ». Leurs licences racontent pourtant deux stratégies différentes. La licence communautaire de Llama 3 est un texte sur mesure, écrit pour encadrer l'usage d'une famille de modèles. Mistral 7B a été publié en 2023 sous Apache 2.0, une licence logicielle permissive largement utilisée.\n\nCes deux exemples ne suffisent pas à caractériser tous les modèles de leurs éditeurs. Meta a publié plusieurs versions de sa licence, et Mistral a utilisé d'autres licences pour certains modèles. Il faut donc vérifier la licence du modèle précis, dans sa version datée, et non se fier au souvenir d'une annonce.\n\n### La licence communautaire Llama 3\n\nLa licence communautaire de Llama 3, dans sa version du 18 avril 2024, accorde le droit d'utiliser, de reproduire, de distribuer et de modifier le modèle et ses dérivés. Elle impose plusieurs conditions. Il faut conserver les mentions de copyright et la licence, fournir un fichier de notice, et afficher la mention « Built with Meta Llama 3 » dans les interfaces concernées. Les produits dérivés doivent aussi respecter des règles de nommage : leur nom doit commencer par « Llama 3 ».\n\nLa licence contient une politique d'usage acceptable qui interdit certains usages. Elle précise aussi que les sorties du modèle ne peuvent pas être utilisées pour améliorer un autre modèle de langage, sauf s'il s'agit d'un dérivé de Llama 3. Enfin, elle prévoit un seuil de 700 millions d'utilisateurs actifs mensuels : au-delà, il faut demander une licence distincte à Meta, et les droits ne sont accordés que si Meta l'accepte. Ce seuil ne concerne pas la majorité des projets, mais il doit être connu.\n\n### Apache 2.0 et Mistral 7B\n\nLe rapport technique de Mistral 7B, publié en 2023, indique que le modèle est distribué sous licence Apache 2.0. Cette licence permet l'utilisation, la modification et la redistribution, y compris pour des usages commerciaux. Elle impose de conserver les mentions de copyright et la licence, d'indiquer les modifications et de fournir une copie de la licence. Elle contient une concession de brevets et une clause de non-garantie.\n\nApache 2.0 ne couvre pas tout. Elle ne concède pas de droits sur les marques, ne garantit pas la conformité à d'autres lois et ne dit rien sur les données d'entraînement. Elle est aussi une licence logicielle : son application à des poids et à une documentation doit être vérifiée au cas par cas.\n\n### Comparer ce qui est comparable\n\nComparer Llama 3 et Mistral 7B sur le seul critère de la licence serait réducteur. Les deux modèles n'ont ni la même taille, ni les mêmes données, ni les mêmes performances. La licence est une dimension parmi d'autres. Elle détermine ce que vous pouvez faire légalement, mais elle ne dit pas si le modèle convient à votre usage.\n\nUne comparaison utile aligne plusieurs colonnes : droits accordés, obligations, restrictions, artefacts publiés, seuil éventuel, politique d'usage, date de la licence. Une licence permissive avec peu d'obligations peut être préférable pour un produit commercial. Une licence sur mesure avec des restrictions peut être acceptable pour un usage de recherche. Le choix dépend du projet, pas d'une hiérarchie abstraite.\n\n### Les pièges fréquents\n\nLe premier piège est de confondre la licence du modèle avec celle du code d'inférence. Le second est de supposer qu'une licence vaut pour toutes les versions d'un modèle. Le troisième est d'oublier la politique d'usage acceptable, qui peut interdire un usage que la licence autorise. Le quatrième est de croire qu'une licence permissive rend les données redistribuables.\n\nUn cinquième piège concerne les sorties. Une licence peut autoriser la redistribution du modèle tout en encadrant l'usage des sorties. Si votre produit génère du contenu, lisez les clauses correspondantes. Si vous entraînez un modèle sur des sorties, vérifiez si la licence l'autorise.\n\n### Une conclusion provisoire\n\nLlama 3 et Mistral 7B montrent que le mot « ouvert » recouvre des réalités juridiques différentes. La licence Llama 3 est plus détaillée et plus restrictive qu'Apache 2.0 sur certains points. Apache 2.0 est plus simple et plus permissive, mais elle ne dit pas tout. Dans les deux cas, la licence est un document à lire, pas un logo à afficher.",
+      "diagram": {
+        "title": "Comparer deux licences, colonne par colonne",
+        "description": "Schéma illustratif : Llama 3 et Mistral 7B comparés sur les droits, les obligations, les restrictions et les artefacts. Les cases indiquent des tendances, pas un avis juridique.",
+        "svg": "<svg viewBox=\"0 0 860 460\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Comparaison illustrative des licences Llama 3 et Mistral 7B\">\n  <rect width=\"860\" height=\"460\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"430\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Deux licences, deux équilibres</text>\n  <text x=\"430\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans conseil juridique</text>\n\n  <g id=\"entetes\">\n    <rect x=\"40\" y=\"80\" width=\"250\" height=\"50\" rx=\"8\" fill=\"#111827\" stroke=\"#334155\"/>\n    <text x=\"165\" y=\"110\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">Critère</text>\n    <rect x=\"300\" y=\"80\" width=\"250\" height=\"50\" rx=\"8\" fill=\"#111827\" stroke=\"#334155\"/>\n    <text x=\"425\" y=\"110\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">Llama 3</text>\n    <rect x=\"560\" y=\"80\" width=\"250\" height=\"50\" rx=\"8\" fill=\"#111827\" stroke=\"#334155\"/>\n    <text x=\"685\" y=\"110\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">Mistral 7B</text>\n  </g>\n\n  <g id=\"droits\">\n    <rect x=\"40\" y=\"140\" width=\"250\" height=\"50\" rx=\"8\" fill=\"#0f172a\" stroke=\"#38bdf8\"/>\n    <text x=\"165\" y=\"170\" fill=\"#bae6fd\" font-size=\"12\" text-anchor=\"middle\">Usage, modification</text>\n    <rect x=\"300\" y=\"140\" width=\"250\" height=\"50\" rx=\"8\" fill=\"#0f172a\" stroke=\"#38bdf8\"/>\n    <text x=\"425\" y=\"170\" fill=\"#e0f2fe\" font-size=\"12\" text-anchor=\"middle\">Oui, sous conditions</text>\n    <rect x=\"560\" y=\"140\" width=\"250\" height=\"50\" rx=\"8\" fill=\"#0f172a\" stroke=\"#38bdf8\"/>\n    <text x=\"685\" y=\"170\" fill=\"#e0f2fe\" font-size=\"12\" text-anchor=\"middle\">Oui, Apache 2.0</text>\n  </g>\n\n  <g id=\"obligations\">\n    <rect x=\"40\" y=\"200\" width=\"250\" height=\"50\" rx=\"8\" fill=\"#0f172a\" stroke=\"#818cf8\"/>\n    <text x=\"165\" y=\"230\" fill=\"#c7d2fe\" font-size=\"12\" text-anchor=\"middle\">Attribution et notices</text>\n    <rect x=\"300\" y=\"200\" width=\"250\" height=\"50\" rx=\"8\" fill=\"#0f172a\" stroke=\"#818cf8\"/>\n    <text x=\"425\" y=\"230\" fill=\"#e0e7ff\" font-size=\"12\" text-anchor=\"middle\">Nommage et mention</text>\n    <rect x=\"560\" y=\"200\" width=\"250\" height=\"50\" rx=\"8\" fill=\"#0f172a\" stroke=\"#818cf8\"/>\n    <text x=\"685\" y=\"230\" fill=\"#e0e7ff\" font-size=\"12\" text-anchor=\"middle\">Notice et licence</text>\n  </g>\n\n  <g id=\"restrictions\">\n    <rect x=\"40\" y=\"260\" width=\"250\" height=\"50\" rx=\"8\" fill=\"#0f172a\" stroke=\"#fbbf24\"/>\n    <text x=\"165\" y=\"290\" fill=\"#fde68a\" font-size=\"12\" text-anchor=\"middle\">Usage et seuil</text>\n    <rect x=\"300\" y=\"260\" width=\"250\" height=\"50\" rx=\"8\" fill=\"#0f172a\" stroke=\"#fbbf24\"/>\n    <text x=\"425\" y=\"290\" fill=\"#fef3c7\" font-size=\"12\" text-anchor=\"middle\">Politique et 700 M</text>\n    <rect x=\"560\" y=\"260\" width=\"250\" height=\"50\" rx=\"8\" fill=\"#0f172a\" stroke=\"#fbbf24\"/>\n    <text x=\"685\" y=\"290\" fill=\"#fef3c7\" font-size=\"12\" text-anchor=\"middle\">Pas de seuil de ce type</text>\n  </g>\n\n  <g id=\"artefacts\">\n    <rect x=\"40\" y=\"320\" width=\"250\" height=\"50\" rx=\"8\" fill=\"#0f172a\" stroke=\"#34d399\"/>\n    <text x=\"165\" y=\"350\" fill=\"#a7f3d0\" font-size=\"12\" text-anchor=\"middle\">Artefacts publiés</text>\n    <rect x=\"300\" y=\"320\" width=\"250\" height=\"50\" rx=\"8\" fill=\"#0f172a\" stroke=\"#34d399\"/>\n    <text x=\"425\" y=\"350\" fill=\"#d1fae5\" font-size=\"12\" text-anchor=\"middle\">Poids, code, fiche</text>\n    <rect x=\"560\" y=\"320\" width=\"250\" height=\"50\" rx=\"8\" fill=\"#0f172a\" stroke=\"#34d399\"/>\n    <text x=\"685\" y=\"350\" fill=\"#d1fae5\" font-size=\"12\" text-anchor=\"middle\">Poids, code, rapport</text>\n  </g>\n\n  <text x=\"430\" y=\"405\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">Les deux licences ne disent pas la même chose sur les données</text>\n  <text x=\"430\" y=\"425\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">Vérifier la version du texte et le modèle précis</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Droits et obligations",
+            "explanation": "Les deux licences accordent l'usage et la modification, mais Llama 3 ajoute des règles de nommage et de mention.",
+            "highlight": [
+              "droits",
+              "obligations"
+            ]
+          },
+          {
+            "title": "2. Restrictions",
+            "explanation": "Llama 3 prévoit une politique d'usage acceptable et un seuil de 700 millions d'utilisateurs actifs ; Apache 2.0 ne contient pas de seuil de ce type.",
+            "highlight": [
+              "restrictions"
+            ]
+          },
+          {
+            "title": "3. Artefacts",
+            "explanation": "La licence ne dit pas tout des artefacts. Il faut vérifier ce qui est réellement publié et sous quels termes.",
+            "highlight": [
+              "artefacts"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Quelle restriction est propre à la licence communautaire Llama 3 ?",
+          "options": [
+            "Un seuil de 700 millions d'utilisateurs actifs mensuels",
+            "Une interdiction totale de l'usage commercial",
+            "Une obligation de publier les données",
+            "Une licence limitée à la recherche"
+          ],
+          "correctIndex": 0,
+          "explanation": "La licence Llama 3 prévoit un seuil de 700 millions d'utilisateurs actifs mensuels, au-delà duquel il faut demander une licence distincte à Meta, qui peut l'accorder ou la refuser."
+        },
+        {
+          "question": "Sous quelle licence Mistral 7B a-t-il été publié en 2023 ?",
+          "options": [
+            "Apache 2.0",
+            "MIT",
+            "GPL 3.0",
+            "Llama 3 Community License"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le rapport technique de Mistral 7B indique une publication sous Apache 2.0. Cela ne préjuge pas des autres modèles Mistral."
+        },
+        {
+          "question": "Pourquoi ne pas comparer deux modèles sur la seule licence ?",
+          "options": [
+            "Parce que la licence ne dit rien des droits",
+            "Parce que la taille, les données et les performances comptent aussi",
+            "Parce que toutes les licences sont identiques",
+            "Parce que la licence est toujours secrète"
+          ],
+          "correctIndex": 1,
+          "explanation": "La licence détermine les droits, mais elle ne dit pas si le modèle convient à un usage. Une comparaison utile porte aussi sur les artefacts et les caractéristiques techniques."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Licence communautaire",
+          "definition": "Licence sur mesure écrite pour une famille de modèles, qui combine droits larges, obligations et restrictions."
+        },
+        {
+          "term": "Apache 2.0",
+          "definition": "Licence logicielle permissive qui exige notamment de conserver les notices, accorde une concession de brevets et ne concède pas de droits de marque."
+        },
+        {
+          "term": "Seuil d'utilisateurs",
+          "definition": "Condition qui fait dépendre certains droits du nombre d'utilisateurs actifs d'un produit ou d'un service."
+        },
+        {
+          "term": "Politique d'usage acceptable",
+          "definition": "Texte qui définit les usages autorisés ou interdits d'un modèle, distinct de la licence elle-même."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Un dérivé de Llama 3 en production",
+          "prompt": "Une petite équipe adapte Llama 3 et veut publier son modèle dérivé sous un nouveau nom, avec une interface grand public. Quelles obligations de la licence communautaire doit-elle respecter, et à partir de quel seuil une licence distincte devient-elle nécessaire ?",
+          "solution": "La licence demande de conserver les mentions de copyright et de fournir une copie du texte et un fichier de notice. Les produits dérivés doivent respecter les règles de nommage : leur nom commence par « Llama 3 ». L’interface concernée doit afficher « Built with Meta Llama 3 ». La politique d’usage acceptable s’applique, et les sorties ne peuvent pas servir à améliorer un autre modèle de langage, sauf un dérivé de Llama 3. Au-delà de 700 millions d’utilisateurs actifs mensuels, une licence distincte doit être demandée à Meta, qui l’accorde ou la refuse. Une relecture juridique reste nécessaire."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Meta, Llama 3 License, consultée le 21 octobre 2026.",
+          "href": "https://dev.meta.ai/llama/llama3/license"
+        },
+        {
+          "label": "Jiang et al., Mistral 7B, 2023.",
+          "href": "https://arxiv.org/abs/2310.06825"
+        },
+        {
+          "label": "Open Source Initiative, Open Source AI Definition, consultée le 21 octobre 2026.",
+          "href": "https://opensource.org/ai/open-source-ai-definition"
+        }
+      ]
+    },
+    {
+      "id": "vraiment-ouvert",
+      "title": "OLMo, Pythia et les modèles réellement ouverts",
+      "keyTakeaways": [
+        "OLMo 2 publie les poids, le code, les données d'entraînement, les recettes et de nombreux points de contrôle, ce qui va au-delà des poids seuls.",
+        "Pythia est une famille de modèles de recherche entraînée sur The Pile, avec des points de contrôle intermédiaires et une documentation du corpus.",
+        "La publication des données permet d'étudier les biais, la contamination et les effets de la composition du corpus.",
+        "Un modèle réellement ouvert n'est pas nécessairement meilleur qu'un modèle fermé : l'ouverture sert l'étude et la reproduction, pas la performance.",
+        "Les licences des données, du code et des poids peuvent différer ; il faut vérifier chaque artefact séparément."
+      ],
+      "theory": "### Au-delà du fichier de poids\n\nCertains projets publient davantage qu'un fichier de paramètres. Ils rendent accessibles le code d'entraînement, les données, les recettes, les journaux et des points de contrôle intermédiaires. Cette pratique permet de comprendre comment le modèle a été construit, de reproduire une partie du travail et d'étudier des questions qui restent invisibles avec les seuls poids.\n\nOLMo 2, présenté dans le rapport « 2 OLMo 2 Furious » en 2025, est un exemple de cette approche. La famille comprend des modèles denses de 7, 13 et 32 milliards de paramètres. Le projet publie les poids, le code, les données d'entraînement, les recettes et de nombreux points de contrôle. Il documente aussi les étapes de l'entraînement et les choix techniques.\n\n### Pourquoi publier les données\n\nLes données d'entraînement déterminent une partie du comportement d'un modèle. Elles influencent le vocabulaire, les connaissances, les biais et les erreurs. Quand seuls les poids sont publiés, un chercheur peut observer les effets, mais il ne peut pas en analyser les causes. Quand les données sont disponibles, il peut étudier la composition du corpus, mesurer la présence de certains contenus et tester des hypothèses.\n\nLa documentation des données permet aussi de vérifier leur provenance, leurs licences et les filtres appliqués. Elle ne garantit pas que le corpus soit exempt de contenus problématiques : un corpus documenté peut contenir des biais, des doublons ou des données personnelles. La publication rend ces questions visibles, elle ne les résout pas.\n\nLa publication des données pose cependant des questions de droits, de vie privée et de sécurité. Toutes les données ne peuvent pas être redistribuées. Un projet peut publier une description détaillée, des filtres ou des statistiques sans diffuser les documents eux-mêmes. La transparence n'est pas binaire : elle se mesure à ce qui est réellement accessible et à ce qui permet de reproduire.\n\n### Les points de contrôle\n\nUn point de contrôle est une sauvegarde des paramètres à une étape de l'entraînement. Publier plusieurs points de contrôle permet d'étudier l'évolution du modèle, de comparer des étapes et de tester des hypothèses sur l'apprentissage. Cela demande de l'espace de stockage et une organisation rigoureuse, mais c'est une ressource précieuse pour la recherche.\n\nPythia, une famille de modèles de recherche entraînée sur The Pile, est connue pour avoir documenté de nombreux points de contrôle intermédiaires et l'ordre des données. Cette combinaison permet des analyses fines : à quel moment une capacité apparaît, comment le modèle évolue, quel rôle joue la composition du corpus. Les conclusions restent liées au corpus et aux conditions d'entraînement.\n\nLa publication de points de contrôle a un coût de stockage et de bande passante. Elle oblige aussi à documenter précisément l'ordre des données et les paramètres pour que les étapes soient comparables. Un projet qui publie des poids sans ces informations reste utile, mais il ne permet pas les mêmes analyses.\n\n### Ce que cela permet, ce que cela ne garantit pas\n\nUn modèle réellement ouvert facilite la reproduction, l'audit et l'enseignement. Il permet de tester des hypothèses sur les données, de vérifier des affirmations et de former des personnes à l'analyse des modèles. Il ne garantit ni la qualité, ni l'absence de biais, ni la sécurité. Il ne garantit pas non plus que les résultats seront faciles à reproduire : le matériel, les bibliothèques et les choix d'implémentation comptent.\n\nReproduire ne signifie pas obtenir exactement le même modèle. Cela signifie refaire une expérience avec les mêmes artefacts et documenter les écarts. Les projets sérieux publient les journaux, les versions de code et les paramètres pour rendre ces écarts interprétables. Cette documentation demande un travail continu, car les dépendances et les outils évoluent.\n\nL'ouverture a aussi un coût. Publier des données peut exposer des informations personnelles ou des contenus protégés. Publier des poids peut faciliter des usages détournés. Les projets sérieux mettent en place des filtres, des licences et des procédures de retrait. Ces mesures ne suppriment pas les risques, mais elles les rendent explicites.\n\n### Un exemple de check-list\n\nPour qualifier un modèle de réellement ouvert, vérifiez la présence des poids, du code d'entraînement, des données ou d'une description suffisante, des recettes, des journaux et des points de contrôle. Vérifiez ensuite les licences de chaque artefact. Un modèle peut publier ses poids sous une licence permissive et ses données sous une licence plus restrictive.\n\nLe code, les poids et les données ne sont pas nécessairement couverts par le même texte. Cette séparation est fréquente dans les projets de recherche, qui utilisent des licences distinctes pour les logiciels, les modèles et les corpus. Il faut donc lire chaque dépôt et chaque fiche de modèle, pas seulement la licence affichée en tête de page.\n\nOLMo 2 et Pythia ne sont pas les seuls exemples, et tous les projets n'ont pas les mêmes moyens. Un petit projet peut publier moins d'artefacts et rester utile. La question n'est pas de savoir qui est le plus ouvert, mais de savoir ce qui est publié, sous quels termes et pour quel usage.",
+      "diagram": {
+        "title": "Ce que publie un projet réellement ouvert",
+        "description": "Schéma illustratif : données, code, poids, points de contrôle et journaux sont représentés comme cinq artefacts complémentaires. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 860 430\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Cinq artefacts publiés par un projet de modèle réellement ouvert\">\n  <rect width=\"860\" height=\"430\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"430\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Un projet ouvert publie plusieurs artefacts</text>\n  <text x=\"430\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"donnees\">\n    <rect x=\"40\" y=\"100\" width=\"145\" height=\"120\" rx=\"12\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"112\" y=\"138\" fill=\"#d1fae5\" font-size=\"13\" text-anchor=\"middle\">Données</text>\n    <text x=\"112\" y=\"162\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">corpus, filtres</text>\n    <text x=\"112\" y=\"182\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">provenance</text>\n  </g>\n\n  <g id=\"code\">\n    <rect x=\"200\" y=\"100\" width=\"145\" height=\"120\" rx=\"12\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"272\" y=\"138\" fill=\"#e0f2fe\" font-size=\"13\" text-anchor=\"middle\">Code</text>\n    <text x=\"272\" y=\"162\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">entraînement</text>\n    <text x=\"272\" y=\"182\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">inférence</text>\n  </g>\n\n  <g id=\"poids\">\n    <rect x=\"360\" y=\"100\" width=\"145\" height=\"120\" rx=\"12\" fill=\"#0f172a\" stroke=\"#818cf8\" stroke-width=\"2\"/>\n    <text x=\"432\" y=\"138\" fill=\"#e0e7ff\" font-size=\"13\" text-anchor=\"middle\">Poids</text>\n    <text x=\"432\" y=\"162\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">paramètres</text>\n    <text x=\"432\" y=\"182\" fill=\"#a5b4fc\" font-size=\"11\" text-anchor=\"middle\">licence</text>\n  </g>\n\n  <g id=\"checkpoints\">\n    <rect x=\"520\" y=\"100\" width=\"145\" height=\"120\" rx=\"12\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <text x=\"592\" y=\"138\" fill=\"#fef3c7\" font-size=\"13\" text-anchor=\"middle\">Points de contrôle</text>\n    <text x=\"592\" y=\"162\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">étapes</text>\n    <text x=\"592\" y=\"182\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">évolution</text>\n  </g>\n\n  <g id=\"journaux\">\n    <rect x=\"680\" y=\"100\" width=\"145\" height=\"120\" rx=\"12\" fill=\"#0f172a\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"752\" y=\"138\" fill=\"#fce7f3\" font-size=\"13\" text-anchor=\"middle\">Journaux</text>\n    <text x=\"752\" y=\"162\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">recettes</text>\n    <text x=\"752\" y=\"182\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">hyperparamètres</text>\n  </g>\n\n  <g id=\"reproduction\">\n    <rect x=\"170\" y=\"285\" width=\"520\" height=\"90\" rx=\"12\" fill=\"#111827\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"430\" y=\"318\" fill=\"#e0f2fe\" font-size=\"13\" text-anchor=\"middle\">Reproduction, audit, enseignement</text>\n    <text x=\"430\" y=\"342\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">chaque artefact a sa licence et ses limites</text>\n    <text x=\"430\" y=\"360\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">l'ouverture ne garantit ni qualité ni sécurité</text>\n  </g>\n\n  <line x1=\"112\" y1=\"220\" x2=\"300\" y2=\"280\" stroke=\"#475569\" stroke-width=\"1.2\"/>\n  <line x1=\"272\" y1=\"220\" x2=\"360\" y2=\"280\" stroke=\"#475569\" stroke-width=\"1.2\"/>\n  <line x1=\"432\" y1=\"220\" x2=\"432\" y2=\"280\" stroke=\"#475569\" stroke-width=\"1.2\"/>\n  <line x1=\"592\" y1=\"220\" x2=\"510\" y2=\"280\" stroke=\"#475569\" stroke-width=\"1.2\"/>\n  <line x1=\"752\" y1=\"220\" x2=\"570\" y2=\"280\" stroke=\"#475569\" stroke-width=\"1.2\"/>\n  <text x=\"430\" y=\"408\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">Vérifier ce qui est publié, et sous quels termes</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Données et code",
+            "explanation": "Les données et le code d'entraînement permettent de comprendre la construction du modèle et de tester des hypothèses.",
+            "highlight": [
+              "donnees",
+              "code"
+            ]
+          },
+          {
+            "title": "2. Poids et points de contrôle",
+            "explanation": "Les poids permettent l'usage ; les points de contrôle intermédiaires permettent d'étudier l'évolution du modèle.",
+            "highlight": [
+              "poids",
+              "checkpoints"
+            ]
+          },
+          {
+            "title": "3. Journaux et reproduction",
+            "explanation": "Les recettes et les journaux rendent la reproduction possible, sans garantir que le résultat sera identique.",
+            "highlight": [
+              "journaux",
+              "reproduction"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Qu'est-ce qu'OLMo 2 publie en plus des poids ?",
+          "options": [
+            "Uniquement une fiche technique",
+            "Le code, les données, les recettes et de nombreux points de contrôle",
+            "Seulement les sorties du modèle",
+            "Un accès API payant"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le rapport OLMo 2 décrit la publication des poids, du code, des données, des recettes et de nombreux points de contrôle."
+        },
+        {
+          "question": "Quel est l'intérêt de publier des points de contrôle intermédiaires ?",
+          "options": [
+            "Réduire la taille du modèle",
+            "Étudier l'évolution du modèle et comparer des étapes d'entraînement",
+            "Garantir l'absence de biais",
+            "Supprimer le besoin de licence"
+          ],
+          "correctIndex": 1,
+          "explanation": "Les points de contrôle permettent d'analyser l'apprentissage à différentes étapes. Ils ne garantissent ni la qualité ni l'absence de biais."
+        },
+        {
+          "question": "Pythia est surtout connue pour…",
+          "options": [
+            "des points de contrôle documentés et une documentation du corpus d'entraînement",
+            "un modèle propriétaire sans poids",
+            "une licence interdisant la recherche",
+            "un benchmark de consommation électrique"
+          ],
+          "correctIndex": 0,
+          "explanation": "Pythia est une famille de modèles de recherche entraînée sur The Pile, avec des points de contrôle et une documentation du corpus."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Point de contrôle",
+          "definition": "Sauvegarde des paramètres d'un modèle à une étape de l'entraînement, qui permet d'étudier son évolution."
+        },
+        {
+          "term": "The Pile",
+          "definition": "Corpus de textes utilisé pour entraîner la famille Pythia, documenté avec l'ordre des données."
+        },
+        {
+          "term": "Reproduction",
+          "definition": "Capacité à refaire une partie de l'entraînement ou de l'évaluation à partir des artefacts publiés."
+        },
+        {
+          "term": "Contamination",
+          "definition": "Présence, dans les données d'entraînement, d'éléments proches des questions d'évaluation, qui peut fausser les résultats."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Poids seuls ou points de contrôle",
+          "prompt": "Deux projets publient leurs poids. Le premier ajoute les points de contrôle intermédiaires, l’ordre des données et les journaux ; le second ne publie que le modèle final. Quelles analyses le premier permet-il que le second interdit, et l’ouverture garantit-elle un meilleur modèle ?",
+          "solution": "Avec les points de contrôle et l’ordre des données, on peut suivre l’apparition d’une capacité au fil de l’entraînement, comparer des étapes et relier un comportement à la composition du corpus. Le second projet permet d’observer le modèle final, de le quantifier et de l’adapter, mais pas d’analyser ces causes. L’ouverture ne garantit ni la qualité, ni l’absence de biais, ni la sécurité : elle rend l’étude et la reproduction possibles, avec les écarts de matériel et de bibliothèques à documenter. Il faut aussi vérifier séparément les licences des poids, du code et des données."
+        }
+      ],
+      "sources": [
+        {
+          "label": "OLMo Team, 2 OLMo 2 Furious, 2025.",
+          "href": "https://arxiv.org/abs/2501.00656"
+        },
+        {
+          "label": "Open Source Initiative, page IA, consultée le 21 octobre 2026.",
+          "href": "https://opensource.org/ai"
+        }
+      ]
+    },
+    {
+      "id": "enjeux",
+      "title": "Enjeux juridiques, sécurité et souveraineté",
+      "keyTakeaways": [
+        "Le règlement européen sur l'IA encadre les modèles à usage général : les obligations principales s'appliquent depuis le 2 août 2025, avec des échéances distinctes pour la transparence.",
+        "L'exemption prévue pour certains modèles libres ne couvre pas les modèles à risque systémique et ne supprime pas les obligations de politique de droits d'auteur ni de résumé des contenus d'entraînement.",
+        "Les poids ouverts permettent l'inspection et l'hébergement local, mais ils peuvent aussi faciliter des usages détournés ou la suppression de garde-fous.",
+        "La souveraineté n'est pas automatique : héberger un modèle demande du calcul, des compétences, une maintenance et une analyse des dépendances.",
+        "Une licence permissive ne dispense pas de respecter les autres lois, les droits de tiers ou les obligations de transparence."
+      ],
+      "theory": "### Un cadre qui dépend du rôle\n\nLe règlement européen sur l'intelligence artificielle, souvent appelé AI Act, encadre les systèmes d'IA selon leur rôle et leur niveau de risque. Les modèles à usage général, capables de remplir des tâches variées, font l'objet d'obligations spécifiques. Le fournisseur doit notamment établir une documentation technique, fournir aux fournisseurs de systèmes d'IA en aval des informations et une documentation, et respecter une politique en matière de droits d'auteur. Les obligations principales pour ces modèles s'appliquent depuis le 2 août 2025.\n\nLe règlement prévoit une exception pour certains modèles libres et ouverts. L'article 53, paragraphe 2, dispense les fournisseurs de modèles libres et ouverts de certaines obligations lorsque les paramètres, l'architecture et les informations d'usage sont publics. Cette dispense ne s'applique pas aux modèles présentant un risque systémique. Elle ne supprime pas non plus les obligations de politique de droits d'auteur et de résumé suffisamment détaillé des contenus d'entraînement.\n\n### Les dates à retenir\n\nLe calendrier est important. Les obligations relatives aux modèles à usage général s'appliquent depuis le 2 août 2025. Les obligations de transparence de l'article 50 s'appliquent à partir du 2 août 2026. Certaines dispositions concernent les systèmes à haut risque et suivent un calendrier distinct. Les dates et les périmètres doivent être vérifiés dans le texte consolidé, car les guides et les interprétations évoluent.\n\nL'article 2, paragraphe 12, exclut du champ d'application certaines IA libres et ouvertes, sauf si elles sont à haut risque, si elles mettent en œuvre des pratiques interdites ou si elles relèvent des obligations de transparence. Cette exclusion n'est donc pas générale. Un modèle libre peut rester soumis à plusieurs obligations selon son usage et son contexte.\n\n### Sécurité : ni angélisme, ni fatalisme\n\nLes poids ouverts permettent l'inspection. Des chercheurs peuvent analyser les paramètres, tester des comportements, comparer des versions et signaler des problèmes. Cette possibilité est utile pour la recherche et pour la confiance. Elle ne garantit pas que le modèle est sûr : un modèle inspectable peut contenir des biais, des erreurs ou des vulnérabilités.\n\nLes poids ouverts peuvent aussi faciliter des usages détournés. Un acteur peut les adapter, retirer certains garde-fous ou les intégrer dans un produit sans les contrôles prévus par l'éditeur. Ce risque existe aussi avec les API fermées, mais l'accès local change les possibilités. La réponse n'est pas de conclure que l'ouverture est dangereuse en soi : elle dépend du modèle, des mesures de sécurité et du contexte.\n\n### Souveraineté : ce que l'hébergement local permet\n\nHéberger un modèle sur ses propres machines peut réduire la dépendance à une API étrangère. Les données ne sortent pas nécessairement du périmètre choisi, les versions peuvent être figées et les usages peuvent être adaptés. C'est un argument souvent avancé en faveur des poids ouverts.\n\nLa souveraineté n'est pas automatique. Il faut du calcul, de l'énergie, des compétences et une maintenance. Il faut aussi vérifier la provenance des poids, la licence, les dépendances logicielles et les mises à jour de sécurité. Un modèle téléchargé puis oublié peut devenir une dette technique. La souveraineté est un processus, pas une case à cocher.\n\n### Les obligations qui ne disparaissent pas\n\nUne licence permissive ne dispense pas de respecter le droit applicable. Les obligations de transparence, de protection des données, de propriété intellectuelle et de sécurité peuvent continuer à s'appliquer. Si vous déployez un système qui interagit avec des personnes, vous devez peut-être indiquer qu'il s'agit d'une IA. Si vous traitez des données personnelles, le RGPD peut s'appliquer. Si vous utilisez des contenus protégés, les droits des auteurs comptent.\n\nLes licences de modèles ne règlent pas ces questions. Elles organisent les droits sur les artefacts, pas la conformité de votre produit. Il faut donc combiner la lecture de la licence, l'analyse du cadre réglementaire et l'évaluation des risques. Ce module ne remplace ni un juriste ni une analyse de conformité.\n\n### Une conclusion en trois questions\n\nAvant de déployer un modèle ouvert, posez trois questions. Que puis-je faire avec les artefacts publiés, selon leur licence ? Quelles obligations légales s'appliquent à mon usage et à mon rôle ? Quels risques de sécurité et de dépendance dois-je gérer ? Les réponses permettent de choisir entre un modèle fermé, un modèle à poids ouverts et un modèle réellement ouvert, sans confondre le vocabulaire avec une garantie.",
+      "diagram": {
+        "title": "Responsabilités selon le niveau d'ouverture",
+        "description": "Schéma illustratif : API fermée, poids ouverts et modèle réellement ouvert, avec des responsabilités qui se déplacent vers l'utilisateur. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 860 450\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Responsabilités selon trois niveaux d'ouverture d'un modèle\">\n  <rect width=\"860\" height=\"450\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"430\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Trois niveaux d'ouverture, trois répartitions des responsabilités</text>\n  <text x=\"430\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans conseil juridique</text>\n\n  <g id=\"api\">\n    <rect x=\"40\" y=\"95\" width=\"230\" height=\"150\" rx=\"12\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"155\" y=\"130\" fill=\"#e0f2fe\" font-size=\"14\" text-anchor=\"middle\">API fermée</text>\n    <text x=\"155\" y=\"156\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">accès distant</text>\n    <text x=\"155\" y=\"176\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">pas de poids</text>\n    <text x=\"155\" y=\"196\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">contrôles de l'éditeur</text>\n    <text x=\"155\" y=\"216\" fill=\"#38bdf8\" font-size=\"11\" text-anchor=\"middle\">dépendance au service</text>\n  </g>\n\n  <g id=\"poids-ouverts\">\n    <rect x=\"315\" y=\"95\" width=\"230\" height=\"150\" rx=\"12\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <text x=\"430\" y=\"130\" fill=\"#fef3c7\" font-size=\"14\" text-anchor=\"middle\">Poids ouverts</text>\n    <text x=\"430\" y=\"156\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">poids téléchargeables</text>\n    <text x=\"430\" y=\"176\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">code parfois partiel</text>\n    <text x=\"430\" y=\"196\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">données souvent absentes</text>\n    <text x=\"430\" y=\"216\" fill=\"#fbbf24\" font-size=\"11\" text-anchor=\"middle\">licence à vérifier</text>\n  </g>\n\n  <g id=\"ouvert\">\n    <rect x=\"590\" y=\"95\" width=\"230\" height=\"150\" rx=\"12\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"705\" y=\"130\" fill=\"#d1fae5\" font-size=\"14\" text-anchor=\"middle\">Réellement ouvert</text>\n    <text x=\"705\" y=\"156\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">poids, code, données</text>\n    <text x=\"705\" y=\"176\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">recettes, journaux</text>\n    <text x=\"705\" y=\"196\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">points de contrôle</text>\n    <text x=\"705\" y=\"216\" fill=\"#34d399\" font-size=\"11\" text-anchor=\"middle\">audit possible</text>\n  </g>\n\n  <g id=\"responsabilites\">\n    <rect x=\"40\" y=\"300\" width=\"780\" height=\"90\" rx=\"12\" fill=\"#111827\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"430\" y=\"332\" fill=\"#fce7f3\" font-size=\"13\" text-anchor=\"middle\">Ce qui ne change pas : licence, droit applicable, sécurité, transparence</text>\n    <text x=\"430\" y=\"356\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">L'ouverture déplace une partie du contrôle, pas les obligations</text>\n    <text x=\"430\" y=\"376\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">Un modèle local peut faciliter la souveraineté, pas la garantir</text>\n  </g>\n\n  <line x1=\"155\" y1=\"245\" x2=\"300\" y2=\"295\" stroke=\"#475569\" stroke-width=\"1.2\"/>\n  <line x1=\"430\" y1=\"245\" x2=\"430\" y2=\"295\" stroke=\"#475569\" stroke-width=\"1.2\"/>\n  <line x1=\"705\" y1=\"245\" x2=\"560\" y2=\"295\" stroke=\"#475569\" stroke-width=\"1.2\"/>\n  <text x=\"430\" y=\"425\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">Vérifier les artefacts, la licence et le rôle de chacun</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. API fermée",
+            "explanation": "L'éditeur garde les poids et une partie des contrôles. L'utilisateur dépend du service et de ses conditions.",
+            "highlight": [
+              "api"
+            ]
+          },
+          {
+            "title": "2. Poids ouverts",
+            "explanation": "L'utilisateur héberge et adapte le modèle, mais doit vérifier la licence, les artefacts manquants et les risques.",
+            "highlight": [
+              "poids-ouverts"
+            ]
+          },
+          {
+            "title": "3. Réellement ouvert",
+            "explanation": "L'audit et la reproduction deviennent possibles, sans supprimer les obligations légales ni les risques de sécurité.",
+            "highlight": [
+              "ouvert",
+              "responsabilites"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Quelle obligation de transparence s'applique à partir du 2 août 2026 ?",
+          "options": [
+            "L'article 50 du règlement sur l'IA",
+            "L'article 53, paragraphe 2",
+            "L'article 2, paragraphe 12",
+            "Le RGPD uniquement"
+          ],
+          "correctIndex": 0,
+          "explanation": "Les obligations de transparence de l'article 50 s'appliquent à partir du 2 août 2026. Les obligations pour les modèles à usage général ont commencé le 2 août 2025."
+        },
+        {
+          "question": "Les poids ouverts rendent-ils un modèle sûr ?",
+          "options": [
+            "Oui, car ils permettent l'inspection",
+            "Non, l'inspection ne supprime ni les biais ni les usages détournés",
+            "Oui, si la licence est permissive",
+            "Non, les poids ouverts sont toujours dangereux"
+          ],
+          "correctIndex": 1,
+          "explanation": "L'inspection est utile, mais elle ne garantit pas la sécurité. Les poids ouverts peuvent aussi faciliter des usages détournés ou la suppression de garde-fous."
+        },
+        {
+          "question": "Que permet l'hébergement local d'un modèle ouvert ?",
+          "options": [
+            "Une souveraineté automatique et complète",
+            "De réduire certaines dépendances, à condition de gérer calcul, maintenance et sécurité",
+            "De supprimer les obligations légales",
+            "De garantir l'absence de biais"
+          ],
+          "correctIndex": 1,
+          "explanation": "L'hébergement local peut réduire la dépendance à une API, mais il demande des ressources, des compétences et une analyse des risques. Il ne supprime pas les obligations."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Modèle à usage général",
+          "definition": "Modèle capable de remplir des tâches variées, soumis à des obligations spécifiques dans le règlement européen sur l'IA."
+        },
+        {
+          "term": "Risque systémique",
+          "definition": "Risque d'effets étendus lié à un modèle très capable, qui exclut certaines dispenses prévues pour les modèles libres."
+        },
+        {
+          "term": "Souveraineté",
+          "definition": "Capacité à héberger, contrôler et maintenir un modèle et ses données dans un périmètre choisi, sans dépendance exclusive à un fournisseur."
+        },
+        {
+          "term": "Transparence",
+          "definition": "Obligation d'informer les utilisateurs sur le fonctionnement et la nature d'un système d'IA, prévue notamment par l'article 50 du règlement."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Poids ouverts et obligations",
+          "prompt": "Pourquoi des poids ouverts ne signifient-ils pas absence d’obligations juridiques, et quelles limites l’exemption prévue pour certains modèles libres comporte-t-elle ?",
+          "solution": "Une licence permissive ne supprime ni le droit d’auteur, ni les droits de tiers, ni les obligations de transparence. L’exemption de l’AI Act pour certains modèles libres ne couvre pas les modèles à risque systémique et ne supprime pas les obligations de politique de droits d’auteur et de résumé des contenus d’entraînement."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Règlement (UE) 2024/1689, AI Act.",
+          "href": "https://eur-lex.europa.eu/eli/reg/2024/1689/oj"
+        },
+        {
+          "label": "Open Source Initiative, Open Source AI Definition, consultée le 21 octobre 2026.",
+          "href": "https://opensource.org/ai/open-source-ai-definition"
+        },
+        {
+          "label": "Meta, Llama 3 License, consultée le 21 octobre 2026.",
+          "href": "https://dev.meta.ai/llama/llama3/license"
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "label": "Open Source Initiative, Open Source AI Definition, consultée le 21 octobre 2026.",
+      "href": "https://opensource.org/ai/open-source-ai-definition"
+    },
+    {
+      "label": "Open Source Initiative, page IA, consultée le 21 octobre 2026.",
+      "href": "https://opensource.org/ai"
+    },
+    {
+      "label": "Open Source Initiative, Open Source Definition, version 1.9, consultée le 21 octobre 2026.",
+      "href": "https://opensource.org/osd"
+    },
+    {
+      "label": "Meta, Llama 3 License, consultée le 21 octobre 2026.",
+      "href": "https://dev.meta.ai/llama/llama3/license"
+    },
+    {
+      "label": "Jiang et al., Mistral 7B, 2023.",
+      "href": "https://arxiv.org/abs/2310.06825"
+    },
+    {
+      "label": "OLMo Team, 2 OLMo 2 Furious, 2025.",
+      "href": "https://arxiv.org/abs/2501.00656"
+    },
+    {
+      "label": "Règlement (UE) 2024/1689, AI Act.",
+      "href": "https://eur-lex.europa.eu/eli/reg/2024/1689/oj"
+    }
+  ],
+  "related": [
+    {
+      "to": "/cours-approfondis",
+      "title": "Cours approfondis",
+      "description": "Le catalogue des cours longs, avec leurs prérequis et leurs niveaux."
+    },
+    {
+      "to": "/cours/ia-environnement",
+      "title": "IA et environnement",
+      "description": "Consommation, matériel et limites physiques des modèles."
+    },
+    {
+      "to": "/glossaire",
+      "title": "Glossaire de l'IA",
+      "description": "Les termes du cours, définis sobrement et reliés entre eux."
+    }
+  ]
+}

@@ -1,0 +1,1091 @@
+{
+  "slug": "cout-des-tokens",
+  "title": "Le coût des tokens : comprendre, estimer et réduire la facture d'un modèle de langage",
+  "subtitle": "Tokens, prix d'entrée et de sortie, historique, tokens de réflexion, estimation de budget et leviers d'économie, avec des calculs refaisables",
+  "level": "Intermédiaire",
+  "tags": [
+    "Tokens",
+    "Tokenisation",
+    "Coût des API",
+    "Cache du prompt",
+    "Tokens de réflexion",
+    "Estimation de budget"
+  ],
+  "summary": "Ce cours explique comment se calcule la facture d'un usage de modèle de langage par API : ce qu'est un token et pourquoi son nombre dépend du tokenizer et de la langue, pourquoi l'entrée et la sortie ont deux prix, ce qui s'ajoute à la requête visible (historique, outils, passages d'un RAG, images, tokens de réflexion), comment estimer un budget avec une fourchette, et comment le réduire. Il s'adresse à des personnes qui utilisent déjà une API ou un outil comme le calculateur de coûts du site, et qui veulent comprendre les chiffres plutôt que les recopier. Aucune grille de prix n'y est donnée comme une vérité : les prix changent, et le site tient un relevé daté. Les exemples de code tournent en local ; les prix qu'ils utilisent sont des valeurs d'illustration.",
+  "introduction": "### Pourquoi ce sujet\n\nOn utilise de plus en plus les modèles de langage par API, et ces API se facturent **au token**. La facture dépend donc de choses que l'on ne voit pas à l'écran : le nombre de tokens que le modèle compte réellement, la part de la requête qui est relue à chaque tour, la réflexion qu'un modèle produit sans toujours l'afficher. Les mauvaises surprises viennent presque toujours de ces parties cachées, pas du prix affiché sur la page tarifaire.\n\n### D'où viennent les idées\n\nCe sujet ne repose pas sur un article fondateur unique. Il rassemble des éléments de provenances différentes, et chacun est cité avec sa source dans le cours :\n\n- la **tokenisation en sous-mots** (Sennrich et al., 2015, présenté à ACL 2016) et ses inégalités entre langues (Petrov et al., 2023, NeurIPS 2023 ; Ahia et al., 2023) ;\n- la **caractérisation des deux phases de l'inférence**, lecture du prompt et génération (Pope et al., 2022 ; Patel et al., 2023) ;\n- les **mécanismes de tarification** (cache du prompt, traitement par lots, tokens de réflexion), dont la source de référence est la **documentation officielle des éditeurs**. Elle évolue : celle d'Anthropic et d'OpenAI citée ici a été consultée le 18/10/2026.\n\n### Ce qu'il faut savoir avant\n\n- ce qu'est un modèle de langage, un prompt et une réponse (voir le cours [Paramètres des LLM](/cours/parametres-llm)) ;\n- l'idée d'une API : on envoie une requête, on reçoit une réponse ;\n- pour les exemples, savoir lire un court script Python.\n\n### Ce que vous saurez expliquer à la fin\n\n- ce qu'est un token, et pourquoi le même texte n'en compte pas autant selon le tokenizer et la langue ;\n- pourquoi l'entrée et la sortie sont facturées séparément, et pourquoi la sortie coûte en général plus cher par token ;\n- ce qui s'ajoute à ce que vous voyez : historique de conversation, outils, passages d'un RAG, images, réflexion ;\n- comment estimer un budget avec une fourchette plutôt qu'un seul chiffre, avec un calcul que vous pouvez refaire ;\n- comment réduire une facture (cache du prompt, traitement par lots, choix du modèle, longueur des réponses), et comment suivre l'usage réel.\n\n### Ses limites\n\nLes **prix et les mécanismes changent vite**. Ce cours ne reproduit pas de grille de prix : tous les montants des exemples sont des **valeurs d'illustration**, présentées comme telles, et les seuls ordres de grandeur issus de données réelles viennent du relevé daté du site (dernier contrôle complet le 04/10/2026), qui est lui-même un ordre de grandeur. Vérifiez toujours la page du fournisseur et utilisez le [calculateur de coûts](/calculateur-couts-ia) pour refaire les calculs.\n\nL'explication matérielle des deux prix (module 2) est une explication **plausible** : les éditeurs ne publient pas leur structure de coûts et fixent leurs tarifs librement. Les écarts de tokenisation mesurés au module 1 portent sur **un seul paragraphe** : ils illustrent un mécanisme, ils ne donnent pas un taux pour le français. Enfin, ce cours ne dit pas quel modèle ou quel fournisseur choisir, et ne traite ni le coût d'un entraînement ou d'un fine-tuning, ni l'empreinte énergétique (voir le cours [IA et environnement](/cours/ia-environnement)).",
+  "prerequisites": [
+    "Savoir ce qu'est un modèle de langage, un prompt et une réponse",
+    "Avoir une idée de ce qu'est une API",
+    "Savoir lire un court script Python (pour les exemples de code)"
+  ],
+  "checkedOn": "2026-10-18",
+  "cover": {
+    "src": "pics/cours/cout-des-tokens.webp",
+    "alt": "Flux de petits cubes lumineux traversant un portique de mesure en verre, avec un canal d'entrée large et une sortie plus étroite."
+  },
+  "modules": [
+    {
+      "id": "token-et-tokenizer",
+      "title": "Ce qu'est un token, et pourquoi le même texte n'en compte pas autant partout",
+      "keyTakeaways": [
+        "Un modèle de langage ne lit ni lettres ni mots : il lit une suite de nombres entiers, les tokens, produits par un tokenizer à partir d'un vocabulaire fixé avant l'entraînement.",
+        "Un token n'est pas une unité de mesure universelle : le même texte donne des nombres de tokens différents selon le tokenizer, donc selon le modèle.",
+        "Sur un paragraphe mesuré ici, le français demande environ 53 % de tokens de plus que l'anglais avec le tokenizer de GPT-2, et environ 5 % de plus avec un tokenizer multilingue. C'est une mesure sur un seul texte, pas une loi.",
+        "Des études (Ahia et al., 2023 ; Petrov et al., 2023) montrent que les écarts entre langues existent et se répercutent sur le prix, la durée de traitement et la place disponible dans le contexte.",
+        "Pour estimer un coût, on compte avec le tokenizer du modèle visé ou avec l'outil de comptage du fournisseur, jamais avec un coefficient « mots vers tokens » trouvé en ligne."
+      ],
+      "theory": "### D'un texte à une suite de nombres\n\nUn réseau de neurones calcule sur des nombres. Avant d'arriver au modèle, le texte est donc découpé par un **tokenizer** en morceaux appelés **tokens**. Chaque morceau est remplacé par son numéro dans un **vocabulaire**, une liste fixe de quelques dizaines à quelques centaines de milliers de morceaux possibles, établie avant l'entraînement du modèle. Le modèle reçoit une suite de numéros et produit lui aussi des numéros, que le tokenizer retransforme en texte. Le mécanisme de génération est détaillé dans le cours [Génération mot par mot](/cours/generation-mot-par-mot).\n\nUn token n'est donc **ni un mot ni une lettre** : c'est un morceau de texte, parfois un mot entier (« intelligence »), parfois un fragment (« iel »), parfois une ponctuation, parfois un simple octet.\n\n### Comment un vocabulaire est construit\n\nLa méthode la plus répandue est le **BPE** (*byte pair encoding*, codage par paires d'octets). On part de petits symboles, puis on fusionne à répétition la paire de symboles la plus fréquente dans un grand corpus de textes, jusqu'à atteindre la taille de vocabulaire voulue. Sennrich et al. (2015) l'ont adopté pour la traduction automatique, afin de représenter les mots rares comme des suites de morceaux plus courants. **SentencePiece** (Kudo et Richardson, 2018) est une bibliothèque qui entraîne un tokenizer directement sur du texte brut, sans découpage préalable en mots, ce qui est utile pour les langues qui n'ont pas d'espaces entre les mots.\n\nLa conséquence est simple : **ce qui est fréquent dans le corpus du tokenizer devient un seul token, ce qui est rare est découpé**. Un vocabulaire reflète les textes sur lesquels il a été construit.\n\n### Un exemple mesuré\n\nAvec le tokenizer de GPT-2, la phrase anglaise « Artificial intelligence is transforming the digital economy. » donne 9 tokens. Sa version française, « L'intelligence artificielle transforme l'économie numérique. », en donne 17 : `L` `'` `intelligence` `▁artific` `iel` `le` `▁transform` `e` `▁l` `'` `Ã©` `conom` `ie` `▁num` `Ã©` `rique` `.` (le signe ▁ marque une espace devant le morceau, et « Ã© » est la lettre « é » écrite avec deux octets, car ce tokenizer travaille sur les octets).\n\nSur un paragraphe entier de 45 mots en anglais et 44 mots en français, rédigé pour l'occasion, on obtient :\n\n| Tokenizer | Entrées du vocabulaire | Tokens (anglais) | Tokens (français) | Écart |\n| :-- | --: | --: | --: | --: |\n| GPT-2 (2019) | 50 257 | 51 | 78 | +53 % |\n| Multilingue (XLM-R) | 250 002 | 56 | 59 | +5 % |\n\nDeux précautions. D'abord, il s'agit d'**un seul paragraphe** : c'est un ordre de grandeur pour comprendre le mécanisme, pas une statistique sur le français. Ensuite, le second tokenizer est celui d'un modèle d'embeddings multilingue, pas celui d'un modèle de conversation commercial : on ne peut pas en déduire ce que compte un fournisseur donné.\n\n### Ce que disent les études\n\nPetrov et al. (2023) comparent des textes traduits dans de nombreuses langues et rapportent que le même texte peut donner des longueurs de tokenisation très différentes (jusqu'à 15 fois dans certains cas, d'après leur résumé), y compris avec des tokenizers pensés pour le multilingue. Ils en tirent des coûts inégaux, des temps de traitement inégaux et une place inégale dans la fenêtre de contexte. Ahia et al. (2023) étudient l'API d'OpenAI sur 22 langues et concluent que les locuteurs de plusieurs d'entre elles paient davantage tout en obtenant de moins bons résultats. Pour le français, **ne retenez aucun pourcentage général** : il dépend du tokenizer, du type de texte, et il change quand un éditeur change de tokenizer.\n\nC'est d'ailleurs un point à retenir pour toute estimation : la documentation d'Anthropic (consultée le 18/10/2026) indique que les modèles à partir de Claude 4.7 utilisent un nouveau tokenizer, qui produit environ 30 % de tokens en plus pour un même texte que les modèles précédents, l'augmentation exacte dépendant du contenu. Elle recommande de recompter ses prompts avec le modèle visé.\n\n### Conséquences pratiques\n\n- **Ne convertissez pas des mots en tokens avec un coefficient trouvé en ligne.** Comptez avec le tokenizer du modèle (quand il est publié) ou avec l'outil de comptage du fournisseur. Chez Anthropic, le point d'accès de comptage est gratuit et donne une estimation (de petites différences avec la facturation sont possibles).\n- **Le code, le JSON et les tableaux** consomment des tokens pour leurs symboles, leurs guillemets et leurs indentations : mesurez-les au lieu de supposer.\n- **Le même compte borne la fenêtre de contexte** : plus un texte compte de tokens, moins il en reste pour le reste (voir le cours [Paramètres des LLM](/cours/parametres-llm)).",
+      "analogy": {
+        "title": "Un jeu de briques de tailles variées",
+        "text": "Imaginez que l'on vous demande de décrire des maisons avec un jeu de briques, chaque brique étant facturée au même prix quelle que soit sa taille. Une forme courante correspond à une grande brique du jeu : elle ne coûte qu'une brique. Une forme inhabituelle doit être assemblée avec plusieurs petites briques et coûte donc plus cher. Le jeu a été composé d'après les maisons les plus fréquentes du corpus : celles qu'il connaît mal reviennent plus cher.\n\n**Limite de l'analogie** : les briques d'un tokenizer ne sont pas choisies à la main, elles sont apprises par fusions successives sur un corpus, et leur découpage ne suit pas toujours les frontières des mots."
+      },
+      "diagram": {
+        "title": "Le même sens, plus ou moins de tokens",
+        "description": "Mesures réelles faites avec le tokenizer de GPT-2 sur une phrase, puis avec un tokenizer multilingue sur un paragraphe. Un seul exemple : il illustre le mécanisme, il ne donne pas un taux général.",
+        "svg": "<svg viewBox=\"0 0 880 390\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Découpage d'une phrase en anglais et en français par le tokenizer de GPT-2\">\n  <rect width=\"880\" height=\"390\" rx=\"16\" fill=\"#0f172a\" />\n  <text x=\"440\" y=\"36\" fill=\"#f8fafc\" font-family=\"sans-serif\" font-size=\"17\" font-weight=\"700\" text-anchor=\"middle\">Même phrase, deux langues, tokenizer de GPT-2</text>\n  <text x=\"440\" y=\"58\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Chaque case est un token ; ▁ marque une espace placée devant le morceau</text>\n  <g id=\"ligne-en\">\n  <text x=\"40\" y=\"98\" fill=\"#c7d2fe\" font-family=\"sans-serif\" font-size=\"13\" font-weight=\"700\">Anglais : « Artificial intelligence is transforming the digital economy. »</text>\n  <rect x=\"40\" y=\"112\" width=\"33.6\" height=\"30\" rx=\"6\" fill=\"#1e1b4b\" stroke=\"#6366f1\" stroke-width=\"1.2\" />\n  <text x=\"56.8\" y=\"132\" fill=\"#e0e7ff\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">Art</text>\n  <rect x=\"77.6\" y=\"112\" width=\"62.4\" height=\"30\" rx=\"6\" fill=\"#1e1b4b\" stroke=\"#6366f1\" stroke-width=\"1.2\" />\n  <text x=\"108.8\" y=\"132\" fill=\"#e0e7ff\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">ificial</text>\n  <rect x=\"144.0\" y=\"112\" width=\"105.6\" height=\"30\" rx=\"6\" fill=\"#1e1b4b\" stroke=\"#6366f1\" stroke-width=\"1.2\" />\n  <text x=\"196.8\" y=\"132\" fill=\"#e0e7ff\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">▁intelligence</text>\n  <rect x=\"253.6\" y=\"112\" width=\"33.6\" height=\"30\" rx=\"6\" fill=\"#1e1b4b\" stroke=\"#6366f1\" stroke-width=\"1.2\" />\n  <text x=\"270.4\" y=\"132\" fill=\"#e0e7ff\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">▁is</text>\n  <rect x=\"291.2\" y=\"112\" width=\"105.6\" height=\"30\" rx=\"6\" fill=\"#1e1b4b\" stroke=\"#6366f1\" stroke-width=\"1.2\" />\n  <text x=\"344.0\" y=\"132\" fill=\"#e0e7ff\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">▁transforming</text>\n  <rect x=\"400.79999999999995\" y=\"112\" width=\"40.8\" height=\"30\" rx=\"6\" fill=\"#1e1b4b\" stroke=\"#6366f1\" stroke-width=\"1.2\" />\n  <text x=\"421.2\" y=\"132\" fill=\"#e0e7ff\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">▁the</text>\n  <rect x=\"445.59999999999997\" y=\"112\" width=\"69.6\" height=\"30\" rx=\"6\" fill=\"#1e1b4b\" stroke=\"#6366f1\" stroke-width=\"1.2\" />\n  <text x=\"480.4\" y=\"132\" fill=\"#e0e7ff\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">▁digital</text>\n  <rect x=\"519.1999999999999\" y=\"112\" width=\"69.6\" height=\"30\" rx=\"6\" fill=\"#1e1b4b\" stroke=\"#6366f1\" stroke-width=\"1.2\" />\n  <text x=\"554.0\" y=\"132\" fill=\"#e0e7ff\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">▁economy</text>\n  <rect x=\"592.8\" y=\"112\" width=\"19.2\" height=\"30\" rx=\"6\" fill=\"#1e1b4b\" stroke=\"#6366f1\" stroke-width=\"1.2\" />\n  <text x=\"602.4\" y=\"132\" fill=\"#e0e7ff\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">.</text>\n  <text x=\"40\" y=\"166\" fill=\"#a5b4fc\" font-family=\"sans-serif\" font-size=\"14\" font-weight=\"700\">9 tokens</text>\n  </g>\n  <g id=\"ligne-fr\">\n  <text x=\"40\" y=\"210\" fill=\"#fecdd3\" font-family=\"sans-serif\" font-size=\"13\" font-weight=\"700\">Français : « L'intelligence artificielle transforme l'économie numérique. »</text>\n  <rect x=\"40\" y=\"224\" width=\"19.2\" height=\"30\" rx=\"6\" fill=\"#4c0519\" stroke=\"#fb7185\" stroke-width=\"1.2\" />\n  <text x=\"49.6\" y=\"244\" fill=\"#ffe4e6\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">L</text>\n  <rect x=\"63.2\" y=\"224\" width=\"19.2\" height=\"30\" rx=\"6\" fill=\"#4c0519\" stroke=\"#fb7185\" stroke-width=\"1.2\" />\n  <text x=\"72.8\" y=\"244\" fill=\"#ffe4e6\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">'</text>\n  <rect x=\"86.4\" y=\"224\" width=\"98.4\" height=\"30\" rx=\"6\" fill=\"#4c0519\" stroke=\"#fb7185\" stroke-width=\"1.2\" />\n  <text x=\"135.6\" y=\"244\" fill=\"#ffe4e6\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">intelligence</text>\n  <rect x=\"188.8\" y=\"224\" width=\"69.6\" height=\"30\" rx=\"6\" fill=\"#4c0519\" stroke=\"#fb7185\" stroke-width=\"1.2\" />\n  <text x=\"223.6\" y=\"244\" fill=\"#ffe4e6\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">▁artific</text>\n  <rect x=\"262.4\" y=\"224\" width=\"33.6\" height=\"30\" rx=\"6\" fill=\"#4c0519\" stroke=\"#fb7185\" stroke-width=\"1.2\" />\n  <text x=\"279.2\" y=\"244\" fill=\"#ffe4e6\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">iel</text>\n  <rect x=\"300.0\" y=\"224\" width=\"26.4\" height=\"30\" rx=\"6\" fill=\"#4c0519\" stroke=\"#fb7185\" stroke-width=\"1.2\" />\n  <text x=\"313.2\" y=\"244\" fill=\"#ffe4e6\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">le</text>\n  <rect x=\"330.4\" y=\"224\" width=\"84.0\" height=\"30\" rx=\"6\" fill=\"#4c0519\" stroke=\"#fb7185\" stroke-width=\"1.2\" />\n  <text x=\"372.4\" y=\"244\" fill=\"#ffe4e6\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">▁transform</text>\n  <rect x=\"418.4\" y=\"224\" width=\"19.2\" height=\"30\" rx=\"6\" fill=\"#4c0519\" stroke=\"#fb7185\" stroke-width=\"1.2\" />\n  <text x=\"428.0\" y=\"244\" fill=\"#ffe4e6\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">e</text>\n  <rect x=\"441.59999999999997\" y=\"224\" width=\"26.4\" height=\"30\" rx=\"6\" fill=\"#4c0519\" stroke=\"#fb7185\" stroke-width=\"1.2\" />\n  <text x=\"454.8\" y=\"244\" fill=\"#ffe4e6\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">▁l</text>\n  <rect x=\"471.99999999999994\" y=\"224\" width=\"19.2\" height=\"30\" rx=\"6\" fill=\"#4c0519\" stroke=\"#fb7185\" stroke-width=\"1.2\" />\n  <text x=\"481.6\" y=\"244\" fill=\"#ffe4e6\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">'</text>\n  <rect x=\"495.19999999999993\" y=\"224\" width=\"26.4\" height=\"30\" rx=\"6\" fill=\"#4c0519\" stroke=\"#fb7185\" stroke-width=\"1.2\" />\n  <text x=\"508.4\" y=\"244\" fill=\"#ffe4e6\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">Ã©</text>\n  <rect x=\"525.5999999999999\" y=\"224\" width=\"48.0\" height=\"30\" rx=\"6\" fill=\"#4c0519\" stroke=\"#fb7185\" stroke-width=\"1.2\" />\n  <text x=\"549.6\" y=\"244\" fill=\"#ffe4e6\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">conom</text>\n  <rect x=\"577.5999999999999\" y=\"224\" width=\"26.4\" height=\"30\" rx=\"6\" fill=\"#4c0519\" stroke=\"#fb7185\" stroke-width=\"1.2\" />\n  <text x=\"590.8\" y=\"244\" fill=\"#ffe4e6\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">ie</text>\n  <rect x=\"607.9999999999999\" y=\"224\" width=\"40.8\" height=\"30\" rx=\"6\" fill=\"#4c0519\" stroke=\"#fb7185\" stroke-width=\"1.2\" />\n  <text x=\"628.4\" y=\"244\" fill=\"#ffe4e6\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">▁num</text>\n  <rect x=\"652.7999999999998\" y=\"224\" width=\"26.4\" height=\"30\" rx=\"6\" fill=\"#4c0519\" stroke=\"#fb7185\" stroke-width=\"1.2\" />\n  <text x=\"666.0\" y=\"244\" fill=\"#ffe4e6\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">Ã©</text>\n  <rect x=\"683.1999999999998\" y=\"224\" width=\"48.0\" height=\"30\" rx=\"6\" fill=\"#4c0519\" stroke=\"#fb7185\" stroke-width=\"1.2\" />\n  <text x=\"707.2\" y=\"244\" fill=\"#ffe4e6\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">rique</text>\n  <rect x=\"735.1999999999998\" y=\"224\" width=\"19.2\" height=\"30\" rx=\"6\" fill=\"#4c0519\" stroke=\"#fb7185\" stroke-width=\"1.2\" />\n  <text x=\"744.8\" y=\"244\" fill=\"#ffe4e6\" font-family=\"monospace\" font-size=\"12\" text-anchor=\"middle\">.</text>\n  <text x=\"40\" y=\"278\" fill=\"#fda4af\" font-family=\"sans-serif\" font-size=\"14\" font-weight=\"700\">17 tokens</text>\n  <text x=\"150\" y=\"278\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\">« Ã© » est la lettre é écrite avec deux octets ; « artific | iel | le » est un mot découpé en trois</text>\n  </g>\n  <g id=\"bilan\">\n  <rect x=\"40\" y=\"304\" width=\"800\" height=\"70\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#38bdf8\" stroke-width=\"1.5\" />\n  <text x=\"60\" y=\"330\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"13\">Autre tokenizer (multilingue, 250 000 entrées), paragraphe de 45 et 44 mots :</text>\n  <text x=\"60\" y=\"354\" fill=\"#7dd3fc\" font-family=\"sans-serif\" font-size=\"13\" font-weight=\"700\">56 tokens en anglais, 59 en français. Le nombre de tokens dépend du tokenizer, pas seulement de la langue.</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "Anglais : 9 tokens",
+            "explanation": "La phrase anglaise est découpée en 9 tokens : la plupart des mots courants forment un seul token, précédé de son espace.",
+            "highlight": [
+              "ligne-en"
+            ]
+          },
+          {
+            "title": "Français : 17 tokens",
+            "explanation": "La phrase française de même sens en donne 17 : les apostrophes sont à part, « artificielle » est coupé en trois et chaque « é » occupe un token de deux octets. Avec ce tokenizer, le texte coûte presque le double.",
+            "highlight": [
+              "ligne-fr"
+            ]
+          },
+          {
+            "title": "Un autre tokenizer, un autre écart",
+            "explanation": "Sur un paragraphe entier, un tokenizer multilingue à plus grand vocabulaire donne 56 tokens en anglais et 59 en français. L'écart dépend donc du tokenizer, qu'il faut mesurer pour le modèle réellement utilisé.",
+            "highlight": [
+              "bilan"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "code": "# Compter les tokens d'un même contenu en anglais et en français, avec deux tokenizers.\n# Les tokenizers sont téléchargés une fois (Hugging Face), puis tout tourne en local.\nfrom transformers import AutoTokenizer\n\nEN = (\"Artificial intelligence is changing the way companies handle customer \"\n      \"requests. A model reads the question, looks at the history of the \"\n      \"conversation and writes an answer. Every word that goes in and every \"\n      \"word that comes out is counted, because the price depends on it.\")\nFR = (\"L'intelligence artificielle change la manière dont les entreprises \"\n      \"traitent les demandes de leurs clients. Un modèle lit la question, \"\n      \"consulte l'historique de la conversation et rédige une réponse. \"\n      \"Chaque mot qui entre et chaque mot qui sort est compté, car le prix \"\n      \"en dépend.\")\n\nTOKENIZERS = {\n    \"gpt2 (2019, anglais surtout)\": \"gpt2\",\n    \"XLM-R (multilingue)\": \"sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2\",\n}\n\nfor nom, repo in TOKENIZERS.items():\n    tok = AutoTokenizer.from_pretrained(repo)\n    n_en = len(tok.encode(EN, add_special_tokens=False))\n    n_fr = len(tok.encode(FR, add_special_tokens=False))\n    print(f\"{nom}  (vocabulaire : {len(tok)} entrées)\")\n    print(f\"  anglais  : {n_en:3d} tokens, {len(EN) / n_en:.1f} caractères par token\")\n    print(f\"  français : {n_fr:3d} tokens, {len(FR) / n_fr:.1f} caractères par token\")\n    print(f\"  écart    : {100 * (n_fr / n_en - 1):+.0f} % de tokens pour le français\")\n\n# Les morceaux produits par GPT-2 sur une phrase française (« Ġ » marque une espace\n# devant le mot ; « Ã© » est la lettre « é » écrite avec deux octets).\ngpt2 = AutoTokenizer.from_pretrained(\"gpt2\")\nphrase = \"L'intelligence artificielle transforme l'économie numérique.\"\nprint()\nprint(gpt2.convert_ids_to_tokens(gpt2.encode(phrase)))",
+        "explanation": "Compte les tokens d'un même contenu en anglais et en français avec deux tokenizers (GPT-2 et un tokenizer multilingue). Les tokenizers se téléchargent une fois depuis Hugging Face, puis le calcul est local. La sortie ci-dessous a été obtenue en exécutant ce code.",
+        "output": "gpt2 (2019, anglais surtout)  (vocabulaire : 50257 entrées)\n  anglais  :  51 tokens, 5.3 caractères par token\n  français :  78 tokens, 3.5 caractères par token\n  écart    : +53 % de tokens pour le français\nXLM-R (multilingue)  (vocabulaire : 250002 entrées)\n  anglais  :  56 tokens, 4.8 caractères par token\n  français :  59 tokens, 4.7 caractères par token\n  écart    : +5 % de tokens pour le français\n\n['L', \"'\", 'intelligence', 'Ġartific', 'iel', 'le', 'Ġtransform', 'e', 'Ġl', \"'\", 'Ã©', 'conom', 'ie', 'Ġnum', 'Ã©', 'rique', '.']",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Avec le tokenizer de GPT-2, une phrase française compte presque deux fois plus de tokens que sa traduction anglaise. Quelle explication est la plus juste ?",
+          "options": [
+            "Le français contient beaucoup plus de mots que l'anglais pour dire la même chose.",
+            "Le vocabulaire a été construit sur des textes où beaucoup de morceaux français sont rares, donc souvent découpés en plusieurs tokens.",
+            "Les fournisseurs facturent les lettres accentuées en supplément.",
+            "Un token correspond toujours à un nombre fixe de caractères, et les mots français sont plus longs."
+          ],
+          "correctIndex": 1,
+          "explanation": "Un vocabulaire reflète le corpus qui a servi à le construire : ce qui y est rare est découpé. L'argument du nombre de mots ne tient pas ici, puisque les deux textes mesurés comptent 45 et 44 mots. Les accents ne sont pas un supplément de prix : ils pèsent parce que, dans ce tokenizer, un « é » (écrit avec deux octets) forme un token à part et coupe les mots en plusieurs morceaux. Enfin, un token n'a pas de longueur fixe : le même tokenizer donne 5,3 caractères par token en anglais et 3,5 en français sur cet exemple."
+        },
+        {
+          "question": "Vous avez compté 10 000 tokens pour un prompt avec un ancien modèle, puis vous passez à un modèle plus récent d'un autre éditeur. Que faites-vous pour estimer le coût ?",
+          "options": [
+            "Je garde 10 000 tokens : un token est une unité universelle.",
+            "Je recompte le prompt avec le tokenizer ou l'outil de comptage du nouveau modèle.",
+            "Je convertis en mots avec un coefficient moyen, puis je reconvertis en tokens.",
+            "Je divise par deux, car les modèles récents compressent mieux le texte."
+          ],
+          "correctIndex": 1,
+          "explanation": "Le nombre de tokens dépend du tokenizer, donc du modèle. La documentation d'Anthropic donne même un exemple de changement : environ 30 % de tokens en plus pour un même texte à partir des modèles Claude 4.7, selon le contenu. Passer par les mots ajoute une approximation de plus. Et rien ne garantit qu'un modèle récent compte moins : le sens du changement dépend du tokenizer choisi."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Token",
+          "definition": "Morceau de texte (mot, fragment de mot, ponctuation ou octet) qui sert d'unité de calcul et de facturation à un modèle de langage."
+        },
+        {
+          "term": "Tokenizer",
+          "definition": "Programme qui découpe un texte en tokens, et qui retransforme des tokens en texte. Il est propre à un modèle ou à une famille de modèles."
+        },
+        {
+          "term": "Vocabulaire",
+          "definition": "Liste fixe des tokens que connaît un tokenizer, chacun avec son numéro."
+        },
+        {
+          "term": "BPE (byte pair encoding)",
+          "definition": "Méthode de construction d'un vocabulaire par fusions répétées de la paire de symboles la plus fréquente dans un corpus."
+        },
+        {
+          "term": "SentencePiece",
+          "definition": "Bibliothèque qui entraîne un tokenizer directement sur du texte brut, sans découpage préalable en mots."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Mots ou tokens",
+          "prompt": "Un collègue estime un budget en multipliant le nombre de mots par 1,3. Pourquoi ce coefficient est-il trompeur ? Appuyez-vous sur les mesures du module et indiquez la méthode à suivre.",
+          "solution": "Un token est un morceau de texte défini par un vocabulaire, pas un mot. Sur le paragraphe mesuré, GPT-2 compte 51 tokens en anglais et 78 en français (+53 %), un tokenizer multilingue 56 et 59 (+5 %) : l’écart dépend du tokenizer et du texte. Anthropic indique en outre qu’un nouveau tokenizer produit environ 30 % de tokens en plus pour un même texte. Il faut compter avec le tokenizer du modèle visé ou l’outil de comptage du fournisseur, jamais avec un coefficient général."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Sennrich, Haddow et Birch, 2015. Neural Machine Translation of Rare Words with Subword Units (arXiv 1508.07909, ACL 2016)",
+          "href": "https://arxiv.org/abs/1508.07909"
+        },
+        {
+          "label": "Kudo et Richardson, 2018. SentencePiece: A simple and language independent subword tokenizer and detokenizer for Neural Text Processing (arXiv 1808.06226, EMNLP 2018)",
+          "href": "https://arxiv.org/abs/1808.06226"
+        },
+        {
+          "label": "Petrov, La Malfa, Torr et Bibi, 2023. Language Model Tokenizers Introduce Unfairness Between Languages (arXiv 2305.15425, NeurIPS 2023)",
+          "href": "https://arxiv.org/abs/2305.15425"
+        },
+        {
+          "label": "Ahia et al., 2023. Do All Languages Cost the Same? Tokenization in the Era of Commercial Language Models (arXiv 2305.13707)",
+          "href": "https://arxiv.org/abs/2305.13707"
+        }
+      ]
+    },
+    {
+      "id": "entree-sortie-prix",
+      "title": "Payer à l'entrée et à la sortie : pourquoi les deux compteurs n'ont pas le même prix",
+      "keyTakeaways": [
+        "Une requête par API est facturée sur deux compteurs : les tokens d'entrée (tout ce que vous envoyez) et les tokens de sortie (tout ce que le modèle écrit), chacun avec son prix par million de tokens.",
+        "Le coût d'une requête vaut tokens d'entrée × prix d'entrée + tokens de sortie × prix de sortie, les prix étant ramenés à un million de tokens.",
+        "Dans le relevé du site du 04/10/2026, le prix de sortie vaut le plus souvent 3 à 5 fois le prix d'entrée, avec des extrêmes de 1 à 10 : le rapport varie selon le modèle.",
+        "Une explication plausible tient au matériel : l'entrée se traite en parallèle (prefill), la sortie se produit token par token (décodage) avec une lecture de la mémoire à chaque pas (Patel et al., 2023). C'est un facteur de coût, pas une formule de prix.",
+        "Comme la sortie coûte plus cher par token, raccourcir une réponse économise souvent plus que raccourcir un prompt de la même quantité, selon le rapport de prix du modèle."
+      ],
+      "theory": "### Deux compteurs, deux prix\n\nLes API de modèles de langage se facturent à l'usage. Chaque réponse indique combien de tokens le modèle a **lus** (les **tokens d'entrée**, *input*) et combien il a **écrits** (les **tokens de sortie**, *output*). Les prix s'expriment en dollars **par million de tokens**, avec un prix pour chaque compteur. Le coût d'une requête est donc :\n\n$$\\text{coût} = T_{\\text{ent}} \\times \\frac{P_{\\text{ent}}}{10^6} + T_{\\text{sor}} \\times \\frac{P_{\\text{sor}}}{10^6}$$\n\noù $T_{\\text{ent}}$ et $T_{\\text{sor}}$ sont les nombres de tokens, et $P_{\\text{ent}}$ et $P_{\\text{sor}}$ les prix par million de tokens. C'est exactement l'arithmétique du [calculateur de coûts](/calculateur-couts-ia) du site, qui y ajoute le nombre d'utilisateurs, de requêtes et de jours. Ce cours ne reproduit aucune grille de prix : elles changent trop vite. Le site tient un relevé daté (dernier contrôle complet le 04/10/2026), à prendre comme un ordre de grandeur, et **vous devez toujours vérifier la page du fournisseur** avant de fixer un budget.\n\n### Quel rapport entre les deux prix ?\n\nPour la plupart des modèles de texte du relevé du site au 04/10/2026, le prix de la sortie vaut **3 à 5 fois** celui de l'entrée. Les extrêmes vont d'un modèle facturé au même prix dans les deux sens à un modèle dont la sortie coûte 10 fois l'entrée. Retenez donc la forme (« la sortie coûte plus cher par token ») et pas un chiffre : le rapport change d'un modèle à l'autre, et d'un relevé à l'autre.\n\n### Pourquoi la sortie coûte plus cher : une explication matérielle\n\nUn modèle de langage est **autorégressif** : il écrit un token à la fois, et chaque token dépend de tous les précédents. Deux phases se distinguent donc.\n\n- **Le prefill (traitement du prompt).** Tous les tokens d'entrée sont connus dès le départ : le modèle peut les traiter ensemble, en parallèle, ce qui occupe bien les unités de calcul de la puce.\n- **Le décodage (génération de la réponse).** Il faut une passe par token produit, et on ne peut pas calculer le token suivant avant d'avoir le précédent. À chaque pas, la puce doit relire en mémoire les poids du modèle et le **cache clé-valeur** (*KV cache*, les résultats d'attention déjà calculés pour les tokens précédents), pour peu de calcul à effectuer. La vitesse est alors surtout limitée par la mémoire, pas par le calcul.\n\nPatel et al. (2023, article *Splitwise*) décrivent ces deux phases comme ayant des profils très différents : une phase de calcul du prompt qui demande beaucoup de calcul, et une phase de génération qui demande beaucoup de mémoire et qui sous-utilise le calcul même avec les meilleures techniques de regroupement des requêtes. Pope et al. (2022) analysent en détail ce qui limite l'inférence des grands modèles.\n\nCette explication rend **plausible** un prix de sortie plus élevé, mais elle ne le **fixe** pas. Les éditeurs ne publient pas leur structure de coûts, regroupent les requêtes de nombreux clients (ce qui répartit le coût de la lecture des poids), et choisissent leurs tarifs pour des raisons commerciales aussi. N'en déduisez pas un prix : retenez seulement pourquoi l'ordre est vraisemblable. Elle explique aussi un fait que vous constaterez vous-même : une réponse longue met du temps à arriver, parce que ses tokens sont produits l'un après l'autre.\n\n### Ce que cela change pour un budget\n\nParce que chaque token de sortie coûte davantage, **raccourcir une réponse économise souvent plus que raccourcir un prompt de la même quantité**, mais cela dépend du rapport de prix. Le code ci-dessous le mesure sur trois rapports d'illustration. Deux garde-fous : demander un format concis dans la consigne, et fixer un plafond de tokens de sortie (`max_tokens` chez Anthropic, `max_output_tokens` chez OpenAI), en sachant qu'une réponse qui atteint le plafond est **coupée**.",
+      "analogy": {
+        "title": "Lire une lettre, écrire une lettre",
+        "text": "Votre œil parcourt une lettre reçue en quelques secondes, en saisissant plusieurs mots à la fois. Pour écrire la réponse, il faut tracer les mots un par un, chacun dépendant de ce qui précède. À longueur égale, lire va beaucoup plus vite qu'écrire, et un service qui facturerait le temps passé facturerait davantage l'écriture.\n\n**Limite de l'analogie** : une puce graphique ne lit pas comme un œil, et le prix d'un token n'est pas calculé à la seconde. L'analogie ne rend compte que de l'asymétrie entre traitement en parallèle et traitement pas à pas."
+      },
+      "example": {
+        "title": "Une requête chiffrée (valeurs d'illustration)",
+        "text": "Un prompt de 1 200 tokens et une réponse de 400 tokens, avec un prix d'entrée de 2 \\$ et un prix de sortie de 10 \\$ par million de tokens (valeurs d'illustration, pas des tarifs) : l'entrée coûte 0,0024 \\$ et la sortie 0,0040 \\$, soit 0,0064 \\$ au total. La sortie ne représente que **25 %** des tokens (400 sur 1 600), mais **63 %** du coût. Si l'on refait le calcul avec un autre rapport de prix, les proportions changent : c'est le rôle du code ci-dessous."
+      },
+      "diagram": {
+        "title": "Lecture en parallèle, écriture pas à pas",
+        "description": "Schéma qualitatif et sans échelle : l'entrée est lue d'un bloc, la sortie est produite token par token. Il illustre une explication plausible des deux prix, pas une mesure.",
+        "svg": "<svg viewBox=\"0 0 880 410\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Comparaison de la phase de lecture du prompt et de la phase de génération de la réponse\">\n  <rect width=\"880\" height=\"410\" rx=\"16\" fill=\"#0f172a\" />\n  <text x=\"440\" y=\"40\" fill=\"#f8fafc\" font-family=\"sans-serif\" font-size=\"17\" font-weight=\"700\" text-anchor=\"middle\">Pourquoi l'entrée et la sortie ne sont pas traitées de la même façon</text>\n  <text x=\"440\" y=\"62\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Schéma qualitatif : aucune durée ni aucun prix à l'échelle</text>\n  <g id=\"prefill\">\n  <rect x=\"40\" y=\"80\" width=\"380\" height=\"250\" rx=\"12\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" stroke-width=\"2\" />\n  <text x=\"230\" y=\"112\" fill=\"#7dd3fc\" font-family=\"sans-serif\" font-size=\"16\" font-weight=\"700\" text-anchor=\"middle\">Entrée : lecture du prompt</text>\n  <text x=\"230\" y=\"134\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Phase dite de prefill</text>\n  <rect x=\"70\" y=\"160\" width=\"46\" height=\"30\" rx=\"6\" fill=\"#075985\" stroke=\"#38bdf8\" stroke-width=\"1.2\" />\n  <text x=\"93\" y=\"180\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">T1</text>\n  <rect x=\"125\" y=\"160\" width=\"46\" height=\"30\" rx=\"6\" fill=\"#075985\" stroke=\"#38bdf8\" stroke-width=\"1.2\" />\n  <text x=\"148\" y=\"180\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">T2</text>\n  <rect x=\"180\" y=\"160\" width=\"46\" height=\"30\" rx=\"6\" fill=\"#075985\" stroke=\"#38bdf8\" stroke-width=\"1.2\" />\n  <text x=\"203\" y=\"180\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">T3</text>\n  <rect x=\"235\" y=\"160\" width=\"46\" height=\"30\" rx=\"6\" fill=\"#075985\" stroke=\"#38bdf8\" stroke-width=\"1.2\" />\n  <text x=\"258\" y=\"180\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">T4</text>\n  <rect x=\"290\" y=\"160\" width=\"46\" height=\"30\" rx=\"6\" fill=\"#075985\" stroke=\"#38bdf8\" stroke-width=\"1.2\" />\n  <text x=\"313\" y=\"180\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">T5</text>\n  <rect x=\"345\" y=\"160\" width=\"46\" height=\"30\" rx=\"6\" fill=\"#075985\" stroke=\"#38bdf8\" stroke-width=\"1.2\" />\n  <text x=\"368\" y=\"180\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">T6</text>\n  <rect x=\"70\" y=\"220\" width=\"320\" height=\"40\" rx=\"8\" fill=\"#0c4a6e\" stroke=\"#38bdf8\" stroke-width=\"1.5\" />\n  <text x=\"230\" y=\"245\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-size=\"13\" font-weight=\"700\" text-anchor=\"middle\">Tous les tokens traités ensemble</text>\n  <text x=\"230\" y=\"290\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Les tokens sont déjà connus : le calcul</text>\n  <text x=\"230\" y=\"308\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">peut se répartir en parallèle</text>\n  </g>\n  <g id=\"decodage\">\n  <rect x=\"460\" y=\"80\" width=\"380\" height=\"250\" rx=\"12\" fill=\"#1c1420\" stroke=\"#fb7185\" stroke-width=\"2\" />\n  <text x=\"650\" y=\"112\" fill=\"#fecdd3\" font-family=\"sans-serif\" font-size=\"16\" font-weight=\"700\" text-anchor=\"middle\">Sortie : écriture de la réponse</text>\n  <text x=\"650\" y=\"134\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Phase dite de décodage</text>\n  <rect x=\"490\" y=\"160\" width=\"70\" height=\"30\" rx=\"6\" fill=\"#881337\" stroke=\"#fb7185\" stroke-width=\"1.2\" />\n  <text x=\"525\" y=\"180\" fill=\"#ffe4e6\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Token 1</text>\n  <text x=\"567\" y=\"180\" fill=\"#fb7185\" font-family=\"sans-serif\" font-size=\"16\" font-weight=\"700\" text-anchor=\"middle\">›</text>\n  <rect x=\"575\" y=\"160\" width=\"70\" height=\"30\" rx=\"6\" fill=\"#881337\" stroke=\"#fb7185\" stroke-width=\"1.2\" />\n  <text x=\"610\" y=\"180\" fill=\"#ffe4e6\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Token 2</text>\n  <text x=\"652\" y=\"180\" fill=\"#fb7185\" font-family=\"sans-serif\" font-size=\"16\" font-weight=\"700\" text-anchor=\"middle\">›</text>\n  <rect x=\"660\" y=\"160\" width=\"70\" height=\"30\" rx=\"6\" fill=\"#881337\" stroke=\"#fb7185\" stroke-width=\"1.2\" />\n  <text x=\"695\" y=\"180\" fill=\"#ffe4e6\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Token 3</text>\n  <text x=\"737\" y=\"180\" fill=\"#fb7185\" font-family=\"sans-serif\" font-size=\"16\" font-weight=\"700\" text-anchor=\"middle\">›</text>\n  <rect x=\"745\" y=\"160\" width=\"70\" height=\"30\" rx=\"6\" fill=\"#881337\" stroke=\"#fb7185\" stroke-width=\"1.2\" />\n  <text x=\"780\" y=\"180\" fill=\"#ffe4e6\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Token 4</text>\n  <rect x=\"490\" y=\"220\" width=\"320\" height=\"40\" rx=\"8\" fill=\"#4c0519\" stroke=\"#fb7185\" stroke-width=\"1.5\" />\n  <text x=\"650\" y=\"245\" fill=\"#ffe4e6\" font-family=\"sans-serif\" font-size=\"13\" font-weight=\"700\" text-anchor=\"middle\">Un token à la fois, chacun après le précédent</text>\n  <text x=\"650\" y=\"290\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">À chaque pas, le matériel relit en mémoire</text>\n  <text x=\"650\" y=\"308\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">les poids du modèle et le cache d'attention</text>\n  </g>\n  <g id=\"prix\">\n  <rect x=\"40\" y=\"346\" width=\"800\" height=\"44\" rx=\"10\" fill=\"#1e293b\" stroke=\"#f59e0b\" stroke-width=\"1.5\" />\n  <text x=\"440\" y=\"373\" fill=\"#fde68a\" font-family=\"sans-serif\" font-size=\"13\" font-weight=\"700\" text-anchor=\"middle\">Deux compteurs facturés chacun à son prix par million de tokens, avec un rapport qui varie selon le modèle</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "Entrée : traitée en parallèle",
+            "explanation": "Les tokens du prompt sont tous connus à l'avance : le modèle peut les traiter ensemble en une passe. Cette phase s'appelle le prefill.",
+            "highlight": [
+              "prefill"
+            ]
+          },
+          {
+            "title": "Sortie : un token après l'autre",
+            "explanation": "Chaque nouveau token dépend des précédents : il faut une passe de calcul par token. À chaque pas, le matériel relit en mémoire les poids du modèle et le cache d'attention, ce qui limite la vitesse. Cette phase s'appelle le décodage.",
+            "highlight": [
+              "decodage"
+            ]
+          },
+          {
+            "title": "Deux prix",
+            "explanation": "Les éditeurs affichent un prix pour chaque compteur. L'explication matérielle rend plausible un prix de sortie plus élevé, mais le tarif reste une décision commerciale : le rapport varie d'un modèle à l'autre.",
+            "highlight": [
+              "prix"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "code": "# Coût d'une requête = tokens d'entrée × prix d'entrée + tokens de sortie × prix de sortie.\n# Prix en dollars par million de tokens. VALEURS D'ILLUSTRATION, arrondies : elles imitent\n# trois rapports sortie/entrée vus dans le relevé du site du 04/10/2026, ce ne sont pas des tarifs.\nPROFILS = {                    # (prix d'entrée, prix de sortie)\n    \"rapport 3\": (0.50, 1.50),\n    \"rapport 5\": (2.00, 10.00),\n    \"rapport 8\": (0.30, 2.50),\n}\n\ndef cout(tokens_entree, tokens_sortie, prix_entree, prix_sortie):\n    return tokens_entree / 1_000_000 * prix_entree + tokens_sortie / 1_000_000 * prix_sortie\n\nt_in, t_out = 1_200, 400       # requête d'illustration\nprint(f\"Requête : {t_in} tokens envoyés, {t_out} tokens reçus\")\nfor nom, (p_in, p_out) in PROFILS.items():\n    c_in = t_in / 1e6 * p_in\n    c_out = t_out / 1e6 * p_out\n    total = c_in + c_out\n    print(f\"{nom} ({p_in} / {p_out} $ par million) : \"\n          f\"entrée {c_in:.6f} $, sortie {c_out:.6f} $, total {total:.6f} $, \"\n          f\"part de la sortie {100 * c_out / total:.0f} %\")\n\nprint()\nprint(\"Même requête avec une réponse trois fois plus longue, ou un prompt trois fois plus long :\")\nfor nom, (p_in, p_out) in PROFILS.items():\n    base = cout(t_in, t_out, p_in, p_out)\n    reponse_x3 = cout(t_in, 3 * t_out, p_in, p_out)\n    prompt_x3 = cout(3 * t_in, t_out, p_in, p_out)\n    print(f\"{nom} : réponse x3 -> coût x{reponse_x3 / base:.2f} ; prompt x3 -> coût x{prompt_x3 / base:.2f}\")",
+        "explanation": "Calcule le coût d'une requête avec trois jeux de prix d'illustration qui imitent trois rapports sortie/entrée, puis compare une réponse trois fois plus longue et un prompt trois fois plus long. Les prix sont inventés pour l'exercice : remplacez-les par ceux de votre fournisseur. La sortie ci-dessous a été obtenue en exécutant ce code.",
+        "output": "Requête : 1200 tokens envoyés, 400 tokens reçus\nrapport 3 (0.5 / 1.5 $ par million) : entrée 0.000600 $, sortie 0.000600 $, total 0.001200 $, part de la sortie 50 %\nrapport 5 (2.0 / 10.0 $ par million) : entrée 0.002400 $, sortie 0.004000 $, total 0.006400 $, part de la sortie 63 %\nrapport 8 (0.3 / 2.5 $ par million) : entrée 0.000360 $, sortie 0.001000 $, total 0.001360 $, part de la sortie 74 %\n\nMême requête avec une réponse trois fois plus longue, ou un prompt trois fois plus long :\nrapport 3 : réponse x3 -> coût x2.00 ; prompt x3 -> coût x2.00\nrapport 5 : réponse x3 -> coût x2.25 ; prompt x3 -> coût x1.75\nrapport 8 : réponse x3 -> coût x2.47 ; prompt x3 -> coût x1.53",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Une requête envoie 2 000 tokens et reçoit 500 tokens. Le prix est de 1 dollar par million de tokens en entrée et de 5 dollars par million de tokens en sortie. Quel est le coût de la requête ?",
+          "options": [
+            "0,0025 dollar",
+            "0,0045 dollar",
+            "0,0125 dollar",
+            "0,002 dollar"
+          ],
+          "correctIndex": 1,
+          "explanation": "Entrée : 2 000 × 1 / 1 000 000 = 0,002 dollar. Sortie : 500 × 5 / 1 000 000 = 0,0025 dollar. Total : 0,0045 dollar. Les autres réponses oublient un compteur (0,0025 ne compte que la sortie, 0,002 que l'entrée) ou facturent tous les tokens au prix de sortie (2 500 × 5 / 1 000 000 = 0,0125)."
+        },
+        {
+          "question": "Quelle phrase résume le mieux l'explication matérielle d'un prix de sortie plus élevé ?",
+          "options": [
+            "Les tokens de sortie sont plus longs que les tokens d'entrée.",
+            "Le modèle relit et corrige chaque réponse avant de l'envoyer.",
+            "La sortie est produite token par token, avec une lecture de la mémoire à chaque pas, alors que l'entrée se traite en parallèle.",
+            "Le prix suit exactement le coût d'électricité mesuré pour chaque token."
+          ],
+          "correctIndex": 2,
+          "explanation": "La phase de génération est séquentielle et limitée par la mémoire (Patel et al., 2023), ce qui rend un prix plus élevé plausible. Un token n'a pas de longueur différente en entrée et en sortie. Le modèle ne relit pas sa réponse avant l'envoi. Et le prix n'est pas une simple mesure de coût : les éditeurs ne publient pas leur structure de coûts et fixent leurs tarifs aussi pour des raisons commerciales."
+        },
+        {
+          "question": "Le prix est de 0,30 dollar par million de tokens en entrée et de 2,50 dollars en sortie. Pour une requête de 1 200 tokens en entrée et 400 en sortie, vous pouvez soit diviser le prompt par deux, soit diviser la réponse par deux. Qu'est-ce qui économise le plus ?",
+          "options": [
+            "Diviser le prompt par deux : il compte plus de tokens.",
+            "Diviser la réponse par deux : chaque token de sortie coûte plus de huit fois un token d'entrée.",
+            "Les deux économisent exactement la même somme.",
+            "Aucun des deux : seul le choix du modèle change le coût."
+          ],
+          "correctIndex": 1,
+          "explanation": "Coût de départ : 1 200 × 0,30 + 400 × 2,50 = 360 + 1 000, soit 1 360 millionièmes de dollar. Prompt divisé par deux : 1 180. Réponse divisée par deux : 860. L'argument « il compte plus de tokens » oublie que les deux compteurs n'ont pas le même prix. Les deux leviers n'économisent pas la même somme, et le choix du modèle est un troisième levier, pas le seul."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Token d'entrée (input)",
+          "definition": "Token lu par le modèle : consignes, historique, documents joints et question. Il est facturé au prix d'entrée."
+        },
+        {
+          "term": "Token de sortie (output)",
+          "definition": "Token écrit par le modèle, y compris, selon les éditeurs, les tokens de réflexion non affichés. Il est facturé au prix de sortie."
+        },
+        {
+          "term": "Prix par million de tokens",
+          "definition": "Unité usuelle de tarification : montant en dollars pour un million de tokens, avec un prix d'entrée et un prix de sortie."
+        },
+        {
+          "term": "Prefill",
+          "definition": "Phase où le modèle traite l'ensemble du prompt avant d'écrire, en parallèle sur les tokens d'entrée."
+        },
+        {
+          "term": "Décodage",
+          "definition": "Phase où le modèle produit sa réponse un token après l'autre, chaque token dépendant des précédents."
+        },
+        {
+          "term": "Cache clé-valeur (KV cache)",
+          "definition": "Mémoire des résultats d'attention déjà calculés pour les tokens précédents, qui évite de les recalculer à chaque nouveau token."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Deux compteurs, deux parts",
+          "prompt": "Un prompt de 2 000 tokens et une réponse de 200 tokens, avec un prix d’entrée de 2 \\$ et un prix de sortie de 10 \\$ par million de tokens (valeurs d’illustration). Calculez le coût de la requête et la part de la sortie dans ce coût.",
+          "solution": "Entrée : 2 000 × 2 / 10⁶ = 0,004 \\$. Sortie : 200 × 10 / 10⁶ = 0,002 \\$. Total : 0,006 \\$. La sortie ne représente que 9 % des tokens, 200 sur 2 200, mais un tiers du coût, parce que son prix par token vaut cinq fois celui de l’entrée. Raccourcir la réponse de 100 tokens économise 0,001 \\$, autant qu’en retirant 500 tokens d’entrée. Le rapport entre les deux prix varie selon le modèle : vérifiez la page du fournisseur."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Anthropic, documentation : Prompt caching (consultée le 18/10/2026)",
+          "href": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+        },
+        {
+          "label": "OpenAI, documentation : Prompt caching (consultée le 18/10/2026)",
+          "href": "https://developers.openai.com/api/docs/guides/prompt-caching"
+        },
+        {
+          "label": "Patel et al., 2023. Splitwise: Efficient generative LLM inference using phase splitting (arXiv 2311.18677)",
+          "href": "https://arxiv.org/abs/2311.18677"
+        }
+      ]
+    },
+    {
+      "id": "ce-qui-sajoute",
+      "title": "Ce qui s'ajoute à la requête visible : historique, contexte, outils et images",
+      "keyTakeaways": [
+        "Un modèle appelé par API ne garde pas la conversation en mémoire : l'application renvoie à chaque tour les messages précédents, qui sont refacturés comme tokens d'entrée.",
+        "Avec n tours, la part d'historique relue croît comme n(n−1)/2 fois la taille ajoutée à chaque tour : le total d'entrée grandit plus vite que la conversation (environ 15 fois le texte échangé sur 20 tours dans l'exemple d'illustration).",
+        "S'ajoutent à chaque requête les consignes système, les définitions d'outils, les passages d'un RAG, les documents joints, les images et, pour un agent, les résultats d'outils.",
+        "Une image se compte en tokens selon une règle propre à chaque éditeur ; chez Anthropic, des patchs de 28 × 28 pixels avec un plafond par modèle (documentation consultée le 18/10/2026).",
+        "Au-delà d'un seuil de longueur, certains tarifs changent : le relevé du site du 04/10/2026 en signale pour des seuils de 200 000 et 272 000 tokens d'entrée."
+      ],
+      "theory": "### Un modèle qui oublie tout entre deux appels\n\nQuand on appelle un modèle par API, **chaque requête est indépendante** : le modèle ne garde aucun souvenir de l'appel précédent. Pour qu'une conversation tienne, l'application doit renvoyer à chaque tour **tous les messages précédents**, les questions comme les réponses. La documentation d'Anthropic le dit en toutes lettres à propos des images : dans les conversations à plusieurs tours, chaque requête renvoie l'historique complet. Une application de chat le fait à votre place, mais le mécanisme est le même derrière. Même si une API propose de garder l'état de la conversation côté serveur, le modèle relit l'historique à chaque tour : vérifiez dans la documentation de votre éditeur comment il est facturé.\n\nConséquence pour le budget : **ce que vous avez déjà payé en entrée est payé de nouveau au tour suivant**. Si chaque tour ajoute $h$ tokens à l'historique (le message et la réponse) et si la part fixe de chaque requête (consignes, outils, nouveau message) vaut $F$ tokens, le total des tokens d'entrée après $n$ tours est :\n\n$$T_{\\text{ent}}(n) = n \\times F + h \\times \\frac{n(n-1)}{2}$$\n\nLe premier terme croît proportionnellement au nombre de tours. Le second croît **comme le carré** du nombre de tours : c'est lui qui finit par dominer dans une longue conversation. Ce n'est pas une croissance exponentielle, mais elle est bien plus rapide que celle du texte réellement échangé.\n\n### Tout ce qui s'ajoute à chaque requête\n\n- **Les consignes système** (*system prompt*) : un texte parfois long, envoyé à chaque requête. Plus il est volumineux, plus il pèse, d'où l'intérêt de la mise en cache (module 6).\n- **Les définitions d'outils** : quand un modèle peut appeler des fonctions ou des serveurs MCP (voir le cours [MCP](/cours/mcp)), leurs descriptions, écrites en JSON, font partie du prompt. Chez Anthropic, le préfixe d'une requête se construit dans l'ordre outils, consignes, puis messages.\n- **Les passages récupérés** par un système de RAG (voir le cours [Le RAG](/cours/rag), qui chiffre l'écart entre « tout le document » et « trois extraits »).\n- **Les documents joints** : un PDF ou un fichier ajouté à la requête est converti en tokens et compte comme du texte.\n- **Les boucles d'agent** : chaque étape d'un agent est une nouvelle requête qui renvoie l'historique et les résultats d'outils (voir le cours [Boucles agentiques](/cours/boucles-agentiques)).\n\n### Les images\n\nUne image est convertie en tokens. D'après la documentation d'Anthropic (consultée le 18/10/2026), elle est découpée en patchs de 28 × 28 pixels et coûte $\\lceil \\text{largeur}/28 \\rceil \\times \\lceil \\text{hauteur}/28 \\rceil$ tokens, avant redimensionnement : les grandes images sont réduites pour respecter une limite par modèle (1 568 ou 4 784 tokens d'image, selon le modèle). Une image de 1 000 × 1 000 pixels donne ainsi 36 × 36 = 1 296 tokens. Chaque éditeur a sa propre règle : lisez celle du vôtre. La documentation recommande de réduire la taille des images quand le détail fin n'est pas nécessaire, et une image laissée dans l'historique est renvoyée à chaque tour comme le reste.\n\n### Les seuils de longueur\n\nLe coût n'est pas toujours proportionnel à la longueur. Le relevé du site (04/10/2026) signale, pour certains modèles, un tarif plus élevé au-delà d'un seuil de contexte : par exemple 272 000 tokens en entrée pour une famille de modèles, 200 000 pour d'autres. Un contexte très long peut donc changer de palier de prix, pas seulement de volume. Vérifiez ces seuils dans la page du fournisseur.",
+      "analogy": {
+        "title": "Un interlocuteur amnésique au téléphone",
+        "text": "Imaginez que vous appeliez quelqu'un qui oublie tout dès que vous raccrochez, et que chaque minute d'écoute vous soit facturée. À chaque nouvel appel, pour qu'il puisse répondre à votre question, vous devez lui relire toute la conversation précédente, puis poser la nouvelle question. Plus l'échange dure, plus la relecture est longue, alors que votre question, elle, reste courte.\n\n**Limite de l'analogie** : un humain à qui l'on relit une conversation la subit mot à mot, alors qu'un modèle traite la relecture en parallèle (voir le module précédent), et qu'un mécanisme de cache peut alléger la relecture d'un début identique (module 6). Le prix, lui, reste proportionnel aux tokens relus."
+      },
+      "example": {
+        "title": "Vingt tours (valeurs d'illustration)",
+        "text": "Prenons des consignes de 800 tokens, des outils de 600 tokens, des messages d'utilisateur de 60 tokens et des réponses de 200 tokens (valeurs d'illustration). Au tour 1, l'entrée est de 1 460 tokens ; au tour 20, elle est de 6 400 tokens. Sur 20 tours, le modèle a lu 78 600 tokens d'entrée pour une conversation dont le texte réel (questions et réponses) ne compte que 5 200 tokens : environ 15 fois plus. Avec un prix d'entrée de 2 \\$ et un prix de sortie de 10 \\$ par million de tokens (illustration), l'entrée représente environ 0,157 \\$ et la sortie 0,040 \\$."
+      },
+      "diagram": {
+        "title": "L'historique qui s'accumule",
+        "description": "Quatre tours d'une même conversation fictive : la part fixe ne change pas, la part d'historique relue grandit à chaque tour. Les tailles sont celles du code, choisies pour l'illustration.",
+        "svg": "<svg viewBox=\"0 0 880 384\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Barres montrant la taille de l'entrée aux tours 1, 5, 10 et 20 d'une conversation\">\n  <rect width=\"880\" height=\"384\" rx=\"16\" fill=\"#0f172a\" />\n  <text x=\"440\" y=\"36\" fill=\"#f8fafc\" font-family=\"sans-serif\" font-size=\"17\" font-weight=\"700\" text-anchor=\"middle\">Ce que le modèle relit à chaque tour d'une conversation</text>\n  <text x=\"440\" y=\"58\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Valeurs d'illustration du code ci-dessous, en tokens d'entrée par requête</text>\n  <g id=\"tour-1\">\n  <text x=\"40\" y=\"114\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"14\" font-weight=\"700\">Tour 1</text>\n  <rect x=\"120\" y=\"90\" width=\"131.2\" height=\"36\" rx=\"4\" fill=\"#312e81\" stroke=\"#818cf8\" stroke-width=\"1.2\" />\n  <rect x=\"251.2\" y=\"90\" width=\"5.6\" height=\"36\" rx=\"2\" fill=\"#065f46\" stroke=\"#34d399\" stroke-width=\"1.2\" />\n  <text x=\"266.9\" y=\"114\" fill=\"#fde68a\" font-family=\"sans-serif\" font-size=\"13\" font-weight=\"700\">1 460 tokens</text>\n  </g>\n  <g id=\"tour-5\">\n  <text x=\"40\" y=\"176\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"14\" font-weight=\"700\">Tour 5</text>\n  <rect x=\"120\" y=\"152\" width=\"131.2\" height=\"36\" rx=\"4\" fill=\"#312e81\" stroke=\"#818cf8\" stroke-width=\"1.2\" />\n  <rect x=\"251.2\" y=\"152\" width=\"5.6\" height=\"36\" rx=\"2\" fill=\"#065f46\" stroke=\"#34d399\" stroke-width=\"1.2\" />\n  <rect x=\"256.9\" y=\"152\" width=\"97.5\" height=\"36\" rx=\"4\" fill=\"#7c2d12\" stroke=\"#fb923c\" stroke-width=\"1.2\" />\n  <text x=\"364.4\" y=\"176\" fill=\"#fde68a\" font-family=\"sans-serif\" font-size=\"13\" font-weight=\"700\">2 500 tokens</text>\n  </g>\n  <g id=\"tour-10\">\n  <text x=\"40\" y=\"238\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"14\" font-weight=\"700\">Tour 10</text>\n  <rect x=\"120\" y=\"214\" width=\"131.2\" height=\"36\" rx=\"4\" fill=\"#312e81\" stroke=\"#818cf8\" stroke-width=\"1.2\" />\n  <rect x=\"251.2\" y=\"214\" width=\"5.6\" height=\"36\" rx=\"2\" fill=\"#065f46\" stroke=\"#34d399\" stroke-width=\"1.2\" />\n  <rect x=\"256.9\" y=\"214\" width=\"219.4\" height=\"36\" rx=\"4\" fill=\"#7c2d12\" stroke=\"#fb923c\" stroke-width=\"1.2\" />\n  <text x=\"486.2\" y=\"238\" fill=\"#fde68a\" font-family=\"sans-serif\" font-size=\"13\" font-weight=\"700\">3 800 tokens</text>\n  </g>\n  <g id=\"tour-20\">\n  <text x=\"40\" y=\"300\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"14\" font-weight=\"700\">Tour 20</text>\n  <rect x=\"120\" y=\"276\" width=\"131.2\" height=\"36\" rx=\"4\" fill=\"#312e81\" stroke=\"#818cf8\" stroke-width=\"1.2\" />\n  <rect x=\"251.2\" y=\"276\" width=\"5.6\" height=\"36\" rx=\"2\" fill=\"#065f46\" stroke=\"#34d399\" stroke-width=\"1.2\" />\n  <rect x=\"256.9\" y=\"276\" width=\"463.1\" height=\"36\" rx=\"4\" fill=\"#7c2d12\" stroke=\"#fb923c\" stroke-width=\"1.2\" />\n  <text x=\"730.0\" y=\"300\" fill=\"#fde68a\" font-family=\"sans-serif\" font-size=\"13\" font-weight=\"700\">6 400 tokens</text>\n  </g>\n  <rect x=\"120\" y=\"350\" width=\"14\" height=\"14\" rx=\"3\" fill=\"#312e81\" stroke=\"#818cf8\" stroke-width=\"1\" />\n  <text x=\"142\" y=\"362\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\">Consignes et outils (renvoyés à chaque fois)</text>\n  <rect x=\"420\" y=\"350\" width=\"14\" height=\"14\" rx=\"3\" fill=\"#065f46\" stroke=\"#34d399\" stroke-width=\"1\" />\n  <text x=\"442\" y=\"362\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\">Nouveau message</text>\n  <rect x=\"570\" y=\"350\" width=\"14\" height=\"14\" rx=\"3\" fill=\"#7c2d12\" stroke=\"#fb923c\" stroke-width=\"1\" />\n  <text x=\"592\" y=\"362\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\">Historique relu</text>\n</svg>",
+        "steps": [
+          {
+            "title": "Tour 1 : seulement la part fixe",
+            "explanation": "Au premier tour, il n'y a pas d'historique : la requête contient les consignes, les définitions d'outils et le premier message, soit 1 460 tokens dans cet exemple.",
+            "highlight": [
+              "tour-1"
+            ]
+          },
+          {
+            "title": "Tour 10 : l'historique dépasse la part fixe",
+            "explanation": "Au dixième tour, la requête contient 2 340 tokens d'historique en plus de la part fixe : l'entrée a plus que doublé alors que le nouveau message n'a pas changé de taille.",
+            "highlight": [
+              "tour-10"
+            ]
+          },
+          {
+            "title": "Tour 20 : l'historique domine",
+            "explanation": "Au vingtième tour, l'historique pèse 4 940 des 6 400 tokens d'entrée. Chaque tour paie à nouveau tous les précédents, d'où une croissance du total plus rapide que celle de la conversation.",
+            "highlight": [
+              "tour-20"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "code": "# Un chatbot renvoie tout l'historique à chaque tour : le total des tokens d'entrée\n# croît comme le carré du nombre de tours. Tailles en tokens : VALEURS D'ILLUSTRATION.\nSYSTEME = 800        # consignes du système, envoyées à chaque tour\nOUTILS = 600         # définitions d'outils, envoyées à chaque tour\nMSG_UTILISATEUR = 60\nREPONSE = 200\nPRIX_ENTREE, PRIX_SORTIE = 2.00, 10.00   # $ par million de tokens (illustration)\n\nhistorique = 0\ntotal_entree = total_sortie = 0\nprint(\"tour  entrée envoyée  dont historique\")\nfor tour in range(1, 21):\n    entree = SYSTEME + OUTILS + historique + MSG_UTILISATEUR\n    total_entree += entree\n    total_sortie += REPONSE\n    if tour in (1, 2, 5, 10, 20):\n        print(f\"{tour:4d}  {entree:14d}  {historique:15d}\")\n    historique += MSG_UTILISATEUR + REPONSE   # le tour s'ajoute à l'historique\n\ncout = total_entree / 1e6 * PRIX_ENTREE + total_sortie / 1e6 * PRIX_SORTIE\nvisible = 20 * (MSG_UTILISATEUR + REPONSE)\nprint()\nprint(f\"20 tours : {total_entree} tokens d'entrée facturés, {total_sortie} tokens de sortie\")\nprint(f\"Texte réellement échangé (questions et réponses) : {visible} tokens\")\nprint(f\"Entrée facturée / texte échangé : {total_entree / visible:.1f}\")\nprint(f\"Coût de la conversation : {cout:.4f} $ (entrée {total_entree / 1e6 * PRIX_ENTREE:.4f} $, \"\n      f\"sortie {total_sortie / 1e6 * PRIX_SORTIE:.4f} $)\")\n\n# Une image : chez Anthropic, des patchs de 28 x 28 pixels (documentation consultée le 18/10/2026),\n# avant l'éventuel redimensionnement des grandes images. Chaque éditeur a sa propre règle.\nfrom math import ceil\n\ndef jetons_image(largeur, hauteur):\n    return ceil(largeur / 28) * ceil(hauteur / 28)\n\nprint()\nfor l, h in [(200, 200), (1000, 1000), (1092, 1092)]:\n    print(f\"image {l} x {h} px : {jetons_image(l, h)} tokens\")",
+        "explanation": "Simule vingt tours d'un chatbot avec des tailles d'illustration, compte les tokens d'entrée facturés et les compare au texte réellement échangé, puis calcule le nombre de tokens d'une image avec la règle des patchs de 28 pixels. La sortie ci-dessous a été obtenue en exécutant ce code.",
+        "output": "tour  entrée envoyée  dont historique\n   1            1460                0\n   2            1720              260\n   5            2500             1040\n  10            3800             2340\n  20            6400             4940\n\n20 tours : 78600 tokens d'entrée facturés, 4000 tokens de sortie\nTexte réellement échangé (questions et réponses) : 5200 tokens\nEntrée facturée / texte échangé : 15.1\nCoût de la conversation : 0.1972 $ (entrée 0.1572 $, sortie 0.0400 $)\n\nimage 200 x 200 px : 64 tokens\nimage 1000 x 1000 px : 1296 tokens\nimage 1092 x 1092 px : 1521 tokens",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Au vingtième tour d'une conversation par API, sans aucune optimisation, que reçoit le modèle ?",
+          "options": [
+            "Seulement le dernier message : le modèle se souvient du reste.",
+            "Les consignes, les outils, les messages et réponses des 19 tours précédents, puis le nouveau message.",
+            "Un résumé des tours précédents, produit automatiquement par l'éditeur.",
+            "Seulement les messages de l'utilisateur, pas les réponses du modèle."
+          ],
+          "correctIndex": 1,
+          "explanation": "Chaque requête est indépendante : le modèle ne garde aucun souvenir d'un appel à l'autre, et l'application doit renvoyer tout ce qui doit être pris en compte, réponses du modèle comprises. Un résumé n'est pas produit sans que vous le demandiez : c'est une technique que l'on met en place soi-même (module 6). Omettre les réponses ferait perdre le fil de la conversation."
+        },
+        {
+          "question": "Quand le nombre de tours d'une conversation double, comment évolue le total des tokens d'entrée facturés, à taille de tour constante ?",
+          "options": [
+            "Il double exactement, car chaque tour ajoute le même nombre de tokens.",
+            "Il croît plus vite que le nombre de tours, à peu près comme son carré pour la part due à l'historique.",
+            "Il reste constant, car l'historique est mis en mémoire.",
+            "Il croît de façon exponentielle : il double à chaque tour supplémentaire."
+          ],
+          "correctIndex": 1,
+          "explanation": "L'historique ajouté à chaque tour est constant, mais il est relu à chaque tour suivant : le total du terme d'historique vaut h × n(n−1)/2, donc il croît comme le carré. La première réponse confond ce que chaque tour ajoute (constant) et ce qui est facturé au total. La croissance n'est pas exponentielle : elle ne double pas à chaque tour."
+        },
+        {
+          "question": "Selon la règle d'Anthropic décrite dans ce module (patchs de 28 pixels, avant tout redimensionnement), combien de tokens coûte une image de 1 000 × 1 000 pixels ?",
+          "options": [
+            "36 tokens",
+            "1 000 tokens",
+            "1 296 tokens",
+            "1 000 000 tokens"
+          ],
+          "correctIndex": 2,
+          "explanation": "L'image est découpée en patchs de 28 × 28 pixels : 1 000 / 28 donne 35,7, arrondi à 36 patchs par côté, soit 36 × 36 = 1 296 tokens. 36 est le nombre de patchs sur un seul côté. 1 000 000 serait un token par pixel, ce qui n'est pas la règle, et 1 000 n'a pas de fondement."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Sans état (stateless)",
+          "definition": "Se dit d'un appel d'API qui ne garde aucun souvenir des appels précédents : tout le contexte nécessaire doit être renvoyé à chaque requête."
+        },
+        {
+          "term": "Historique de conversation",
+          "definition": "Ensemble des messages précédents (questions et réponses) renvoyés au modèle à chaque tour pour qu'il puisse poursuivre l'échange."
+        },
+        {
+          "term": "Consignes système (system prompt)",
+          "definition": "Texte d'instructions placé au début de chaque requête pour cadrer le comportement du modèle."
+        },
+        {
+          "term": "Définition d'outil",
+          "definition": "Description (nom, rôle, paramètres) d'une fonction que le modèle peut appeler, incluse dans le prompt."
+        },
+        {
+          "term": "Patch d'image",
+          "definition": "Bloc de pixels (28 × 28 chez Anthropic) qui compte pour un token visuel dans le calcul du coût d'une image."
+        },
+        {
+          "term": "Fenêtre de contexte",
+          "definition": "Quantité maximale de tokens qu'un modèle peut prendre en compte dans une requête ; elle borne la longueur de l'historique."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Le coût d’une image dans l’historique",
+          "prompt": "Pourquoi une image de 1 000 × 1 000 pixels envoyée à un modèle Anthropic compte-t-elle 1 296 tokens, et pourquoi ce coût revient-il à chaque tour d’une conversation ?",
+          "solution": "D’après la règle citée dans le module, l’image est découpée en patchs de 28 × 28 pixels : 1 000 / 28 donne 36 dans chaque direction, donc 36 × 36 = 1 296 tokens. Les grandes images sont en plus redimensionnées pour respecter un plafond par modèle. Comme le modèle ne garde rien entre deux appels, l’application renvoie l’historique complet, image comprise, à chaque tour : elle est refacturée à chaque fois. Réduire la taille de l’image quand le détail fin est inutile est donc un levier direct."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Anthropic, documentation : Prompt caching (consultée le 18/10/2026)",
+          "href": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+        },
+        {
+          "label": "Anthropic, documentation : Vision, limites et coûts des images (consultée le 18/10/2026)",
+          "href": "https://platform.claude.com/docs/en/build-with-claude/vision"
+        },
+        {
+          "label": "Anthropic, documentation : Token counting (consultée le 18/10/2026)",
+          "href": "https://platform.claude.com/docs/en/build-with-claude/token-counting"
+        }
+      ]
+    },
+    {
+      "id": "tokens-de-reflexion",
+      "title": "Les modèles de raisonnement : des tokens de réflexion facturés, parfois invisibles",
+      "keyTakeaways": [
+        "Un modèle de raisonnement produit d'abord un long texte de réflexion, puis sa réponse : ces tokens de réflexion sont facturés comme des tokens de sortie.",
+        "Chez OpenAI comme chez Anthropic, on paie la réflexion complète même si elle n'est pas montrée ou n'est que résumée, et le total de sortie du compteur d'usage l'inclut déjà.",
+        "Le nombre de tokens de réflexion n'est connu qu'après l'appel et varie selon la question, le modèle et le niveau d'effort : il se budgète comme une fourchette.",
+        "Le plafond de sortie compte la réflexion : trop bas, il peut couper la réponse avant tout texte visible.",
+        "Pour les tâches simples, un modèle sans réflexion ou un effort faible évite de payer une réflexion dont le bénéfice n'est pas mesuré."
+      ],
+      "theory": "### Qu'est-ce qu'un token de réflexion ?\n\nCertains modèles sont conçus pour **réfléchir avant de répondre** : ils produisent d'abord un long texte intermédiaire, une « chaîne de raisonnement », puis la réponse finale. L'idée de faire écrire au modèle des étapes intermédiaires remonte au moins à l'article de Wei et al. (2022) sur le *chain-of-thought prompting*, qui rapporte de meilleurs résultats sur des tâches d'arithmétique et de raisonnement. Snell et al. (2024) étudient l'étape suivante, qui consiste à dépenser davantage de calcul au moment de la réponse, et trouvent que l'efficacité de cette dépense dépend de la difficulté de la question. Ce texte intermédiaire est fait de **tokens de réflexion** (*reasoning tokens* chez OpenAI, *thinking tokens* chez Anthropic).\n\n### Facturés comme de la sortie, même quand on ne les voit pas\n\nLes documentations d'OpenAI et d'Anthropic (consultées le 18/10/2026) convergent :\n\n| | OpenAI | Anthropic |\n| :-- | :-- | :-- |\n| Facturation | Au prix de sortie | Au prix de sortie |\n| Visibilité | Non visibles via l'API | Réflexion résumée ou omise à l'affichage, mais **facturée en entier** |\n| Où lire leur nombre | `usage.output_tokens_details.reasoning_tokens` | `usage.output_tokens_details.thinking_tokens` |\n| Plafond | `max_output_tokens`, réflexion comprise | `max_tokens`, réflexion comprise |\n| Réglage de la profondeur | Niveau d'effort de raisonnement, de `none` à `max` selon le modèle | Paramètre `effort`, de `low` à `max` |\n\nDans les deux cas, le total `output_tokens` du compteur d'usage **inclut déjà** la réflexion : il ne faut pas l'ajouter une seconde fois. Chez Anthropic, la documentation insiste sur un point : le nombre de tokens de sortie facturés **ne correspond pas** au nombre de tokens que l'on voit dans la réponse, car on paie la réflexion complète, pas son résumé. La réflexion occupe aussi de la place dans la fenêtre de contexte. Et chez Anthropic, les blocs de réflexion des tours précédents qui restent dans le contexte sont facturés comme des tokens d'entrée sur les modèles qui les conservent tous.\n\n### Pourquoi c'est difficile à prévoir\n\nLe nombre de tokens de réflexion **n'est pas connu avant l'appel**. Il varie avec la question, avec le niveau d'effort et avec le modèle. Sur les modèles à réflexion adaptative d'Anthropic, le modèle décide à chaque requête s'il réfléchit et combien, aucun niveau d'effort ne garantit un bloc de réflexion, et la réflexion par requête tend à diminuer quand la conversation s'allonge. Anthropic présente le niveau d'effort comme une **indication**, pas comme une garantie de nombre de tokens. Un budget sérieux traite donc ce poste comme une **fourchette**, à calibrer sur vos propres requêtes (module 5).\n\n### Garder la main\n\n- **Plafonner la sortie**, en laissant de la place à la réflexion et à la réponse : OpenAI recommande de réserver au moins 25 000 tokens pour la réflexion et la sortie quand on commence à expérimenter. Un plafond trop bas peut couper la réponse avant tout texte visible.\n- **Régler l'effort** : chez Anthropic, abaisser le niveau d'effort est le premier levier pour obtenir moins de réflexion. Demander dans le prompt de réfléchir moins n'est pas toujours efficace, d'après leur documentation.\n- **Choisir un modèle sans réflexion, ou un effort faible, pour les tâches simples** (classer, extraire, reformuler), et réserver la réflexion aux problèmes qui en tirent un bénéfice mesuré. La documentation d'Anthropic note que les budgets de réflexion plus grands donnent des rendements décroissants qui dépendent de la tâche.\n- **Ne pas faire varier le niveau d'effort en cours de conversation** quand on utilise la mise en cache : chez Anthropic, changer ce réglage invalide le cache des messages (module 6).\n- **Lire le compteur d'usage** après chaque appel pour savoir ce que la réflexion a coûté réellement (module 7).",
+      "analogy": {
+        "title": "Le brouillon qu'on ne rend pas",
+        "text": "Un élève résout un problème de mathématiques : il remplit trois pages de brouillon, puis recopie une réponse de trois lignes sur sa copie. Si l'on facturait l'encre, ce serait toute l'encre utilisée, brouillon compris, et pas seulement celle de la copie rendue.\n\n**Limite de l'analogie** : un brouillon d'élève est lisible, alors que la réflexion d'un modèle est souvent masquée ou seulement résumée par l'API, et un modèle peut aussi décider de ne presque pas « brouillonner » sur une question facile."
+      },
+      "example": {
+        "title": "Un calcul sur des valeurs inventées",
+        "text": "Une requête de 900 tokens d'entrée produit une réponse visible de 150 tokens. Sans réflexion, la sortie facturée est de 150 tokens. Avec 3 000 tokens de réflexion, elle est de 3 150 tokens. Avec un prix d'entrée de 2 \\$ et un prix de sortie de 10 \\$ par million de tokens (valeurs d'illustration), le coût passe de 0,0033 \\$ à 0,0333 \\$ : environ **10 fois plus** pour une réponse visible identique. Ces nombres de tokens sont inventés pour montrer le mécanisme : la réflexion réelle d'un modèle dépend de la question, du modèle et du réglage."
+      },
+      "diagram": {
+        "title": "Les tokens de réflexion",
+        "description": "Deux requêtes fictives : la même réponse visible de 150 tokens, avec ou sans 3 000 tokens de réflexion, et un plafond de sortie qui s'applique au total. Les nombres sont inventés pour l'illustration.",
+        "svg": "<svg viewBox=\"0 0 880 390\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Comparaison de la sortie facturée avec et sans tokens de réflexion, et plafond de sortie\">\n  <rect width=\"880\" height=\"390\" rx=\"16\" fill=\"#0f172a\" />\n  <text x=\"440\" y=\"36\" fill=\"#f8fafc\" font-family=\"sans-serif\" font-size=\"17\" font-weight=\"700\" text-anchor=\"middle\">Ce que vous lisez, et ce que vous payez en sortie</text>\n  <text x=\"440\" y=\"58\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Deux « usage » inventés pour l'illustration : ce n'est pas une mesure</text>\n  <g id=\"sans\">\n  <text x=\"40\" y=\"118\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"14\" font-weight=\"700\">Sans réflexion</text>\n  <rect x=\"150\" y=\"96\" width=\"28.1\" height=\"34\" rx=\"4\" fill=\"#065f46\" stroke=\"#34d399\" stroke-width=\"1.2\" />\n  <text x=\"190.1\" y=\"118\" fill=\"#a7f3d0\" font-family=\"sans-serif\" font-size=\"13\" font-weight=\"700\">150 tokens facturés</text>\n  </g>\n  <g id=\"avec\">\n  <text x=\"40\" y=\"198\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"14\" font-weight=\"700\">Avec réflexion</text>\n  <rect x=\"150\" y=\"176\" width=\"561.9\" height=\"34\" rx=\"4\" fill=\"#4c1d95\" stroke=\"#a78bfa\" stroke-width=\"1.2\" />\n  <text x=\"162\" y=\"198\" fill=\"#ede9fe\" font-family=\"sans-serif\" font-size=\"12\" font-weight=\"700\">Réflexion : 3 000 tokens (non affichés ou résumés)</text>\n  <rect x=\"711.9\" y=\"176\" width=\"28.1\" height=\"34\" rx=\"4\" fill=\"#065f46\" stroke=\"#34d399\" stroke-width=\"1.2\" />\n  <text x=\"150\" y=\"236\" fill=\"#a7f3d0\" font-family=\"sans-serif\" font-size=\"12\">Texte visible : 150 tokens</text>\n  <text x=\"740\" y=\"236\" fill=\"#fda4af\" font-family=\"sans-serif\" font-size=\"13\" font-weight=\"700\" text-anchor=\"end\">3 150 tokens facturés</text>\n  </g>\n  <g id=\"plafond\">\n  <line x1=\"524.6\" y1=\"150\" x2=\"524.6\" y2=\"262\" stroke=\"#f59e0b\" stroke-width=\"2.5\" stroke-dasharray=\"6 4\" />\n  <text x=\"524.6\" y=\"282\" fill=\"#fde68a\" font-family=\"sans-serif\" font-size=\"13\" font-weight=\"700\" text-anchor=\"middle\">Plafond de sortie (exemple : 2 000 tokens)</text>\n  <rect x=\"40\" y=\"300\" width=\"800\" height=\"70\" rx=\"10\" fill=\"#1e293b\" stroke=\"#f59e0b\" stroke-width=\"1.5\" />\n  <text x=\"440\" y=\"328\" fill=\"#fde68a\" font-family=\"sans-serif\" font-size=\"13\" font-weight=\"700\" text-anchor=\"middle\">Le plafond compte la réflexion comme le texte visible :</text>\n  <text x=\"440\" y=\"350\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"13\" text-anchor=\"middle\">la réponse peut être coupée avant même que le texte visible commence.</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "Sans réflexion",
+            "explanation": "La sortie facturée correspond au texte reçu : 150 tokens dans cet exemple inventé.",
+            "highlight": [
+              "sans"
+            ]
+          },
+          {
+            "title": "Avec réflexion : une facture plus grande que le texte lu",
+            "explanation": "Le modèle produit d'abord une réflexion de 3 000 tokens, que l'API ne montre pas ou résume seulement. Les 3 150 tokens (réflexion et texte visible) sont facturés au prix de sortie, soit environ 21 fois plus de tokens de sortie pour la même réponse visible.",
+            "highlight": [
+              "avec"
+            ]
+          },
+          {
+            "title": "Le plafond de sortie",
+            "explanation": "Le plafond de sortie (max_tokens ou max_output_tokens selon l'éditeur) borne le total, réflexion comprise. S'il est trop bas, la réponse peut être coupée avant d'avoir commencé à s'afficher.",
+            "highlight": [
+              "plafond"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "code": "# Les tokens de réflexion sont facturés comme des tokens de sortie, même quand on ne les voit pas.\n# Les deux « usage » ci-dessous sont INVENTÉS pour l'illustration : ce n'est pas une mesure.\n# Leur forme imite celle des API (le total output_tokens inclut le détail thinking_tokens).\nPRIX_ENTREE, PRIX_SORTIE = 2.00, 10.00        # $ par million de tokens (illustration)\n\nusage_sans_reflexion = {\"input_tokens\": 900, \"output_tokens\": 150,\n                        \"output_tokens_details\": {\"thinking_tokens\": 0}}\nusage_avec_reflexion = {\"input_tokens\": 900, \"output_tokens\": 3150,\n                        \"output_tokens_details\": {\"thinking_tokens\": 3000}}\n\ndef cout(usage):\n    # output_tokens est le total facturé au prix de sortie : il inclut déjà la réflexion.\n    return (usage[\"input_tokens\"] * PRIX_ENTREE + usage[\"output_tokens\"] * PRIX_SORTIE) / 1e6\n\nfor nom, u in [(\"sans réflexion\", usage_sans_reflexion), (\"avec réflexion\", usage_avec_reflexion)]:\n    reflexion = u[\"output_tokens_details\"][\"thinking_tokens\"]\n    visible = u[\"output_tokens\"] - reflexion\n    print(f\"{nom}: sortie facturée {u['output_tokens']} tokens \"\n          f\"(réflexion {reflexion} + texte visible {visible}) -> {cout(u):.6f} $\")\n\nrapport = cout(usage_avec_reflexion) / cout(usage_sans_reflexion)\nprint(f\"Coût avec réflexion / coût sans réflexion : x{rapport:.1f}\")\n\n# Plafonner : max_tokens (ou max_output_tokens) borne le total de sortie, réflexion comprise.\nplafond = 2000\nprint(f\"Avec un plafond de {plafond} tokens de sortie, le pire cas coûte \"\n      f\"{(900 * PRIX_ENTREE + plafond * PRIX_SORTIE) / 1e6:.6f} $ \"\n      f\"(mais la réponse peut être coupée avant d'être écrite)\")",
+        "explanation": "Calcule le coût de deux requêtes dont le compteur d'usage est inventé pour l'illustration, avec et sans réflexion, puis le coût maximal sous un plafond de sortie. Seules les valeurs d'usage sont fictives, le calcul est réel. La sortie ci-dessous a été obtenue en exécutant ce code.",
+        "output": "sans réflexion: sortie facturée 150 tokens (réflexion 0 + texte visible 150) -> 0.003300 $\navec réflexion: sortie facturée 3150 tokens (réflexion 3000 + texte visible 150) -> 0.033300 $\nCoût avec réflexion / coût sans réflexion : x10.1\nAvec un plafond de 2000 tokens de sortie, le pire cas coûte 0.021800 $ (mais la réponse peut être coupée avant d'être écrite)",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Une réponse visible compte 150 tokens, mais le compteur d'usage indique 3 150 tokens de sortie, dont 3 000 de réflexion. Combien de tokens de sortie sont facturés ?",
+          "options": [
+            "150 tokens, ceux que l'on voit",
+            "3 000 tokens, seulement la réflexion",
+            "3 150 tokens",
+            "3 300 tokens, en ajoutant le texte visible à 3 150"
+          ],
+          "correctIndex": 2,
+          "explanation": "Le total de sortie du compteur d'usage inclut déjà la réflexion : 3 000 + 150 = 3 150 tokens, tous facturés au prix de sortie. Ne facturer que le texte visible oublie la réflexion. Ajouter de nouveau les 150 tokens visibles compte deux fois le même texte."
+        },
+        {
+          "question": "Pourquoi est-il difficile de prévoir à l'avance le coût d'un modèle de raisonnement ?",
+          "options": [
+            "Parce que les tokens de réflexion sont gratuits tant qu'ils ne sont pas affichés.",
+            "Parce que le nombre de tokens de réflexion varie selon la requête et le réglage, et n'est connu qu'après l'appel.",
+            "Parce que leur prix est négocié au cas par cas avec chaque client.",
+            "Parce que la réflexion ne compte pas dans la fenêtre de contexte."
+          ],
+          "correctIndex": 1,
+          "explanation": "Le nombre de tokens de réflexion dépend de la question, du modèle et du niveau d'effort, et il n'apparaît que dans le compteur d'usage de la réponse. Ils sont facturés même quand ils ne sont pas affichés, ils occupent de la place dans la fenêtre de contexte (c'est précisé dans la documentation d'OpenAI), et le tarif de sortie est celui de la grille publique."
+        },
+        {
+          "question": "Un plafond de tokens de sortie est atteint pendant la réflexion du modèle. Que peut-il se passer ?",
+          "options": [
+            "Le plafond ne s'applique qu'au texte affiché, la réflexion continue sans limite.",
+            "Le modèle raccourcit automatiquement sa réflexion pour toujours finir dans la limite.",
+            "La réponse peut être coupée, parfois avant que le moindre texte visible soit produit.",
+            "La réflexion au-delà du plafond est offerte par l'éditeur."
+          ],
+          "correctIndex": 2,
+          "explanation": "Chez OpenAI comme chez Anthropic, le plafond borne le total de sortie, réflexion comprise, et la documentation d'OpenAI précise que la coupure peut survenir avant toute sortie visible. Le niveau d'effort est une indication, pas une garantie de longueur : il ne suffit pas à assurer que la réponse tienne dans la limite. Rien n'indique non plus que les tokens générés au-delà d'une limite seraient offerts."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Token de réflexion (reasoning ou thinking token)",
+          "definition": "Token produit par un modèle de raisonnement avant sa réponse finale. Il est facturé comme un token de sortie, qu'il soit affiché, résumé ou masqué."
+        },
+        {
+          "term": "Chaîne de raisonnement (chain of thought)",
+          "definition": "Suite d'étapes intermédiaires écrites par le modèle avant sa réponse."
+        },
+        {
+          "term": "Niveau d'effort",
+          "definition": "Réglage qui indique à un modèle de raisonnement avec quelle profondeur il doit réfléchir ; c'est une indication, pas un nombre de tokens garanti."
+        },
+        {
+          "term": "Plafond de sortie (max_tokens)",
+          "definition": "Limite du nombre de tokens qu'un modèle peut produire dans une réponse, réflexion comprise ; une réponse qui l'atteint est coupée."
+        },
+        {
+          "term": "Compteur d'usage (usage)",
+          "definition": "Champ de la réponse d'une API qui indique les nombres de tokens traités et leur détail (par exemple le nombre de tokens de réflexion)."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Une réponse vide malgré un plafond",
+          "prompt": "Un développeur fixe `max_tokens` à 800 sur un modèle de raisonnement. L’appel se termine, mais la réponse visible est vide. Quelle est l’explication la plus probable, et que faut-il changer ?",
+          "solution": "Le plafond de sortie compte la réflexion et la réponse. Avec 800 tokens, un modèle de raisonnement peut consommer toute la marge en tokens de réflexion, puis être coupé avant le premier mot visible. Il faut laisser de la place aux deux (OpenAI recommande au moins 25 000 tokens en expérimentation), abaisser l’effort de réflexion pour les tâches simples, et lire le détail d’usage (`thinking_tokens` ou `reasoning_tokens`) pour savoir ce que la réflexion a réellement coûté."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Anthropic, documentation : Steering thinking, effort, coût et tarification de la réflexion (consultée le 18/10/2026)",
+          "href": "https://platform.claude.com/docs/en/build-with-claude/thinking-steering-and-cost"
+        },
+        {
+          "label": "OpenAI, documentation : Reasoning models (consultée le 18/10/2026)",
+          "href": "https://developers.openai.com/api/docs/guides/reasoning"
+        },
+        {
+          "label": "Snell, Lee, Xu et Kumar, 2024. Scaling LLM Test-Time Compute Optimally can be More Effective than Scaling Model Parameters (arXiv 2408.03314)",
+          "href": "https://arxiv.org/abs/2408.03314"
+        }
+      ]
+    },
+    {
+      "id": "estimer-un-budget",
+      "title": "Estimer un budget : une formule, des hypothèses et une fourchette",
+      "keyTakeaways": [
+        "Un budget se construit avec quatre ingrédients : le volume de requêtes, les tokens par requête (entrée, sortie, réflexion), les prix et la part de relances.",
+        "On mesure d'abord sur un petit échantillon réel, en lisant le compteur d'usage, plutôt que de deviner les tokens.",
+        "On donne une fourchette (bas, central, haut) : dans l'exemple d'illustration, le scénario haut vaut environ dix fois le scénario bas, et c'est une information utile.",
+        "Les postes les plus souvent oubliés sont les relances, les tokens de réflexion et l'historique de conversation.",
+        "Le calculateur du site applique la formule de base avec des prix saisis à la main et datés ; il ne mesure rien et ne compte ni remises, ni réflexion, ni outils."
+      ],
+      "theory": "### Les ingrédients\n\nLe coût mensuel d'un usage se calcule avec quatre ingrédients :\n\n$$\\text{coût mensuel} = N \\times (1 + r) \\times \\left( T_{\\text{ent}} \\times \\frac{P_{\\text{ent}}}{10^6} + (T_{\\text{sor}} + T_{\\text{réf}}) \\times \\frac{P_{\\text{sor}}}{10^6} \\right)$$\n\n- $N$ : le **nombre de requêtes par mois**. Pour un outil interne, c'est le nombre d'utilisateurs × les requêtes par utilisateur et par jour × les jours d'usage. Le scénario par défaut du [calculateur de coûts](/calculateur-couts-ia) compte ainsi 10 × 20 × 30 = 6 000 requêtes.\n- $r$ : la **part de relances**, c'est-à-dire des requêtes refaites après une erreur (JSON invalide, délai dépassé, réponse refusée par un contrôle). Aucune valeur générale n'est fiable : elle se mesure sur votre application.\n- $T_{\\text{ent}}$, $T_{\\text{sor}}$, $T_{\\text{réf}}$ : les **tokens moyens** d'entrée, de sortie et de réflexion par requête. Pour une conversation, l'entrée moyenne se déduit de la formule du module 3.\n- $P_{\\text{ent}}$, $P_{\\text{sor}}$ : les **prix par million de tokens**, lus sur la page du fournisseur à la date du calcul.\n\n### Mesurer plutôt que deviner\n\nUne estimation honnête commence par un **petit échantillon réel**. Rassemblez quelques dizaines de requêtes représentatives de l'usage visé (des données fictives qui leur ressemblent font l'affaire au début), envoyez-les au modèle envisagé et lisez le compteur d'usage de chaque réponse (module 7). Relevez la moyenne, mais aussi les **valeurs hautes** : si quelques requêtes sont dix fois plus longues que les autres, la moyenne seule cache ce qui fait grimper la facture.\n\nPour l'entrée, on peut aussi compter sans lancer de génération : chez Anthropic, le point d'accès de comptage est gratuit (documentation consultée le 18/10/2026) et donne une estimation. Pour la sortie, on ne connaît le nombre qu'après coup ; le plafond de sortie fournit au moins un **maximum** pour le pire cas.\n\n### Une fourchette, pas un chiffre\n\nLe code ci-dessous calcule trois scénarios avec des valeurs d'illustration (un prix d'entrée de 2 \\$ et un prix de sortie de 10 \\$ par million de tokens) :\n\n| Scénario | Requêtes par mois | Tokens d'entrée | Tokens de sortie | Relances | Coût mensuel |\n| :-- | --: | --: | --: | --: | --: |\n| Optimiste | 4 000 | 1 000 | 300 | 0 % | 20 \\$ |\n| Central | 6 000 | 1 500 | 500 | 5 % | 50,40 \\$ |\n| Pessimiste | 12 000 | 3 000 | 900 | 15 % | 207 \\$ |\n\nLe scénario haut coûte environ dix fois le scénario bas. Ce n'est pas une erreur de calcul : c'est l'incertitude réelle, et mieux vaut la connaître avant de s'engager. Dans le scénario central, ajouter 2 000 tokens de réflexion par requête (module 4) fait passer le coût de 50,40 \\$ à 176,40 \\$ par mois : le poste « réflexion » peut dominer tous les autres.\n\n### Ce que fait le calculateur du site, et ce qu'il ne fait pas\n\nLe [calculateur de coûts](/calculateur-couts-ia) applique la formule de base (entrée × prix d'entrée + sortie × prix de sortie, multipliée par les requêtes) pour un modèle choisi. Son état est mémorisé dans l'URL : il suffit de copier le lien pour partager un calcul. Il **ne mesure rien** et ne contacte aucun fournisseur : les prix sont saisis à la main et datés (dernier contrôle complet le 04/10/2026). Il ne compte pas les remises de mise en cache ou de traitement par lots, les appels d'outils, la recherche web, le stockage, les taxes ni les variations de change. Pour un modèle de raisonnement, ajoutez vous-même les tokens de réflexion aux tokens de sortie.",
+      "analogy": {
+        "title": "Le budget d'un voyage",
+        "text": "Pour prévoir le budget d'un voyage, on ne multiplie pas un seul prix de repas par un seul nombre de jours : on distingue un voyage économe, un voyage moyen et un voyage où tout se passe moins bien (grève, hôtel plus cher, repas au restaurant). On garde une marge pour les imprévus, et on vérifie les prix au moment de réserver.\n\n**Limite de l'analogie** : les imprévus d'un voyage sont rares et visibles, alors que ceux d'un usage de modèle (réflexion plus longue que prévu, relances, historique qui s'allonge) sont fréquents et se lisent dans le compteur d'usage : on peut donc les mesurer."
+      },
+      "example": {
+        "title": "Un assistant interne fictif",
+        "text": "Une équipe de 10 personnes (fictive) envisage un assistant de recherche documentaire. Elle suppose 20 requêtes par personne et par jour pendant 30 jours, soit 6 000 requêtes par mois. Sur un échantillon de test, elle relève environ 1 500 tokens d'entrée et 500 tokens de sortie en moyenne, avec quelques requêtes à 3 000 tokens d'entrée. Elle calcule donc trois scénarios plutôt qu'un : le bas suppose moins de requêtes et des entrées plus courtes, le haut suppose le double de requêtes, des entrées plus longues et 15 % de relances. Tous ces nombres sont des hypothèses écrites noir sur blanc, à remplacer par des mesures."
+      },
+      "diagram": {
+        "title": "Du volume à la fourchette",
+        "description": "Quatre ingrédients se multiplient : le volume, les tokens, les prix et la part de relances. Le résultat se donne en trois scénarios. Les montants sont ceux du code, avec des valeurs d'illustration.",
+        "svg": "<svg viewBox=\"0 0 880 390\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Schéma de l'estimation d'un budget : volume, tokens, prix, relances, puis trois scénarios\">\n  <rect width=\"880\" height=\"390\" rx=\"16\" fill=\"#0f172a\" />\n  <text x=\"440\" y=\"36\" fill=\"#f8fafc\" font-family=\"sans-serif\" font-size=\"17\" font-weight=\"700\" text-anchor=\"middle\">Les ingrédients d'une estimation de budget</text>\n  <text x=\"440\" y=\"58\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Le schéma montre la structure du calcul ; les montants sont ceux du code, en valeurs d'illustration</text>\n  <g id=\"volume\">\n  <rect x=\"40\" y=\"90\" width=\"170\" height=\"130\" rx=\"12\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" stroke-width=\"2\" />\n  <text x=\"125\" y=\"124\" fill=\"#7dd3fc\" font-family=\"sans-serif\" font-size=\"16\" font-weight=\"700\" text-anchor=\"middle\">Volume</text>\n  <text x=\"125\" y=\"154\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">N requêtes par mois</text>\n  <text x=\"125\" y=\"176\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">utilisateurs × requêtes × jours</text>\n  </g>\n  <g id=\"tokens\">\n  <rect x=\"250\" y=\"90\" width=\"170\" height=\"130\" rx=\"12\" fill=\"#1e1b4b\" stroke=\"#818cf8\" stroke-width=\"2\" />\n  <text x=\"335\" y=\"124\" fill=\"#c7d2fe\" font-family=\"sans-serif\" font-size=\"16\" font-weight=\"700\" text-anchor=\"middle\">Tokens</text>\n  <text x=\"335\" y=\"154\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">entrée, sortie, réflexion</text>\n  <text x=\"335\" y=\"176\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">à mesurer sur un échantillon</text>\n  </g>\n  <g id=\"prix\">\n  <rect x=\"460\" y=\"90\" width=\"170\" height=\"130\" rx=\"12\" fill=\"#052e16\" stroke=\"#34d399\" stroke-width=\"2\" />\n  <text x=\"545\" y=\"124\" fill=\"#a7f3d0\" font-family=\"sans-serif\" font-size=\"16\" font-weight=\"700\" text-anchor=\"middle\">Prix</text>\n  <text x=\"545\" y=\"154\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">par million de tokens</text>\n  <text x=\"545\" y=\"176\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">relevé daté, à vérifier</text>\n  </g>\n  <g id=\"relances\">\n  <rect x=\"670\" y=\"90\" width=\"170\" height=\"130\" rx=\"12\" fill=\"#451a03\" stroke=\"#f59e0b\" stroke-width=\"2\" />\n  <text x=\"755\" y=\"124\" fill=\"#fde68a\" font-family=\"sans-serif\" font-size=\"16\" font-weight=\"700\" text-anchor=\"middle\">Relances</text>\n  <text x=\"755\" y=\"154\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">requêtes refaites</text>\n  <text x=\"755\" y=\"176\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">part à mesurer</text>\n  </g>\n  <text x=\"225\" y=\"162\" fill=\"#f8fafc\" font-family=\"sans-serif\" font-size=\"24\" font-weight=\"700\" text-anchor=\"middle\">×</text>\n  <text x=\"435\" y=\"162\" fill=\"#f8fafc\" font-family=\"sans-serif\" font-size=\"24\" font-weight=\"700\" text-anchor=\"middle\">×</text>\n  <text x=\"645\" y=\"162\" fill=\"#f8fafc\" font-family=\"sans-serif\" font-size=\"24\" font-weight=\"700\" text-anchor=\"middle\">×</text>\n  <line x1=\"440\" y1=\"226\" x2=\"440\" y2=\"252\" stroke=\"#38bdf8\" stroke-width=\"2.5\" />\n  <polygon points=\"432,250 448,250 440,264\" fill=\"#38bdf8\" />\n  <g id=\"fourchette\">\n  <rect x=\"40\" y=\"270\" width=\"800\" height=\"100\" rx=\"12\" fill=\"#1e293b\" stroke=\"#f59e0b\" stroke-width=\"2\" />\n  <text x=\"440\" y=\"298\" fill=\"#fde68a\" font-family=\"sans-serif\" font-size=\"16\" font-weight=\"700\" text-anchor=\"middle\">Une fourchette, pas un seul chiffre</text>\n  <text x=\"160\" y=\"328\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Optimiste</text>\n  <text x=\"160\" y=\"352\" fill=\"#a7f3d0\" font-family=\"sans-serif\" font-size=\"16\" font-weight=\"700\" text-anchor=\"middle\">20 $ par mois</text>\n  <text x=\"440\" y=\"328\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Central</text>\n  <text x=\"440\" y=\"352\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"16\" font-weight=\"700\" text-anchor=\"middle\">50 $ par mois</text>\n  <text x=\"720\" y=\"328\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Pessimiste</text>\n  <text x=\"720\" y=\"352\" fill=\"#fda4af\" font-family=\"sans-serif\" font-size=\"16\" font-weight=\"700\" text-anchor=\"middle\">207 $ par mois</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "Le volume",
+            "explanation": "Nombre de requêtes par mois : utilisateurs × requêtes par jour × jours. C'est souvent le chiffre le moins bien connu au lancement.",
+            "highlight": [
+              "volume"
+            ]
+          },
+          {
+            "title": "Les tokens",
+            "explanation": "Tokens d'entrée, de sortie et de réflexion par requête. On les lit dans le compteur d'usage sur un échantillon réel plutôt que de les deviner.",
+            "highlight": [
+              "tokens"
+            ]
+          },
+          {
+            "title": "Les prix",
+            "explanation": "Prix d'entrée et de sortie par million de tokens, lus sur la page du fournisseur à la date du calcul.",
+            "highlight": [
+              "prix"
+            ]
+          },
+          {
+            "title": "Les relances",
+            "explanation": "Part des requêtes refaites après une erreur (JSON invalide, délai dépassé, réponse refusée). Elle se mesure, elle ne se devine pas.",
+            "highlight": [
+              "relances"
+            ]
+          },
+          {
+            "title": "Une fourchette",
+            "explanation": "On calcule un scénario bas, un central et un haut. Dans l'exemple du code, le haut vaut environ dix fois le bas : cet écart est une information, pas une erreur.",
+            "highlight": [
+              "fourchette"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "code": "# Estimer un budget mensuel avec une fourchette, pas avec un seul chiffre.\n# Tous les paramètres sont des HYPOTHÈSES D'ILLUSTRATION à remplacer par vos mesures.\nPRIX_ENTREE, PRIX_SORTIE = 2.00, 10.00        # $ par million de tokens (illustration)\n\ndef cout_mensuel(requetes_par_mois, tokens_entree, tokens_sortie, relances=0.0, tokens_reflexion=0):\n    \"\"\"Même arithmétique que le calculateur du site, plus une part de relances\n    (requêtes refaites après une erreur) et des tokens de réflexion facturés en sortie.\"\"\"\n    par_requete = (tokens_entree * PRIX_ENTREE + (tokens_sortie + tokens_reflexion) * PRIX_SORTIE) / 1e6\n    return requetes_par_mois * (1 + relances) * par_requete\n\n# Contrôle : le scénario par défaut du calculateur (10 utilisateurs, 20 requêtes par jour, 30 jours,\n# 1 000 tokens en entrée, 500 en sortie) donne 10 x 20 x 30 = 6 000 requêtes.\nprint(f\"Scénario du calculateur : {cout_mensuel(6000, 1000, 500):.2f} $ par mois\")\nprint()\n\nSCENARIOS = {                 # requêtes/mois, entrée, sortie, relances\n    \"optimiste\": (4_000, 1_000, 300, 0.00),\n    \"central\": (6_000, 1_500, 500, 0.05),\n    \"pessimiste\": (12_000, 3_000, 900, 0.15),\n}\nfor nom, (n, t_in, t_out, relances) in SCENARIOS.items():\n    print(f\"{nom:10s} {n:6d} requêtes, {t_in} en entrée, {t_out} en sortie, \"\n          f\"relances {relances:.0%} -> {cout_mensuel(n, t_in, t_out, relances):7.2f} $ par mois\")\n\n# Même scénario central, mais avec un modèle de raisonnement qui produit ~2 000 tokens de réflexion.\ncentral = SCENARIOS[\"central\"]\navec = cout_mensuel(*central, tokens_reflexion=2_000)\nprint()\nprint(f\"Scénario central avec 2 000 tokens de réflexion par requête : {avec:.2f} $ par mois\")",
+        "explanation": "Estime un coût mensuel avec trois scénarios, vérifie que l'arithmétique donne bien le résultat du calculateur du site pour son scénario par défaut (42 dollars), puis ajoute des tokens de réflexion. Tous les paramètres sont des hypothèses d'illustration. La sortie ci-dessous a été obtenue en exécutant ce code.",
+        "output": "Scénario du calculateur : 42.00 $ par mois\n\noptimiste    4000 requêtes, 1000 en entrée, 300 en sortie, relances 0% ->   20.00 $ par mois\ncentral      6000 requêtes, 1500 en entrée, 500 en sortie, relances 5% ->   50.40 $ par mois\npessimiste  12000 requêtes, 3000 en entrée, 900 en sortie, relances 15% ->  207.00 $ par mois\n\nScénario central avec 2 000 tokens de réflexion par requête : 176.40 $ par mois",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Un usage compte 6 000 requêtes par mois, avec 1 000 tokens d'entrée à 2 dollars par million et 500 tokens de sortie à 10 dollars par million. Quel est le coût mensuel, sans relances ni remises ?",
+          "options": [
+            "7 dollars",
+            "42 dollars",
+            "70 dollars",
+            "420 dollars"
+          ],
+          "correctIndex": 1,
+          "explanation": "Une requête coûte 1 000 × 2 / 1 000 000 + 500 × 10 / 1 000 000 = 0,002 + 0,005 = 0,007 dollar. Pour 6 000 requêtes, cela fait 0,007 × 6 000 = 42 dollars. 7 dollars correspond à 1 000 requêtes, et les deux autres propositions sont des erreurs d'un facteur 10."
+        },
+        {
+          "question": "Pourquoi calculer trois scénarios (bas, central, haut) plutôt qu'un seul chiffre ?",
+          "options": [
+            "Parce que la moyenne mesurée sur un petit échantillon suffit à connaître le coût exact.",
+            "Parce que le volume, la taille des requêtes, la réflexion et les relances varient, et qu'un seul chiffre cache cette incertitude.",
+            "Parce que les éditeurs facturent selon trois paliers de volume.",
+            "Parce qu'on ne peut estimer que les tokens de sortie, jamais ceux d'entrée."
+          ],
+          "correctIndex": 1,
+          "explanation": "L'incertitude porte sur plusieurs ingrédients à la fois, et elle se compose : un seul chiffre la masque. Une moyenne sur un petit échantillon ne donne pas le coût exact, surtout si quelques requêtes sont beaucoup plus longues. Les paliers de prix existent chez certains éditeurs, mais ce n'est pas la raison des scénarios. Et l'entrée peut être comptée à l'avance, contrairement à la sortie."
+        },
+        {
+          "question": "Vous utilisez un modèle de raisonnement et le calculateur de coûts du site. Que devez-vous faire pour que le calcul reste honnête ?",
+          "options": [
+            "Rien : le calculateur compte déjà les tokens de réflexion.",
+            "Ajouter les tokens de réflexion estimés aux tokens de sortie saisis.",
+            "Ajouter les tokens de réflexion aux tokens d'entrée, car ils sont lus par le modèle.",
+            "Diviser le prix de sortie par deux, car la réflexion est moins chère."
+          ],
+          "correctIndex": 1,
+          "explanation": "Le calculateur ne mesure rien et ne sépare pas la réflexion : il le rappelle lui-même, les tokens de réflexion sont facturés comme des tokens de sortie, donc à ajouter à la sortie saisie. Les placer en entrée les facturerait au mauvais prix, et rien n'indique que la réflexion soit facturée moins cher."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Scénario",
+          "definition": "Jeu d'hypothèses (volume, tokens, relances) qui donne une estimation de coût ; on en compare plusieurs pour obtenir une fourchette."
+        },
+        {
+          "term": "Relance (retry)",
+          "definition": "Requête refaite après un échec ou une réponse inutilisable : elle est facturée comme une requête normale."
+        },
+        {
+          "term": "Compteur de tokens (count tokens)",
+          "definition": "Outil d'un éditeur qui estime le nombre de tokens d'entrée d'une requête sans lancer de génération."
+        },
+        {
+          "term": "Plafond de sortie",
+          "definition": "Limite supérieure des tokens qu'une réponse peut produire ; elle donne un maximum pour le pire cas."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Refaire le scénario central",
+          "prompt": "Retrouvez le coût mensuel du scénario central du module : 6 000 requêtes, 5 % de relances, 1 500 tokens d’entrée et 500 de sortie, prix de 2 \\$ et 10 \\$ par million. Quel ingrédient reste le plus incertain ?",
+          "solution": "Par requête : 1 500 × 2 / 10⁶ = 0,003 \\$ d’entrée, 500 × 10 / 10⁶ = 0,005 \\$ de sortie, soit 0,008 \\$. Avec les relances : 6 000 × 1,05 × 0,008 = 50,40 \\$. Le poste le plus incertain n’est pas le prix, qui se lit sur la page du fournisseur, mais le volume et la longueur réels, et surtout la part de relances et les tokens de réflexion, qui ne se devinent pas. Ajouter 2 000 tokens de réflexion ferait passer la facture à 176,40 \\$."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Anthropic, documentation : Token counting (consultée le 18/10/2026)",
+          "href": "https://platform.claude.com/docs/en/build-with-claude/token-counting"
+        },
+        {
+          "label": "Anthropic, documentation : Vision, limites et coûts des images (consultée le 18/10/2026)",
+          "href": "https://platform.claude.com/docs/en/build-with-claude/vision"
+        },
+        {
+          "label": "Pope et al., 2022. Efficiently Scaling Transformer Inference (arXiv 2211.05102)",
+          "href": "https://arxiv.org/abs/2211.05102"
+        }
+      ]
+    },
+    {
+      "id": "reduire-la-facture",
+      "title": "Réduire la facture : cache du prompt, lots, choix du modèle et longueur des réponses",
+      "keyTakeaways": [
+        "Chaque token d'entrée évité l'est à chaque requête : résumer l'historique, récupérer moins de passages et déclarer moins d'outils sont les leviers les plus directs.",
+        "La mise en cache facture bien moins cher la relecture d'un début de prompt identique (lecture à 0,1 fois le prix d'entrée chez Anthropic pour la plupart des modèles), à condition de mettre le stable en tête et de garder une configuration stable.",
+        "Écrire dans le cache coûte plus cher que lire : avec 1,25 et 0,1, il faut au moins deux requêtes dans la durée du cache pour y gagner.",
+        "Un modèle moins cher par token ne coûte moins par tâche que s'il réussit la tâche : on compare le coût par tâche réussie sur ses propres exemples.",
+        "Le traitement par lots est facturé à 50 % du tarif standard chez Anthropic et OpenAI, pour des tâches qui acceptent jusqu'à 24 heures d'attente."
+      ],
+      "theory": "### Levier 1 : envoyer moins de tokens\n\nChaque token d'entrée évité l'est **à chaque requête**, ce qui en fait le levier le plus direct. Quelques pistes : résumer ou tronquer l'historique d'une conversation (le résumé coûte lui-même des tokens à produire, et il modifie le début du prompt, ce qui interagit avec le cache), récupérer moins de passages dans un système de RAG (le réglage *top-k* du cours [Le RAG](/cours/rag)), ne déclarer que les outils réellement utiles, réduire la taille des images quand le détail n'est pas nécessaire. Chaque simplification peut dégrader la qualité : mesurez-le.\n\n### Levier 2 : mettre en cache le début du prompt\n\nQuand le début d'une requête est **identique** d'un appel à l'autre (consignes, définitions d'outils, document de référence), certains éditeurs facturent beaucoup moins cher sa relecture. Les mécanismes diffèrent. D'après leurs documentations consultées le 18/10/2026 :\n\n| | Anthropic | OpenAI |\n| :-- | :-- | :-- |\n| Activation | À demander avec un champ `cache_control` (mode automatique ou points de cache explicites) | Activée par défaut pour les modèles pris en charge |\n| Écriture dans le cache | 1,25 fois le prix d'entrée (durée de 5 minutes), 2 fois pour une durée d'une heure | 1,25 fois le prix d'entrée pour les modèles récents |\n| Lecture dans le cache | 0,1 fois le prix d'entrée pour la plupart des modèles, moins pour certains (0,05 ou 0,025) | 0,1 fois le prix d'entrée pour les modèles récents, moins pour certains (0,05) |\n| Durée de vie | 5 minutes par défaut, renouvelée à chaque lecture sans frais | 30 minutes par défaut pour les modèles récents, autres durées pour les plus anciens |\n| Taille minimale | Selon le modèle, de 512 à 4 096 tokens | 1 024 tokens pour les modèles récents |\n| Où lire le résultat | `cache_creation_input_tokens` et `cache_read_input_tokens` | `input_tokens_details.cached_tokens` |\n\nCes conditions **changent selon les modèles et avec le temps** : lisez la page de votre éditeur avant de calculer. Plusieurs règles reviennent :\n\n- **Ordre du prompt.** Le cache repose sur un **préfixe** identique. Chez Anthropic, le préfixe se construit dans l'ordre outils, consignes, messages, et une modification à un niveau invalide ce niveau et les suivants. Mettez donc le stable en tête et le variable (la question) à la fin. Une date, un identifiant de session ou un horodatage placé au début empêche tout succès de cache.\n- **Identique au caractère près.** Chez Anthropic, un succès de cache exige un début de prompt strictement identique, et une entrée de cache n'est disponible qu'après le début de la première réponse : des requêtes lancées toutes en même temps ratent donc le cache.\n- **Rentabilité.** Écrire coûte plus cher que lire : avec 1,25 pour l'écriture et 0,1 pour la lecture, deux requêtes dans la durée du cache paient le préfixe 1,35 fois au lieu de 2 fois. Une seule requête paie 1,25 fois au lieu de 1 : elle perd.\n- **Configuration stable.** Chez Anthropic, changer le niveau d'effort ou la configuration de réflexion entre deux requêtes invalide les points de cache des messages (module 4).\n- **Taille minimale.** En dessous du minimum du modèle, le prompt est traité sans cache et sans erreur : un cache qui ne se déclenche jamais passe inaperçu si l'on ne lit pas le compteur d'usage.\n\n### Levier 3 : choisir le modèle adapté\n\nLe relevé du site (04/10/2026) montre, chez un même éditeur, un écart d'un facteur 100 entre un modèle de la gamme économique et un de la gamme haute (0,10 \\$ contre 10 \\$ par million de tokens en entrée). Utiliser le modèle le plus cher pour classer des courriels est un gaspillage probable, mais **le prix par token n'est pas le coût par tâche** : un modèle moins cher peut demander plus de relances, produire des réponses plus longues ou moins souvent justes, et les tokenizers comptent différemment (module 1). Le bon indicateur est le **coût par tâche réussie**, mesuré sur vos propres exemples. La page [comparateur de modèles](/comparateur-modeles-ia) du site propose pour cela une grille de test à remplir soi-même (elle n'appelle aucun modèle).\n\nLe **routage** (ou cascade) consiste à envoyer les demandes simples à un modèle économique et les difficiles à un modèle plus puissant, par une règle simple, un petit classifieur, ou en laissant le petit modèle essayer d'abord. Aucun pourcentage de demandes « simples » ne vaut pour tous : il se mesure sur votre trafic, et le routeur peut lui-même se tromper.\n\n### Levier 4 : limiter la sortie\n\nLa sortie est le compteur le plus cher par token (module 2). Demandez des réponses courtes dans la consigne, choisissez un format compact (une étiquette plutôt qu'une phrase pour une classification) et fixez un plafond de tokens, en acceptant qu'une réponse qui l'atteint soit coupée.\n\n### Levier 5 : différer ce qui n'est pas urgent\n\nLe **traitement par lots** (*batch*) envoie de nombreuses requêtes à traiter de façon asynchrone. D'après les documentations consultées le 18/10/2026, Anthropic et OpenAI le facturent à 50 % du tarif standard. Chez Anthropic, un lot est limité à 100 000 requêtes ou 256 Mo, la plupart des lots se terminent en moins d'une heure, et les requêtes non traitées au bout de 24 heures expirent. Chez OpenAI, la fenêtre de traitement est de 24 heures, avec jusqu'à 50 000 requêtes et 200 Mo par fichier. Le lot convient à l'indexation, à l'évaluation, à la traduction d'un catalogue, pas à un assistant qui doit répondre tout de suite. Chez Anthropic, les remises du cache et du lot peuvent se cumuler, mais les succès de cache y sont obtenus au mieux (la documentation cite des taux typiques de 30 % à 98 % selon le trafic) et elle suggère la durée d'une heure pour le cache dans ce cas.\n\n### Des ordres de grandeur, pas des promesses\n\nLe code ci-dessous chiffre ces leviers sur un cas d'illustration. Les pourcentages qu'il affiche dépendent entièrement de ses hypothèses (part du préfixe, taux de succès du cache, prix) : **ne les transposez pas** à votre usage sans refaire le calcul.",
+      "analogy": {
+        "title": "Le plat préparé à l'avance",
+        "text": "Un restaurant qui sert tous les midis le même plat du jour prépare la base une fois le matin, puis n'a plus qu'à finir chaque assiette à la commande : la préparation commune est faite une fois, la finition est faite à chaque client. Le prompt mis en cache joue le rôle de la base commune, et la question de chaque requête celui de la finition. Si la recette change en cours de journée, il faut recommencer la base.\n\n**Limite de l'analogie** : la base d'un restaurant ne se périme pas en cinq minutes, alors qu'un cache de prompt a une durée de vie courte et doit être renouvelé par des requêtes régulières."
+      },
+      "example": {
+        "title": "Un cas chiffré (valeurs d'illustration)",
+        "text": "Un assistant (fictif) envoie 100 000 requêtes par mois : 4 000 tokens identiques à chaque fois (consignes, documents), 300 tokens variables et 400 tokens de sortie, avec un prix d'entrée de 2 \\$ et un prix de sortie de 10 \\$ par million de tokens (illustration). Référence : 1 260 \\$ par mois. Avec un cache dont 90 % des lectures réussissent et les coefficients d'Anthropic, 632 \\$ (environ moitié moins). Avec seulement 50 % de succès, 1 000 \\$. Avec des réponses deux fois plus courtes, 1 060 \\$. Avec un traitement par lots (si les requêtes ne sont pas urgentes), 630 \\$. Avec un modèle moins cher aux prix imaginaires de 0,30 \\$ et 2,50 \\$, 229 \\$, **à condition que la qualité suive**."
+      },
+      "diagram": {
+        "title": "Cinq leviers",
+        "description": "Cinq façons de réduire une facture : envoyer moins, mettre en cache, choisir le modèle, limiter la sortie, différer. Schéma qualitatif : aucune économie chiffrée n'y figure.",
+        "svg": "<svg viewBox=\"0 0 880 390\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Les cinq leviers de réduction du coût d'un usage de modèle de langage\">\n  <rect width=\"880\" height=\"390\" rx=\"16\" fill=\"#0f172a\" />\n  <text x=\"440\" y=\"36\" fill=\"#f8fafc\" font-family=\"sans-serif\" font-size=\"17\" font-weight=\"700\" text-anchor=\"middle\">Cinq leviers pour réduire une facture de tokens</text>\n  <text x=\"440\" y=\"58\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Chaque levier a ses conditions : l'ampleur de l'économie se mesure sur votre usage</text>\n  <g id=\"levier-contexte\">\n  <rect x=\"25\" y=\"90\" width=\"160\" height=\"170\" rx=\"12\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" stroke-width=\"2\" />\n  <text x=\"105\" y=\"124\" fill=\"#7dd3fc\" font-family=\"sans-serif\" font-size=\"15\" font-weight=\"700\" text-anchor=\"middle\">Envoyer moins</text>\n  <text x=\"105\" y=\"160\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"11.5\" text-anchor=\"middle\">Historique résumé ou tronqué,</text>\n  <text x=\"105\" y=\"182\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"11.5\" text-anchor=\"middle\">moins de passages,</text>\n  <text x=\"105\" y=\"204\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"11.5\" text-anchor=\"middle\">outils utiles seulement</text>\n  <text x=\"105\" y=\"244\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">Levier 1</text>\n  </g>\n  <g id=\"levier-cache\">\n  <rect x=\"195\" y=\"90\" width=\"160\" height=\"170\" rx=\"12\" fill=\"#1e1b4b\" stroke=\"#818cf8\" stroke-width=\"2\" />\n  <text x=\"275\" y=\"124\" fill=\"#c7d2fe\" font-family=\"sans-serif\" font-size=\"15\" font-weight=\"700\" text-anchor=\"middle\">Mettre en cache</text>\n  <text x=\"275\" y=\"160\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"11.5\" text-anchor=\"middle\">Partie stable en tête,</text>\n  <text x=\"275\" y=\"182\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"11.5\" text-anchor=\"middle\">partie variable à la fin,</text>\n  <text x=\"275\" y=\"204\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"11.5\" text-anchor=\"middle\">lecture bien moins chère</text>\n  <text x=\"275\" y=\"244\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">Levier 2</text>\n  </g>\n  <g id=\"levier-modele\">\n  <rect x=\"365\" y=\"90\" width=\"160\" height=\"170\" rx=\"12\" fill=\"#052e16\" stroke=\"#34d399\" stroke-width=\"2\" />\n  <text x=\"445\" y=\"124\" fill=\"#a7f3d0\" font-family=\"sans-serif\" font-size=\"15\" font-weight=\"700\" text-anchor=\"middle\">Choisir le modèle</text>\n  <text x=\"445\" y=\"160\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"11.5\" text-anchor=\"middle\">Le plus petit qui réussit</text>\n  <text x=\"445\" y=\"182\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"11.5\" text-anchor=\"middle\">la tâche, mesuré sur vos</text>\n  <text x=\"445\" y=\"204\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"11.5\" text-anchor=\"middle\">exemples, ou routage</text>\n  <text x=\"445\" y=\"244\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">Levier 3</text>\n  </g>\n  <g id=\"levier-sortie\">\n  <rect x=\"535\" y=\"90\" width=\"160\" height=\"170\" rx=\"12\" fill=\"#451a03\" stroke=\"#f59e0b\" stroke-width=\"2\" />\n  <text x=\"615\" y=\"124\" fill=\"#fde68a\" font-family=\"sans-serif\" font-size=\"15\" font-weight=\"700\" text-anchor=\"middle\">Limiter la sortie</text>\n  <text x=\"615\" y=\"160\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"11.5\" text-anchor=\"middle\">Consigne de concision,</text>\n  <text x=\"615\" y=\"182\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"11.5\" text-anchor=\"middle\">format compact,</text>\n  <text x=\"615\" y=\"204\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"11.5\" text-anchor=\"middle\">plafond de tokens</text>\n  <text x=\"615\" y=\"244\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">Levier 4</text>\n  </g>\n  <g id=\"levier-lots\">\n  <rect x=\"705\" y=\"90\" width=\"160\" height=\"170\" rx=\"12\" fill=\"#4c0519\" stroke=\"#fb7185\" stroke-width=\"2\" />\n  <text x=\"785\" y=\"124\" fill=\"#fecdd3\" font-family=\"sans-serif\" font-size=\"15\" font-weight=\"700\" text-anchor=\"middle\">Différer</text>\n  <text x=\"785\" y=\"160\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"11.5\" text-anchor=\"middle\">Traitement par lots</text>\n  <text x=\"785\" y=\"182\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"11.5\" text-anchor=\"middle\">pour les tâches non</text>\n  <text x=\"785\" y=\"204\" fill=\"#e2e8f0\" font-family=\"sans-serif\" font-size=\"11.5\" text-anchor=\"middle\">urgentes, tarif réduit</text>\n  <text x=\"785\" y=\"244\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">Levier 5</text>\n  </g>\n  <g id=\"mesure\">\n  <rect x=\"25\" y=\"290\" width=\"830\" height=\"80\" rx=\"10\" fill=\"#1e293b\" stroke=\"#94a3b8\" stroke-width=\"1.5\" />\n  <text x=\"440\" y=\"322\" fill=\"#f8fafc\" font-family=\"sans-serif\" font-size=\"14\" font-weight=\"700\" text-anchor=\"middle\">Dans tous les cas : mesurer le coût par tâche réussie,</text>\n  <text x=\"440\" y=\"346\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"13\" text-anchor=\"middle\">pas seulement le prix par token, et vérifier la qualité sur vos propres exemples.</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "Envoyer moins",
+            "explanation": "Chaque token d'entrée évité l'est à chaque requête : historique résumé ou tronqué, moins de passages récupérés, seulement les outils utiles.",
+            "highlight": [
+              "levier-contexte"
+            ]
+          },
+          {
+            "title": "Mettre en cache le préfixe stable",
+            "explanation": "Quand le début de la requête est identique d'un appel à l'autre, sa relecture peut être facturée bien moins cher. Il faut placer la partie stable en tête.",
+            "highlight": [
+              "levier-cache"
+            ]
+          },
+          {
+            "title": "Choisir le modèle adapté",
+            "explanation": "Un modèle plus petit coûte moins par token ; il ne coûte moins par tâche que s'il réussit la tâche. Seule une mesure sur vos exemples le dit.",
+            "highlight": [
+              "levier-modele"
+            ]
+          },
+          {
+            "title": "Limiter la sortie",
+            "explanation": "Une réponse plus courte réduit les tokens de sortie, les plus chers. Un plafond protège le pire cas, au risque de couper la réponse.",
+            "highlight": [
+              "levier-sortie"
+            ]
+          },
+          {
+            "title": "Différer ce qui n'est pas urgent",
+            "explanation": "Le traitement par lots, asynchrone, est facturé à tarif réduit chez les éditeurs qui le proposent : il convient aux tâches qui peuvent attendre.",
+            "highlight": [
+              "levier-lots"
+            ]
+          },
+          {
+            "title": "Mesurer",
+            "explanation": "Aucun levier n'est gagné d'avance : on compare le coût par tâche réussie avant et après.",
+            "highlight": [
+              "mesure"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "code": "# Effet de trois leviers sur un coût mensuel. Prix et volumes : VALEURS D'ILLUSTRATION.\n# Coefficients de la documentation d'Anthropic consultée le 18/10/2026 : écriture du cache 1,25 x le\n# prix d'entrée (durée de 5 minutes), lecture 0,1 x (0,05 x ou moins pour certains modèles),\n# traitement par lots 0,5 x. D'autres éditeurs ont d'autres coefficients : lisez les leurs.\nECRITURE, LECTURE, LOTS = 1.25, 0.10, 0.50\nPRIX_ENTREE, PRIX_SORTIE = 2.00, 10.00              # $ par million de tokens\n\nPREFIXE = 4_000      # tokens identiques à chaque requête (consignes, documents, outils)\nVARIABLE = 300       # tokens propres à chaque requête\nSORTIE = 400\nREQUETES = 100_000   # par mois\n\ndef cout(prefixe_x=1.0, sortie=SORTIE, remise_totale=1.0, prix=(PRIX_ENTREE, PRIX_SORTIE)):\n    entree = (PREFIXE * prefixe_x + VARIABLE) * prix[0]\n    return REQUETES * (entree + sortie * prix[1]) / 1e6 * remise_totale\n\ndef prefixe_avec_cache(taux_succes):\n    \"\"\"Coût moyen du préfixe, en multiples du prix d'entrée : un succès coûte LECTURE,\n    un échec réécrit le cache et coûte ECRITURE.\"\"\"\n    return taux_succes * LECTURE + (1 - taux_succes) * ECRITURE\n\nbase = cout()\nprint(f\"Référence                              : {base:8.2f} $ par mois\")\nfor h in (0.5, 0.9):\n    c = cout(prefixe_x=prefixe_avec_cache(h))\n    print(f\"Cache, {h:.0%} de lectures réussies         : {c:8.2f} $ ({c / base - 1:+.0%})\")\nc = cout(sortie=SORTIE // 2)\nprint(f\"Réponses deux fois plus courtes        : {c:8.2f} $ ({c / base - 1:+.0%})\")\nc = cout(remise_totale=LOTS)\nprint(f\"Traitement par lots (si non urgent)    : {c:8.2f} $ ({c / base - 1:+.0%})\")\nc = cout(prix=(0.30, 2.50))\nprint(f\"Modèle moins cher (0,30 / 2,50 $)      : {c:8.2f} $ ({c / base - 1:+.0%})  <- qualité à vérifier\")\n\n# À partir de combien de requêtes dans la durée du cache l'écriture est-elle rentabilisée ?\nprint()\nfor n in (1, 2, 3):\n    avec = ECRITURE + LECTURE * (n - 1)\n    print(f\"{n} requête(s) dans les 5 minutes : préfixe payé {avec:.2f} x au lieu de {n} x\")",
+        "explanation": "Chiffre l'effet du cache, de réponses plus courtes, du traitement par lots et d'un modèle moins cher sur un cas d'illustration, puis calcule à partir de combien de requêtes l'écriture du cache est rentabilisée. Prix, volumes et taux de succès sont des hypothèses. La sortie ci-dessous a été obtenue en exécutant ce code.",
+        "output": "Référence                              :  1260.00 $ par mois\nCache, 50% de lectures réussies         :  1000.00 $ (-21%)\nCache, 90% de lectures réussies         :   632.00 $ (-50%)\nRéponses deux fois plus courtes        :  1060.00 $ (-16%)\nTraitement par lots (si non urgent)    :   630.00 $ (-50%)\nModèle moins cher (0,30 / 2,50 $)      :   229.00 $ (-82%)  <- qualité à vérifier\n\n1 requête(s) dans les 5 minutes : préfixe payé 1.25 x au lieu de 1 x\n2 requête(s) dans les 5 minutes : préfixe payé 1.35 x au lieu de 2 x\n3 requête(s) dans les 5 minutes : préfixe payé 1.45 x au lieu de 3 x",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Vous voulez profiter de la mise en cache du prompt. Comment ordonnez-vous le prompt ?",
+          "options": [
+            "La question de l'utilisateur d'abord, pour que le modèle la voie en premier, puis les consignes.",
+            "Peu importe : le cache compare l'ensemble du prompt, où qu'il change.",
+            "Les consignes et documents stables en tête, la partie qui change à chaque requête à la fin.",
+            "La date et l'identifiant de session en tête, pour retrouver chaque requête dans les journaux."
+          ],
+          "correctIndex": 2,
+          "explanation": "Le cache repose sur un préfixe identique : tout ce qui change invalide ce niveau et ceux qui suivent. Placer la question ou une date en tête rend le préfixe différent à chaque appel, donc sans succès de cache. L'idée que l'ordre n'a pas d'importance oublie que la comparaison se fait du début vers la fin."
+        },
+        {
+          "question": "Avec une écriture de cache à 1,25 fois le prix d'entrée et une lecture à 0,1 fois, un préfixe est envoyé deux fois dans la durée du cache. Combien de fois le prix d'entrée de base paie-t-on ce préfixe au total, contre 2 fois sans cache ?",
+          "options": [
+            "1,25 fois",
+            "1,35 fois",
+            "2,5 fois",
+            "0,2 fois"
+          ],
+          "correctIndex": 1,
+          "explanation": "La première requête écrit le cache (1,25), la seconde le lit (0,1) : 1,25 + 0,1 = 1,35 fois, contre 2 fois sans cache. 1,25 oublie la lecture. 2,5 compterait l'écriture deux fois. 0,2 supposerait deux lectures, alors qu'il faut d'abord écrire."
+        },
+        {
+          "question": "Un modèle économique coûte 100 fois moins par token qu'un modèle haut de gamme. Pourquoi ne peut-on pas en conclure que la tâche coûtera 100 fois moins ?",
+          "options": [
+            "Parce que les éditeurs ajoutent un supplément aux modèles économiques.",
+            "Parce que le prix par token ne dit rien sur le nombre de tokens de la réponse.",
+            "Parce qu'il peut demander plus de relances, de tokens ou de réponses inutilisables, et que les tokenizers comptent différemment : on compare le coût par tâche réussie.",
+            "Parce que les modèles économiques n'ont pas de prix de sortie."
+          ],
+          "correctIndex": 2,
+          "explanation": "Le prix par token n'est qu'un facteur : le nombre de tokens, les relances et le taux de réussite comptent aussi, et ils se mesurent sur vos exemples. La deuxième réponse est incomplète : le prix par token ne dit rien du nombre de tokens, mais le problème ne s'arrête pas à la longueur des réponses. Les deux autres affirmations sont fausses."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Mise en cache du prompt (prompt caching)",
+          "definition": "Mécanisme par lequel un éditeur réutilise le calcul d'un début de prompt identique d'une requête à l'autre et facture sa relecture moins cher."
+        },
+        {
+          "term": "Préfixe",
+          "definition": "Début d'un prompt. Le cache ne s'applique que si ce début est identique d'une requête à l'autre."
+        },
+        {
+          "term": "Succès de cache (cache hit)",
+          "definition": "Requête dont le préfixe a été retrouvé dans le cache et facturé au tarif de lecture."
+        },
+        {
+          "term": "Traitement par lots (batch)",
+          "definition": "Envoi de nombreuses requêtes traitées de façon asynchrone, facturées à tarif réduit chez les éditeurs qui le proposent, avec un délai pouvant aller jusqu'à 24 heures."
+        },
+        {
+          "term": "Routage de modèles (cascade)",
+          "definition": "Méthode qui envoie chaque requête vers un modèle économique ou un modèle plus puissant selon sa difficulté."
+        },
+        {
+          "term": "Coût par tâche réussie",
+          "definition": "Coût total (relances comprises) divisé par le nombre de tâches correctement accomplies ; indicateur plus juste que le prix par token."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Le cache est-il rentable ?",
+          "prompt": "L’écriture dans le cache coûte 1,25 fois le prix d’entrée et la lecture 0,1 fois. Une seule requête utilise un préfixe mis en cache : y gagne-t-on ? Et avec deux requêtes ? Quelles conditions faut-il respecter ?",
+          "solution": "Avec une seule requête, le préfixe est payé 1,25 fois au lieu de 1 : on perd. Avec deux requêtes dans la durée du cache, il est payé 1,25 + 0,1 = 1,35 fois au lieu de 2, soit environ un tiers d’économie. Encore faut-il un début de prompt identique au caractère près, au-dessus de la taille minimale du modèle, avec le stable en tête et le variable à la fin. Une date ou un identifiant de session au début empêche le cache, et changer le réglage d’effort l’invalide."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Anthropic, documentation : Prompt caching (consultée le 18/10/2026)",
+          "href": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+        },
+        {
+          "label": "Anthropic, documentation : Batch processing (consultée le 18/10/2026)",
+          "href": "https://platform.claude.com/docs/en/build-with-claude/batch-processing"
+        },
+        {
+          "label": "OpenAI, documentation : Prompt caching (consultée le 18/10/2026)",
+          "href": "https://developers.openai.com/api/docs/guides/prompt-caching"
+        },
+        {
+          "label": "OpenAI, documentation : Batch API (consultée le 18/10/2026)",
+          "href": "https://developers.openai.com/api/docs/guides/batch"
+        }
+      ]
+    },
+    {
+      "id": "suivre-et-decider",
+      "title": "Suivre l'usage, plafonner, et savoir quand le prix au token n'est plus le bon outil",
+      "keyTakeaways": [
+        "Chaque réponse d'API indique les tokens consommés : le compteur d'usage est la source fiable du coût réel et se journalise par fonctionnalité.",
+        "Les champs diffèrent selon l'éditeur : chez Anthropic, input_tokens ne compte que les tokens après le dernier point de cache, et l'entrée totale est la somme de trois champs.",
+        "Les plafonds (tokens de sortie, nombre d'étapes d'un agent, quota par utilisateur, alertes) sont pour la plupart à votre charge.",
+        "Héberger soi-même remplace un coût proportionnel par un coût fixe : le seuil théorique est le coût fixe divisé par le prix moyen de l'API, dans le meilleur des cas.",
+        "Le coût en tokens n'est qu'une partie du coût d'un projet : évaluation, ingénierie, stockage, outils facturés à part, taxes et supervision s'y ajoutent."
+      ],
+      "theory": "### Lire le compteur d'usage\n\nChaque réponse d'une API de modèle indique les tokens consommés : c'est la **seule source fiable du coût réel d'un appel**. D'après les documentations consultées le 18/10/2026 :\n\n- **Anthropic** renvoie `input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens` et `output_tokens`. Piège : `input_tokens` ne compte que les tokens d'entrée **après le dernier point de cache**. L'entrée totale vaut la somme des trois champs d'entrée. Le détail `output_tokens_details.thinking_tokens` donne la part de réflexion, déjà comprise dans `output_tokens`.\n- **OpenAI** détaille les tokens mis en cache dans `input_tokens_details.cached_tokens` (et les écritures dans `cache_write_tokens`) et les tokens de réflexion dans `output_tokens_details.reasoning_tokens`.\n\nLes champs et leur sens **diffèrent d'un éditeur à l'autre** : lisez la documentation de celui que vous utilisez avant d'écrire votre calcul de coût. Le code ci-dessous en fait un exemple avec les champs d'Anthropic.\n\n### Journaliser, comparer, recalculer\n\n- **Enregistrez** pour chaque requête la date, la fonctionnalité concernée, le modèle et les champs d'usage, puis le coût calculé. Agréger par fonctionnalité et par jour montre où part l'argent.\n- **Surveillez la dérive** : un nombre moyen de tokens par requête qui augmente lentement révèle souvent un historique qui grossit, un prompt qui s'allonge ou un cache qui ne se déclenche plus (une baisse des tokens lus en cache dans le compteur).\n- **Comparez chaque mois** votre coût calculé avec la facture du fournisseur, qui fait foi. Gardez avec chaque calcul la **date des prix** utilisés : les tarifs changent.\n- **Comptez avant d'envoyer** quand c'est utile : chez Anthropic, le point d'accès de comptage est gratuit et donne une estimation de l'entrée (module 5).\n\n### Plafonner\n\nLes plafonds se posent à plusieurs niveaux, et la plupart sont à votre charge : un plafond de tokens de sortie par requête (module 4), une limite du nombre d'étapes et du total de tokens pour un agent qui boucle (voir le cours [Boucles agentiques](/cours/boucles-agentiques)), un quota par utilisateur pour une application publique, et une **alerte** quand le coût d'une requête ou d'une journée dépasse un seuil que vous avez fixé. Une erreur de boucle sans plafond est la manière la plus rapide de multiplier une facture.\n\n### Coût variable ou coût fixe : héberger soi-même\n\nUn modèle à poids ouverts peut être exécuté sur un serveur que l'on loue ou achète. Le coût n'est plus proportionnel aux tokens mais **fixe** : le serveur se paie même sans trafic. En première approximation, on compare le coût fixe mensuel au coût qu'aurait le même volume en API :\n\n$$\\text{seuil (millions de tokens par mois)} = \\frac{\\text{coût fixe mensuel}}{\\text{prix moyen de l'API par million de tokens}}$$\n\nAvec un coût fixe d'illustration de 1 500 \\$ par mois et un prix moyen de l'API de 4 \\$ par million de tokens, le seuil théorique est de 375 millions de tokens par mois. Ce calcul est un **meilleur cas**. Il suppose que le serveur peut produire ce volume, ce qui dépend du modèle, du matériel et de la charge, et se mesure. Il ignore le travail d'exploitation, la supervision, la redondance en cas de panne, les mises à jour, et l'écart éventuel de qualité entre le modèle ouvert et le modèle de l'API. Un modèle **téléchargeable gratuitement n'est pas gratuit à faire tourner**. Et le choix peut se justifier par d'autres raisons que le prix, comme la confidentialité de données qui ne doivent pas quitter l'organisation, à évaluer séparément.\n\n### Au-delà des tokens\n\nLe coût en tokens n'est qu'une partie du coût d'un projet. S'y ajoutent le temps d'évaluation de la qualité, l'ingénierie, le stockage d'un index pour un RAG, les outils facturés à part (recherche web par exemple), les taxes, les variations de change et la supervision. Pour un budget honnête, listez-les même quand vous ne pouvez pas les chiffrer encore.\n\n### Une liste de contrôle avant de lancer\n\n1. Compter les tokens sur un échantillon réel, avec le tokenizer du modèle visé (module 1).\n2. Calculer trois scénarios, avec les relances et la réflexion (modules 4 et 5).\n3. Ordonner le prompt pour le cache et lire les champs de cache dans le compteur (module 6).\n4. Poser des plafonds et des alertes (ce module).\n5. Journaliser l'usage, comparer à la facture chaque mois, et relire les prix à jour.",
+      "analogy": {
+        "title": "Le compteur d'eau et l'abonnement forfaitaire",
+        "text": "Avec un compteur, vous payez ce que vous consommez : si vous êtes absent un mois, la facture est presque nulle, mais une fuite non détectée peut la faire exploser. Avec un abonnement forfaitaire, vous payez le même montant quelle que soit la consommation : intéressant si vous consommez beaucoup, perdu si vous consommez peu. Une API à la consommation ressemble au compteur, un serveur loué au forfait, et le compteur d'usage est ce qui permet de repérer la fuite.\n\n**Limite de l'analogie** : un forfait d'eau a une capacité pratiquement illimitée, alors qu'un serveur a une capacité de production limitée, au-delà de laquelle il en faut un second."
+      },
+      "example": {
+        "title": "Lire un usage (valeurs inventées)",
+        "text": "Une réponse indique 320 tokens d'entrée non mis en cache, 4 000 tokens lus dans le cache, aucune écriture de cache et 410 tokens de sortie. L'entrée totale vaut 320 + 4 000 = 4 320 tokens. Avec un prix d'entrée de 2 \\$, une lecture de cache à 0,1 fois ce prix et un prix de sortie de 10 \\$ par million de tokens (illustration), l'appel coûte environ 0,0055 \\$, contre 0,0127 \\$ sans cache. Si l'on avait lu seulement `input_tokens`, on aurait cru que l'entrée ne comptait que 320 tokens."
+      },
+      "diagram": {
+        "title": "Le seuil entre API et serveur loué",
+        "description": "Courbe fictive : le coût d'une API croît avec le volume, celui d'un serveur loué est fixe. Elles se croisent à un seuil. Les nombres sont des valeurs d'illustration ; la capacité du serveur et son exploitation ne sont pas représentées.",
+        "svg": "<svg viewBox=\"0 0 880 400\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Coût mensuel d'une API et d'un serveur loué en fonction du volume de tokens, avec un seuil de croisement\">\n  <rect width=\"880\" height=\"400\" rx=\"16\" fill=\"#0f172a\" />\n  <text x=\"440\" y=\"36\" fill=\"#f8fafc\" font-family=\"sans-serif\" font-size=\"17\" font-weight=\"700\" text-anchor=\"middle\">Coût variable contre coût fixe : un seuil théorique</text>\n  <text x=\"440\" y=\"58\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Valeurs d'illustration (celles du code ci-dessous) : à remplacer par un vrai devis</text>\n  <line x1=\"110\" y1=\"330\" x2=\"800\" y2=\"330\" stroke=\"#475569\" stroke-width=\"2\" />\n  <line x1=\"110\" y1=\"330\" x2=\"110\" y2=\"98\" stroke=\"#475569\" stroke-width=\"2\" />\n  <text x=\"110.0\" y=\"350\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">0</text>\n  <text x=\"340.0\" y=\"350\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">250</text>\n  <text x=\"570.0\" y=\"350\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">500</text>\n  <text x=\"800.0\" y=\"350\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">750</text>\n  <text x=\"100\" y=\"334.0\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"end\">0</text>\n  <text x=\"100\" y=\"260.0\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"end\">1000</text>\n  <line x1=\"110\" y1=\"256.0\" x2=\"800\" y2=\"256.0\" stroke=\"#1e293b\" stroke-width=\"1\" />\n  <text x=\"100\" y=\"186.0\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"end\">2000</text>\n  <line x1=\"110\" y1=\"182.0\" x2=\"800\" y2=\"182.0\" stroke=\"#1e293b\" stroke-width=\"1\" />\n  <text x=\"100\" y=\"112.0\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"end\">3000</text>\n  <line x1=\"110\" y1=\"108.0\" x2=\"800\" y2=\"108.0\" stroke=\"#1e293b\" stroke-width=\"1\" />\n  <text x=\"455\" y=\"374\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Millions de tokens par mois</text>\n  <text x=\"70\" y=\"84\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\">Coût mensuel en dollars</text>\n  <g id=\"ligne-api\">\n  <line x1=\"110.0\" y1=\"330.0\" x2=\"800.0\" y2=\"108.0\" stroke=\"#38bdf8\" stroke-width=\"3\" />\n  <text x=\"625.2\" y=\"198.2\" fill=\"#7dd3fc\" font-family=\"sans-serif\" font-size=\"13\" font-weight=\"700\">API : proportionnel au volume</text>\n  </g>\n  <g id=\"ligne-fixe\">\n  <line x1=\"110.0\" y1=\"219.0\" x2=\"800.0\" y2=\"219.0\" stroke=\"#fb923c\" stroke-width=\"3\" />\n  <text x=\"128.4\" y=\"209.0\" fill=\"#fdba74\" font-family=\"sans-serif\" font-size=\"13\" font-weight=\"700\">Serveur loué : coût fixe, quel que soit l'usage</text>\n  </g>\n  <g id=\"seuil\">\n  <circle cx=\"455.0\" cy=\"219.0\" r=\"7\" fill=\"#fde68a\" stroke=\"#f59e0b\" stroke-width=\"2\" />\n  <line x1=\"455.0\" y1=\"227.0\" x2=\"455.0\" y2=\"330\" stroke=\"#f59e0b\" stroke-width=\"2\" stroke-dasharray=\"5 4\" />\n  <text x=\"469.0\" y=\"253.0\" fill=\"#fde68a\" font-family=\"sans-serif\" font-size=\"13\" font-weight=\"700\">Seuil théorique : 375 millions</text>\n  <text x=\"469.0\" y=\"271.0\" fill=\"#fde68a\" font-family=\"sans-serif\" font-size=\"12\">de tokens par mois, dans cet exemple</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "Une API : le coût suit le volume",
+            "explanation": "Avec un tarif au token, le coût mensuel est proportionnel au nombre de tokens traités : pas d'usage, pas de facture.",
+            "highlight": [
+              "ligne-api"
+            ]
+          },
+          {
+            "title": "Un serveur loué : un coût fixe",
+            "explanation": "Un serveur loué se paie, que l'on s'en serve ou non. Dans cet exemple, 1 500 dollars par mois, valeur d'illustration.",
+            "highlight": [
+              "ligne-fixe"
+            ]
+          },
+          {
+            "title": "Le seuil",
+            "explanation": "Au croisement des deux lignes, le serveur devient moins cher que l'API, dans le meilleur des cas. Il faut encore que le serveur puisse produire ce volume et que l'on assume son exploitation : le calcul ne les compte pas.",
+            "highlight": [
+              "seuil"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "code": "# 1) Calculer le coût réel d'une requête à partir du champ « usage » de la réponse.\n# Champs de l'API Messages d'Anthropic (documentation consultée le 18/10/2026). L'« usage » ci-dessous\n# est INVENTÉ pour l'illustration. Prix et coefficients : valeurs d'illustration.\nPRIX_ENTREE, PRIX_SORTIE = 2.00, 10.00           # $ par million de tokens\nECRITURE_CACHE, LECTURE_CACHE = 1.25, 0.10       # multiples du prix d'entrée\n\nusage = {\n    \"input_tokens\": 320,                  # après le dernier point de cache, non mis en cache\n    \"cache_creation_input_tokens\": 0,     # tokens écrits dans le cache\n    \"cache_read_input_tokens\": 4000,      # tokens relus depuis le cache\n    \"output_tokens\": 410,                 # sortie, réflexion éventuelle comprise\n}\n\ndef cout_depuis_usage(u):\n    entree = u[\"input_tokens\"] * PRIX_ENTREE\n    ecriture = u[\"cache_creation_input_tokens\"] * PRIX_ENTREE * ECRITURE_CACHE\n    lecture = u[\"cache_read_input_tokens\"] * PRIX_ENTREE * LECTURE_CACHE\n    sortie = u[\"output_tokens\"] * PRIX_SORTIE\n    return (entree + ecriture + lecture + sortie) / 1e6\n\ntotal_entree = (usage[\"input_tokens\"] + usage[\"cache_creation_input_tokens\"]\n                + usage[\"cache_read_input_tokens\"])\nprint(f\"Entrée totale : {total_entree} tokens ; coût de la requête : {cout_depuis_usage(usage):.6f} $\")\nsans_cache = (total_entree * PRIX_ENTREE + usage[\"output_tokens\"] * PRIX_SORTIE) / 1e6\nprint(f\"Le même appel sans cache aurait coûté {sans_cache:.6f} $\")\n\n# 2) Louer ou héberger un modèle soi-même : un coût fixe contre un coût au token.\n# Le coût fixe mensuel ci-dessous est une HYPOTHÈSE à remplacer par un devis réel.\nfixe_mensuel = 1_500.0                                  # $ par mois, serveur loué, quel que soit l'usage\ntokens_entree, tokens_sortie = 1_200, 400               # profil d'une requête\nprix_moyen = (tokens_entree * PRIX_ENTREE + tokens_sortie * PRIX_SORTIE) / (tokens_entree + tokens_sortie)\nseuil = fixe_mensuel / prix_moyen                       # millions de tokens par mois\nprint()\nprint(f\"Prix moyen de l'API pour ce profil : {prix_moyen:.2f} $ par million de tokens\")\nprint(f\"Seuil théorique : {seuil:.0f} millions de tokens par mois \"\n      f\"({seuil * 1e6 / (tokens_entree + tokens_sortie):,.0f} requêtes)\".replace(\",\", \" \"))\nprint(\"En dessous, l'API coûte moins ; au-dessus, le serveur doit encore pouvoir produire ce volume,\")\nprint(\"et ce calcul ignore le travail d'exploitation, la supervision et les mises à jour.\")",
+        "explanation": "Calcule le coût réel d'un appel à partir d'un champ « usage » inventé avec les noms de champs d'Anthropic, puis le seuil théorique entre une API et un serveur loué avec un coût fixe d'illustration. La sortie ci-dessous a été obtenue en exécutant ce code.",
+        "output": "Entrée totale : 4320 tokens ; coût de la requête : 0.005540 $\nLe même appel sans cache aurait coûté 0.012740 $\n\nPrix moyen de l'API pour ce profil : 4.00 $ par million de tokens\nSeuil théorique : 375 millions de tokens par mois (234 375 requêtes)\nEn dessous, l'API coûte moins ; au-dessus, le serveur doit encore pouvoir produire ce volume,\net ce calcul ignore le travail d'exploitation, la supervision et les mises à jour.",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Chez Anthropic, une réponse indique input_tokens = 320, cache_read_input_tokens = 4 000 et cache_creation_input_tokens = 0. Quel est le nombre total de tokens d'entrée de la requête ?",
+          "options": [
+            "320 tokens",
+            "4 000 tokens",
+            "4 320 tokens",
+            "4 640 tokens"
+          ],
+          "correctIndex": 2,
+          "explanation": "L'entrée totale est la somme des trois champs d'entrée : 320 + 4 000 + 0 = 4 320 tokens. Lire seulement input_tokens est le piège : ce champ ne compte que les tokens situés après le dernier point de cache. 4 000 oublie la partie non cachée, et 4 640 compte deux fois les 320 tokens."
+        },
+        {
+          "question": "Un serveur loué coûte 1 500 dollars par mois, quel que soit l'usage. Pour votre profil, l'API coûterait en moyenne 4 dollars par million de tokens. À partir de quel volume mensuel le serveur devient-il moins cher, dans le meilleur des cas ?",
+          "options": [
+            "6 000 millions de tokens",
+            "375 millions de tokens",
+            "0,0027 million de tokens",
+            "1 500 millions de tokens"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le seuil vaut le coût fixe divisé par le prix moyen par million de tokens : 1 500 / 4 = 375 millions de tokens par mois. 6 000 vient d'une multiplication au lieu d'une division, 0,0027 d'une division à l'envers. Ce seuil reste un meilleur cas : il suppose que le serveur peut produire ce volume et ignore l'exploitation."
+        },
+        {
+          "question": "Un modèle à poids ouverts est téléchargeable gratuitement. Quel coût oublie-t-on le plus souvent en le comparant à une API ?",
+          "options": [
+            "Aucun : si les poids sont gratuits, l'usage est gratuit.",
+            "Le matériel loué ou acheté et son exploitation, dus même quand il y a peu de trafic.",
+            "Une redevance par token reversée à l'auteur du modèle.",
+            "Le coût du tokenizer, facturé séparément."
+          ],
+          "correctIndex": 1,
+          "explanation": "Gratuit à télécharger ne veut pas dire gratuit à exécuter : il faut du matériel, de l'exploitation, de la supervision et des mises à jour, qui se paient même sans trafic. La licence d'un modèle peut imposer des conditions, mais ce n'est pas une redevance par token, et un tokenizer est un composant du modèle, pas un service facturé à part."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Compteur d'usage (usage)",
+          "definition": "Champ de la réponse d'une API qui indique les tokens traités (entrée, sortie, cache, réflexion). Il fait foi pour le calcul du coût d'un appel."
+        },
+        {
+          "term": "Observabilité",
+          "definition": "Pratique qui consiste à enregistrer et agréger l'usage, les coûts et les erreurs pour repérer les dérives."
+        },
+        {
+          "term": "Modèle à poids ouverts",
+          "definition": "Modèle dont les paramètres sont téléchargeables, souvent sous licence, et que l'on peut exécuter soi-même. Ce n'est pas la même chose qu'un logiciel entièrement ouvert."
+        },
+        {
+          "term": "Coût fixe",
+          "definition": "Coût payé quel que soit le volume d'usage, par exemple la location d'un serveur."
+        },
+        {
+          "term": "Seuil de rentabilité",
+          "definition": "Volume au-delà duquel une option à coût fixe revient moins cher qu'une option à coût proportionnel, dans le meilleur des cas."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Lire le compteur",
+          "prompt": "Pourquoi le nombre de tokens estimé à partir du texte visible ne correspond-il pas toujours à la facture, et quelle source faut-il utiliser ?",
+          "solution": "Le prompt réel inclut l’historique, les outils, les images et parfois des tokens de réflexion. Les champs d’entrée et de cache diffèrent selon l’éditeur. Il faut journaliser l’usage renvoyé par l’API, par fonctionnalité, et fixer des plafonds."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Anthropic, documentation : Prompt caching (consultée le 18/10/2026)",
+          "href": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+        },
+        {
+          "label": "Anthropic, documentation : Batch processing (consultée le 18/10/2026)",
+          "href": "https://platform.claude.com/docs/en/build-with-claude/batch-processing"
+        },
+        {
+          "label": "Pope et al., 2022. Efficiently Scaling Transformer Inference (arXiv 2211.05102)",
+          "href": "https://arxiv.org/abs/2211.05102"
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "label": "Anthropic, documentation : Prompt caching (consultée le 18/10/2026)",
+      "href": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+    },
+    {
+      "label": "Anthropic, documentation : Batch processing (consultée le 18/10/2026)",
+      "href": "https://platform.claude.com/docs/en/build-with-claude/batch-processing"
+    },
+    {
+      "label": "Anthropic, documentation : Steering thinking, effort, coût et tarification de la réflexion (consultée le 18/10/2026)",
+      "href": "https://platform.claude.com/docs/en/build-with-claude/thinking-steering-and-cost"
+    },
+    {
+      "label": "Anthropic, documentation : Token counting (consultée le 18/10/2026)",
+      "href": "https://platform.claude.com/docs/en/build-with-claude/token-counting"
+    },
+    {
+      "label": "Anthropic, documentation : Vision, limites et coûts des images (consultée le 18/10/2026)",
+      "href": "https://platform.claude.com/docs/en/build-with-claude/vision"
+    },
+    {
+      "label": "OpenAI, documentation : Prompt caching (consultée le 18/10/2026)",
+      "href": "https://developers.openai.com/api/docs/guides/prompt-caching"
+    },
+    {
+      "label": "OpenAI, documentation : Batch API (consultée le 18/10/2026)",
+      "href": "https://developers.openai.com/api/docs/guides/batch"
+    },
+    {
+      "label": "OpenAI, documentation : Reasoning models (consultée le 18/10/2026)",
+      "href": "https://developers.openai.com/api/docs/guides/reasoning"
+    },
+    {
+      "label": "Sennrich, Haddow et Birch, 2015. Neural Machine Translation of Rare Words with Subword Units (arXiv 1508.07909, ACL 2016)",
+      "href": "https://arxiv.org/abs/1508.07909"
+    },
+    {
+      "label": "Kudo et Richardson, 2018. SentencePiece: A simple and language independent subword tokenizer and detokenizer for Neural Text Processing (arXiv 1808.06226, EMNLP 2018)",
+      "href": "https://arxiv.org/abs/1808.06226"
+    },
+    {
+      "label": "Petrov, La Malfa, Torr et Bibi, 2023. Language Model Tokenizers Introduce Unfairness Between Languages (arXiv 2305.15425, NeurIPS 2023)",
+      "href": "https://arxiv.org/abs/2305.15425"
+    },
+    {
+      "label": "Ahia et al., 2023. Do All Languages Cost the Same? Tokenization in the Era of Commercial Language Models (arXiv 2305.13707)",
+      "href": "https://arxiv.org/abs/2305.13707"
+    },
+    {
+      "label": "Patel et al., 2023. Splitwise: Efficient generative LLM inference using phase splitting (arXiv 2311.18677)",
+      "href": "https://arxiv.org/abs/2311.18677"
+    },
+    {
+      "label": "Pope et al., 2022. Efficiently Scaling Transformer Inference (arXiv 2211.05102)",
+      "href": "https://arxiv.org/abs/2211.05102"
+    },
+    {
+      "label": "Wei et al., 2022. Chain-of-Thought Prompting Elicits Reasoning in Large Language Models (arXiv 2201.11903)",
+      "href": "https://arxiv.org/abs/2201.11903"
+    },
+    {
+      "label": "Snell, Lee, Xu et Kumar, 2024. Scaling LLM Test-Time Compute Optimally can be More Effective than Scaling Model Parameters (arXiv 2408.03314)",
+      "href": "https://arxiv.org/abs/2408.03314"
+    },
+    {
+      "label": "Tokenizer de GPT-2 utilisé dans l'exemple du module 1 (fiche du modèle, Hugging Face)",
+      "href": "https://huggingface.co/openai-community/gpt2"
+    },
+    {
+      "label": "Tokenizer multilingue utilisé dans l'exemple du module 1 (fiche du modèle paraphrase-multilingual-MiniLM-L12-v2, Hugging Face)",
+      "href": "https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    }
+  ],
+  "related": [
+    {
+      "to": "/calculateur-couts-ia",
+      "title": "Calculateur de coûts IA",
+      "description": "Refaire les calculs des modules 2 à 5 avec des tarifs saisis à la main et datés, et partager un calcul par son lien."
+    },
+    {
+      "to": "/comparateur-modeles-ia",
+      "title": "Comparateur de modèles IA",
+      "description": "Sa grille de test permet de noter des modèles sur vos propres exemples, pour juger le coût par tâche réussie."
+    },
+    {
+      "to": "/cours/rag",
+      "title": "Le RAG",
+      "description": "Chiffre l'écart entre mettre tout un document dans le prompt et ne fournir que quelques extraits."
+    },
+    {
+      "to": "/cours/parametres-llm",
+      "title": "Paramètres des LLM",
+      "description": "Fenêtre de contexte, tokens et réglages d'inférence."
+    }
+  ]
+}

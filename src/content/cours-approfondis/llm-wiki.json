@@ -1,0 +1,844 @@
+{
+  "slug": "llm-wiki",
+  "title": "Le LLM Wiki de Karpathy : compiler la connaissance au lieu de la rechercher",
+  "subtitle": "Sources brutes, pages Markdown reliées, compilation et maintenance : comprendre le wiki compilé et le comparer au RAG sans lui prêter des gains universels.",
+  "level": "Intermédiaire",
+  "tags": [
+    "LLM Wiki",
+    "RAG",
+    "Markdown",
+    "Obsidian",
+    "Recherche",
+    "Connaissance"
+  ],
+  "summary": "Ce cours présente le LLM Wiki décrit par Andrej Karpathy en avril 2026 : un ensemble de pages Markdown reliées, compilées par un modèle à partir de sources brutes, puis maintenues à chaque nouvel apport. Il distingue compilation, indexation et recherche, décrit le pipeline et la structure des pages, compare cette approche au RAG sans désigner de gagnant universel, et expose les limites observées : dérive des pages, sources obsolètes, doublons, coûts et résultats circonscrits d'une étude de 2026.",
+  "introduction": "### Pourquoi ce sujet\n\nLa plupart des assistants documentaires fonctionnent aujourd'hui de la même façon : un index est préparé à partir de fichiers, une question déclenche la recherche de quelques passages, et un modèle rédige une réponse à partir de ces extraits. Ce montage est utile, mais il repart de zéro à chaque question. Une réponse qui synthétise cinq documents n'est pas conservée sous une forme réutilisable. Si la même question revient, ou si une question voisine exige les mêmes recoupements, le système refait le travail.\n\nEn avril 2026, Andrej Karpathy a décrit une autre organisation, appelée LLM Wiki. Le modèle lit les sources à l'ingestion, en extrait les informations importantes, puis écrit et met à jour un wiki Markdown persistant. Les pages sont reliées, les contradictions sont signalées, et la synthèse progresse avec chaque source ajoutée. Le wiki se place entre les documents bruts et les questions. Le travail est déplacé de la recherche répétée vers une compilation entretenue.\n\n### D'où vient l'idée\n\nLe texte de Karpathy est un document d'idée, pas une spécification ni un produit. Il décrit trois couches (sources brutes, wiki, schéma de travail) et trois opérations (ingestion, interrogation, contrôle). Il cite Obsidian comme lecteur et comme vue de graphe, et un fichier de consignes comme contrat pour l'agent. Il ne fournit ni mesure de qualité ni comparaison contrôlée. Une étude arXiv de mai 2026, révisée en octobre, a testé une implémentation précise sur un petit corpus de recherche. Ses résultats sont plus étroits que le récit initial, et ce cours les présente avec leurs limites.\n\n### Ce qu'il faut savoir avant\n\n- ce qu'est un modèle de langage ;\n- l'idée d'un RAG, sans connaître les détails d'implémentation ;\n- assez de Markdown pour lire un titre, un lien et une liste ;\n- aucune expérience d'Obsidian n'est nécessaire.\n\n### Ce que vous saurez expliquer à la fin\n\n- ce que compile un LLM Wiki, ce qu'indexe un RAG et ce que fait une recherche ;\n- les étapes d'un pipeline de compilation et les fichiers qui structurent le wiki ;\n- comment une page Markdown est organisée, liée et citée ;\n- ce que l'étude de 2026 mesure réellement, et pourquoi elle ne désigne pas un gagnant universel ;\n- les limites d'exploitation : fraîcheur, dérive, doublons, revue humaine et coût.",
+  "prerequisites": [
+    "Savoir ce qu'est un modèle de langage",
+    "Avoir une idée de ce que fait un RAG",
+    "Savoir lire et écrire du Markdown",
+    "Aucune expérience d'Obsidian requise"
+  ],
+  "checkedOn": "2026-10-26",
+  "cover": {
+    "src": "pics/cours/llm-wiki.webp",
+    "alt": "Réseau de fiches reliées par des fils lumineux face à une rangée linéaire de dossiers, sur fond bleu nuit."
+  },
+  "sources": [
+    {
+      "label": "Andrej Karpathy, LLM Wiki, gist, créé le 4 avril 2026, consulté le 21 octobre 2026.",
+      "href": "https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f"
+    },
+    {
+      "label": "Theodore O. Cochran, Single-Round Vector RAG vs an LLM-Compiled Wiki, arXiv 2605.18490, v3 du 2 octobre 2026, consulté le 21 octobre 2026.",
+      "href": "https://arxiv.org/abs/2605.18490"
+    },
+    {
+      "label": "Patrick Lewis et al., Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks, NeurIPS 2020, consulté le 21 octobre 2026.",
+      "href": "https://arxiv.org/abs/2005.11401"
+    },
+    {
+      "label": "Darren Edge et al., From Local to Global : A Graph RAG Approach to Query-Focused Summarization, 2024, consulté le 21 octobre 2026.",
+      "href": "https://arxiv.org/abs/2404.16130"
+    },
+    {
+      "label": "Obsidian, documentation, consultée le 21 octobre 2026.",
+      "href": "https://obsidian.md/help/"
+    },
+    {
+      "label": "CommonMark, spécification, consultée le 21 octobre 2026.",
+      "href": "https://spec.commonmark.org/"
+    },
+    {
+      "label": "atomicstrata, llm-wiki-compiler, dépôt GitHub, consulté le 21 octobre 2026.",
+      "href": "https://github.com/atomicstrata/llm-wiki-compiler"
+    }
+  ],
+  "related": [
+    {
+      "to": "/cours/rag",
+      "title": "Le RAG : donner à un modèle de langage accès à vos documents",
+      "description": "Le pipeline RAG, ses limites et ses améliorations, pour situer la compilation par rapport à la recherche de passages."
+    },
+    {
+      "to": "/cours/mcp",
+      "title": "Le Model Context Protocol (MCP)",
+      "description": "Un wiki compilé peut être exposé à un agent comme un ensemble de ressources et d'outils."
+    },
+    {
+      "to": "/cours-approfondis",
+      "title": "Tous les cours approfondis",
+      "description": "Le catalogue des cours longs, avec leurs sources et leurs schémas."
+    }
+  ],
+  "modules": [
+    {
+      "id": "probleme",
+      "title": "Le problème du RAG classique",
+      "keyTakeaways": [
+        "Le RAG classique retrouve des passages au moment de la question et les fait relire par le modèle ; il ne conserve pas la synthèse produite.",
+        "La fragmentation des morceaux, les limites du rappel et les questions multi-documents expliquent pourquoi une réponse peut être incomplète même avec un bon modèle.",
+        "Le LLM Wiki déplace une partie du travail vers l'ingestion : il compile des pages persistantes, reliées et citées.",
+        "Cette compilation ne supprime pas la recherche : le wiki doit encore être parcouru, filtré et interrogé.",
+        "Le RAG garde des avantages pour les corpus changeants et les questions factuelles ; la comparaison dépend du corpus et du montage."
+      ],
+      "theory": "### Ce que fait un RAG à chaque question\n\nUn système de génération augmentée par récupération, ou RAG, prépare un index à partir de documents. Au moment de la question, il calcule une représentation de la requête, retrouve les k passages les plus proches, les place dans le prompt, puis demande à un modèle de rédiger une réponse à partir de ces passages. L'article de Lewis et de ses coauteurs (2020) a formalisé une version où la recherche et la génération sont entraînées ensemble. Les montages actuels emploient souvent un modèle déjà entraîné et se contentent d'ajouter les passages au prompt. Dans les deux cas, l'index sert à retrouver, pas à conserver une conclusion.\n\nCette organisation a un mérite simple : elle ne demande pas de réécrire le corpus à l'avance. On découpe les documents, on calcule des vecteurs, on range les morceaux, et le système est prêt. Quand un document change, on remplace ses morceaux. Quand une question porte sur un détail présent dans une seule phrase, la recherche peut le retrouver et le modèle peut le citer. Pour une base documentaire qui bouge vite, ce fonctionnement est souvent plus simple qu'une réécriture complète.\n\n### L'absence d'accumulation\n\nLe mot important est « chaque question ». Le système retrouve des morceaux, puis le modèle les assemble dans une réponse qui n'est pas réutilisée. Karpathy décrit ce manque comme une redécouverte permanente : le modèle doit retrouver et recoudre les mêmes fragments à chaque fois. Une question qui demande de relier cinq documents peut être bien répondue aujourd'hui et mal répondue demain, avec un autre découpage ou une autre reformulation, sans qu'aucune page ne conserve le recoupement.\n\nL'index n'est pas vide pour autant. Il contient des vecteurs, des métadonnées, parfois un graphe d'entités. Mais il ne contient pas de phrase qui dit « ces deux articles se contredisent sur ce point » ou « cette conclusion dépend de telle hypothèse ». Ces formulations sont produites à la demande, dans une réponse, puis perdues. Un historique de conversations peut les conserver, mais il ne forme pas un ensemble de pages reliées que l'on peut parcourir et corriger.\n\n### Trois difficultés du RAG simple\n\nLa première est le rappel. Le bon passage peut ne pas figurer parmi les k morceaux retenus. Le découpage a peut-être séparé une règle de sa condition, ou le vocabulaire de la question diffère de celui du document. Une recherche hybride, un reranking ou une reformulation réduisent ce risque, mais ne le suppriment pas. Le modèle ne peut pas citer ce qu'il n'a pas reçu.\n\nLa deuxième est la fragmentation. Un morceau est une unité de texte choisie pour l'index, pas une unité de sens. Une réponse peut être exacte localement et incomplète globalement : elle cite la phrase qui donne un délai sans la phrase qui donne l'exception. Le modèle peut remarquer la tension s'il reçoit les deux passages, mais rien ne garantit qu'il les recevra ensemble.\n\nLa troisième est la synthèse multi-documents. Une question comme « quelles conclusions les articles de ce corpus partagent-ils, et où divergent-ils ? » ne se satisfait pas de cinq extraits indépendants. Il faut comparer, repérer les contradictions, nommer les accords et les désaccords. Un RAG à un tour peut le faire si les passages sont bien choisis, mais il n'a pas d'artefact où ce travail a déjà été fait et vérifié.\n\n### Ce que le RAG fait bien\n\nIl serait faux de réduire le RAG à ces difficultés. Un RAG bien construit reste excellent pour retrouver un fait précis, citer un passage, répondre sur un document qui vient d'être mis à jour ou traiter un corpus trop grand pour être compilé à l'avance. Il ne demande pas de maintenir des pages dérivées. Il expose directement les sources, ce qui facilite la vérification. Et il existe des variantes qui attaquent la synthèse : recherche itérative, décomposition de la question, graphes d'entités, résumés hiérarchiques. Le « RAG classique » dont parle ce module est donc un point de départ, pas toute la famille.\n\n### Le déplacement proposé par le wiki\n\nLe LLM Wiki propose de déplacer une partie du travail vers l'ingestion. Au lieu de retrouver des morceaux à chaque question, le modèle compile les sources en pages : une page par concept, par entité, par comparaison, avec des liens et des citations. La question ne part plus de fragments bruts, mais de pages déjà organisées. Le wiki est un artefact persistant, et non un cache de réponses.\n\nCe déplacement a un prix. Il faut lire les sources à l'avance, écrire des pages, les relier et les maintenir. Une erreur de compilation peut persister et se propager. Une source qui change peut rendre une page fausse sans que personne ne le voie. Le wiki ne supprime donc pas les difficultés du RAG : il les transforme en difficultés de compilation et de maintenance. Les modules suivants décrivent ce pipeline, puis comparent les deux approches avec les résultats limités de l'étude de 2026.",
+      "diagram": {
+        "title": "Deux façons de répondre à la même question",
+        "description": "Schéma illustratif : un RAG retrouve des morceaux à chaque question, tandis qu'un wiki compile des pages persistantes que l'agent parcourt. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 860 420\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"RAG à chaque question et wiki compilé parcouru par un agent\">\n  <rect width=\"860\" height=\"420\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"430\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">RAG et wiki compilé</text>\n  <text x=\"430\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"rag\">\n    <rect x=\"35\" y=\"90\" width=\"370\" height=\"280\" rx=\"12\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"220\" y=\"120\" fill=\"#e0f2fe\" font-size=\"14\" font-weight=\"bold\" text-anchor=\"middle\">RAG à chaque question</text>\n    <rect x=\"60\" y=\"145\" width=\"140\" height=\"58\" rx=\"8\" fill=\"#111827\" stroke=\"#38bdf8\"/>\n    <text x=\"130\" y=\"169\" fill=\"#bae6fd\" font-size=\"12\" text-anchor=\"middle\">Question</text>\n    <text x=\"130\" y=\"189\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">reformulée</text>\n    <rect x=\"230\" y=\"145\" width=\"150\" height=\"58\" rx=\"8\" fill=\"#111827\" stroke=\"#38bdf8\"/>\n    <text x=\"305\" y=\"169\" fill=\"#bae6fd\" font-size=\"12\" text-anchor=\"middle\">Recherche</text>\n    <text x=\"305\" y=\"189\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">top-k passages</text>\n    <g id=\"chunks\">\n      <rect x=\"60\" y=\"235\" width=\"320\" height=\"52\" rx=\"8\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\"/>\n      <text x=\"220\" y=\"257\" fill=\"#e0f2fe\" font-size=\"12\" text-anchor=\"middle\">Morceaux bruts ajoutés au prompt</text>\n      <text x=\"220\" y=\"276\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">aucune synthèse conservée</text>\n    </g>\n    <g id=\"answer\">\n      <rect x=\"60\" y=\"315\" width=\"320\" height=\"35\" rx=\"8\" fill=\"#1e1b4b\" stroke=\"#818cf8\"/>\n      <text x=\"220\" y=\"337\" fill=\"#e0e7ff\" font-size=\"12\" text-anchor=\"middle\">Réponse produite, puis oubliée</text>\n    </g>\n  </g>\n\n  <g id=\"wiki\">\n    <rect x=\"455\" y=\"90\" width=\"370\" height=\"280\" rx=\"12\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"640\" y=\"120\" fill=\"#d1fae5\" font-size=\"14\" font-weight=\"bold\" text-anchor=\"middle\">Wiki compilé</text>\n    <g id=\"sources\">\n      <rect x=\"480\" y=\"145\" width=\"120\" height=\"58\" rx=\"8\" fill=\"#111827\" stroke=\"#34d399\"/>\n      <text x=\"540\" y=\"169\" fill=\"#a7f3d0\" font-size=\"12\" text-anchor=\"middle\">Sources</text>\n      <text x=\"540\" y=\"189\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">immuables</text>\n    </g>\n    <g id=\"pages\">\n      <rect x=\"630\" y=\"145\" width=\"170\" height=\"58\" rx=\"8\" fill=\"#111827\" stroke=\"#34d399\"/>\n      <text x=\"715\" y=\"169\" fill=\"#a7f3d0\" font-size=\"12\" text-anchor=\"middle\">Pages reliées</text>\n      <text x=\"715\" y=\"189\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">citations et liens</text>\n    </g>\n    <g id=\"browse\">\n      <rect x=\"480\" y=\"235\" width=\"320\" height=\"52\" rx=\"8\" fill=\"#042f2e\" stroke=\"#2dd4bf\"/>\n      <text x=\"640\" y=\"257\" fill=\"#ccfbf1\" font-size=\"12\" text-anchor=\"middle\">L'agent parcourt et lit les pages</text>\n      <text x=\"640\" y=\"276\" fill=\"#99f6e4\" font-size=\"11\" text-anchor=\"middle\">la synthèse existe déjà</text>\n    </g>\n    <g id=\"kept\">\n      <rect x=\"480\" y=\"315\" width=\"320\" height=\"35\" rx=\"8\" fill=\"#052e16\" stroke=\"#4ade80\"/>\n      <text x=\"640\" y=\"337\" fill=\"#dcfce7\" font-size=\"12\" text-anchor=\"middle\">Réponse, et page éventuellement conservée</text>\n    </g>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Le RAG interroge les sources",
+            "explanation": "La question déclenche une recherche de morceaux. Le modèle reçoit des passages bruts, sélectionnés pour cette question.",
+            "highlight": [
+              "rag",
+              "chunks"
+            ]
+          },
+          {
+            "title": "2. La réponse reste locale",
+            "explanation": "La réponse est produite à partir des morceaux, puis n'est pas conservée comme page. La prochaine question repart de l'index.",
+            "highlight": [
+              "answer"
+            ]
+          },
+          {
+            "title": "3. Le wiki conserve une synthèse",
+            "explanation": "Les sources ont été compilées en pages reliées. L'agent les parcourt et peut réutiliser une synthèse déjà écrite.",
+            "highlight": [
+              "wiki",
+              "sources",
+              "pages",
+              "browse"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Que fait un RAG simple au moment de la question ?",
+          "options": [
+            "Il retrouve des passages et les ajoute au prompt",
+            "Il relit tous les documents en entier",
+            "Il réécrit l'index à chaque question",
+            "Il compile les sources en pages"
+          ],
+          "correctIndex": 0,
+          "explanation": "La recherche sélectionne des passages, puis le modèle génère une réponse à partir d'eux. Le corpus n'est pas relu en entier."
+        },
+        {
+          "question": "Pourquoi une question qui recoupe cinq documents est-elle difficile pour un RAG simple ?",
+          "options": [
+            "Les documents sont toujours trop courts",
+            "Les passages utiles peuvent être dispersés et aucun artefact ne conserve la synthèse",
+            "Le modèle refuse les questions complexes",
+            "La recherche vectorielle ne lit pas le texte"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le RAG peut retrouver chaque passage, mais le recoupement est refait à chaque question et n'est pas conservé sous forme de page."
+        },
+        {
+          "question": "Le wiki compilé supprime-t-il toute recherche ?",
+          "options": [
+            "Oui, il n'a plus besoin d'index",
+            "Oui, il remplace le modèle",
+            "Non, il faut encore parcourir ou interroger les pages",
+            "Non, mais il supprime les sources"
+          ],
+          "correctIndex": 2,
+          "explanation": "Le wiki déplace le travail de compilation, mais l'agent doit encore trouver les pages pertinentes, par un index, une recherche ou des liens."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "RAG",
+          "definition": "Montage qui retrouve des passages dans un index, les ajoute au prompt, puis fait rédiger une réponse par un modèle."
+        },
+        {
+          "term": "Chunk",
+          "definition": "Fragment de document, de taille choisie, indexé et retrouvé séparément."
+        },
+        {
+          "term": "Rappel (recall)",
+          "definition": "Part des passages pertinents que la recherche réussit à retrouver pour une question."
+        },
+        {
+          "term": "Synthèse",
+          "definition": "Mise en relation de plusieurs sources pour dégager un accord, une contradiction ou une conclusion."
+        },
+        {
+          "term": "Index",
+          "definition": "Structure préparée à l'avance pour retrouver rapidement des passages ou des pages."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Pourquoi la même question change de réponse",
+          "prompt": "Une équipe pose chaque semaine la même question à un RAG : quelles conclusions les articles du corpus partagent-ils ? La réponse varie et certains recoupements disparaissent. Expliquez ce qui, dans le fonctionnement du RAG, produit ce comportement, et ce que le wiki change.",
+          "solution": "Le RAG découpe les documents en morceaux, retrouve les k plus proches au moment de la question et fait rédiger une réponse qui n’est pas conservée. Le rappel peut manquer un passage, le découpage sépare une règle de sa condition, et la synthèse multi-documents est refaite à chaque fois. Rien ne garde la phrase qui dit que deux articles se contredisent ou que telle conclusion dépend d’une hypothèse. Le wiki déplace ce travail vers l’ingestion : il compile des pages reliées et citées, où le recoupement est écrit, daté et réutilisable. Il ne supprime pas la recherche, il change ce que l’on recherche."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Patrick Lewis et al., Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks, NeurIPS 2020, consulté le 21 octobre 2026.",
+          "href": "https://arxiv.org/abs/2005.11401"
+        },
+        {
+          "label": "Darren Edge et al., From Local to Global : A Graph RAG Approach to Query-Focused Summarization, 2024, consulté le 21 octobre 2026.",
+          "href": "https://arxiv.org/abs/2404.16130"
+        }
+      ]
+    },
+    {
+      "id": "idee",
+      "title": "L'idée du wiki compilé",
+      "keyTakeaways": [
+        "Un LLM Wiki est un artefact persistant : des pages Markdown reliées, écrites et maintenues par un modèle à partir de sources brutes.",
+        "La compilation lit les sources, extrait des informations, écrit des pages et met à jour les liens ; l'indexation se contente de préparer une structure de recherche.",
+        "Le wiki ne remplace pas la recherche : il change ce que l'on recherche, des pages compilées plutôt que des morceaux bruts.",
+        "Un schéma de travail, par exemple un fichier d'instructions pour l'agent, fixe les conventions sans lesquelles les pages divergent.",
+        "La compilation déplace le coût vers l'ingestion et introduit un risque de perte de fidélité et d'erreur persistante."
+      ],
+      "theory": "### Un artefact entre les sources et les questions\n\nKarpathy décrit le wiki comme un artefact persistant qui s'enrichit. Les sources brutes restent la référence : articles, notes, transcriptions, images, fichiers de données. Le modèle ne les modifie pas. Le wiki est une couche intermédiaire, faite de fichiers Markdown que le modèle crée et met à jour. Il contient des résumés, des pages d'entités, des pages de concepts, des comparaisons et une vue d'ensemble. L'humain lit le wiki, mais ne l'écrit pas, ou rarement.\n\nLa troisième couche est le schéma. C'est un document de consignes, par exemple un fichier AGENTS.md ou CLAUDE.md, qui indique comment le wiki est organisé, quelles conventions de nommage suivre, comment ingérer une source, comment citer et quand demander une revue. Sans ce contrat, l'agent produit des pages de formes différentes, avec des titres, des liens et des niveaux de détail incompatibles. Le schéma est ce qui transforme un chatbot en mainteneur discipliné.\n\nKarpathy insiste sur la répartition des rôles. L'humain choisit les sources, oriente l'exploration et pose les questions. Le modèle fait le travail de synthèse, de classement, de recoupement et de tenue de journal. Ce partage est une proposition de méthode, pas une mesure de qualité. Il suppose que l'humain reste capable de juger les pages produites.\n\n### Compiler, indexer, rechercher\n\nTrois verbes sont souvent confondus. Les distinguer évite plusieurs malentendus.\n\nIndexer consiste à préparer une structure pour retrouver. On découpe, on calcule des empreintes ou des vecteurs, on range des métadonnées. L'indexation ne produit pas de nouveau texte : elle rend le corpus consultable. Un RAG classique fait surtout de l'indexation, puis de la recherche.\n\nCompiler consiste à transformer les sources en un nouvel artefact. Le modèle lit, extrait, reformule, relie et écrit des pages. La compilation produit du texte qui n'était pas dans les sources. C'est une opération avec perte : un détail, une nuance ou une condition peuvent disparaître. Une bonne compilation cite ses sources pour permettre de retrouver ce qui a été omis.\n\nRechercher consiste à retrouver, au moment de la question, les éléments pertinents. Un wiki n'échappe pas à cette étape. Il peut utiliser un fichier d'index, une recherche lexicale, des liens, un moteur hybride ou un parcours d'agent. Ce qui change est la nature de ce que l'on recherche : des pages déjà synthétisées au lieu de morceaux bruts.\n\nCette distinction explique une partie des désaccords. Dire qu'un wiki « remplace le RAG » est ambigu : il remplace une partie de la chaîne de récupération par une compilation, mais il conserve une étape de recherche sur les pages. Inversement, un RAG peut indexer des pages de wiki et devenir une recherche sur des connaissances compilées. Les étiquettes décrivent des architectures, pas des camps.\n\n### Ce que la compilation apporte\n\nLe premier apport est la persistance des recoupements. Quand deux articles se contredisent, l'agent peut l'écrire dans une page et mettre à jour les pages concernées. La contradiction n'est plus à redécouvrir à chaque question : elle est signalée, datée et reliée aux sources.\n\nLe deuxième apport est la navigation. Les pages sont reliées par des liens, et un fichier d'index donne une vue d'ensemble. Un lecteur humain peut suivre une notion, revenir à une source, voir les pages voisines. Cette structure est utile même sans modèle : elle rend le corpus lisible.\n\nLe troisième apport est la capitalisation. Une réponse intéressante peut être enregistrée comme page, puis enrichie plus tard. Les questions servent aussi à faire progresser la base. Karpathy parle d'un effet cumulatif : chaque source et chaque exploration laissent une trace réutilisable.\n\nLe quatrième apport est l'auditabilité. Si le wiki est un dépôt Git, chaque modification est datée et attribuable à une opération. Le journal log.md conserve les ingestions et les interrogations. On peut comparer deux versions d'une page, retrouver la source d'une affirmation et revenir en arrière.\n\n### Ce qu'elle coûte et risque\n\nLa compilation a un coût d'ingestion. Il faut appeler un modèle pour lire chaque source, extraire les concepts, écrire les pages et mettre à jour les liens. Ce coût dépend du modèle, de la longueur des sources et du nombre de pages touchées. Il est payé avant la première question, ce qui peut être un avantage pour un corpus stable et un inconvénient pour un corpus qui change tous les jours.\n\nLe risque principal est la perte de fidélité. Une page compilée peut être fluide, cohérente et fausse. Le modèle peut omettre une condition, généraliser une conclusion locale, confondre deux entités ou citer la mauvaise source. Plus la page est réutilisée, plus l'erreur se propage. La source brute reste la référence, mais personne ne la relit si la page paraît claire.\n\nLe deuxième risque est la dérive. Une source mise à jour ne met pas automatiquement à jour toutes les pages qui en dépendent. Une page peut donc mélanger une information ancienne et une information récente. Il faut suivre les dépendances, détecter les pages périmées et les réviser. Un wiki qui n'est pas entretenu devient une archive de synthèses anciennes.\n\nLe troisième risque est la complexité du schéma. Plus les conventions sont nombreuses, plus l'agent doit les respecter, et plus une erreur de consigne se répercute sur toutes les pages. Le schéma doit rester lisible, versionné et testé par des contrôles automatiques.\n\n### Un modèle, pas un produit\n\nLe texte de Karpathy est volontairement abstrait. Il ne fixe ni arborescence, ni format de page, ni outil. Il propose une manière d'organiser le travail. Plusieurs implémentations existent, dont llm-wiki-compiler, un outil open source inspiré du motif. Elles ajoutent des fonctions que le texte ne décrit pas : files de revue, profils de domaine, export, serveur MCP, recherche hybride. Ce cours décrit le motif commun, puis signale les variantes lorsqu'elles changent le raisonnement.\n\nObsidian n'est pas obligatoire. Le wiki peut être un simple dossier Markdown, édité par l'agent et lu dans un éditeur. Obsidian apporte une vue de graphe, des liens wiki, des requêtes sur les métadonnées et une lecture confortable. Ces fonctions aident à inspecter le wiki, mais elles ne constituent pas le principe. Un wiki compilé peut vivre sans elles, à condition de garder des liens et des citations vérifiables.",
+      "diagram": {
+        "title": "Trois couches et un contrat",
+        "description": "Schéma illustratif : les sources brutes alimentent une compilation qui écrit le wiki, sous les conventions d'un schéma. Les questions parcourent ensuite les pages.",
+        "svg": "<svg viewBox=\"0 0 840 420\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Sources brutes, compilation, wiki, schéma et questions\">\n  <rect width=\"840\" height=\"420\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"420\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Les couches du LLM Wiki</text>\n  <text x=\"420\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"sources\">\n    <rect x=\"40\" y=\"105\" width=\"200\" height=\"115\" rx=\"12\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"140\" y=\"136\" fill=\"#e0f2fe\" font-size=\"14\" text-anchor=\"middle\">Sources brutes</text>\n    <text x=\"140\" y=\"160\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">articles, notes, PDF</text>\n    <text x=\"140\" y=\"180\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">immuables</text>\n    <text x=\"140\" y=\"200\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">référence de vérité</text>\n  </g>\n\n  <g id=\"compilation\">\n    <rect x=\"310\" y=\"105\" width=\"220\" height=\"115\" rx=\"12\" fill=\"#111827\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"420\" y=\"136\" fill=\"#fce7f3\" font-size=\"14\" text-anchor=\"middle\">Compilation</text>\n    <text x=\"420\" y=\"160\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">lire, extraire, reformuler</text>\n    <text x=\"420\" y=\"180\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">relier, signaler</text>\n    <text x=\"420\" y=\"200\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">opération avec perte</text>\n  </g>\n\n  <g id=\"wiki\">\n    <rect x=\"600\" y=\"105\" width=\"200\" height=\"115\" rx=\"12\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"700\" y=\"136\" fill=\"#d1fae5\" font-size=\"14\" text-anchor=\"middle\">Wiki</text>\n    <text x=\"700\" y=\"160\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">pages Markdown</text>\n    <text x=\"700\" y=\"180\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">liens et citations</text>\n    <text x=\"700\" y=\"200\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">index et journal</text>\n  </g>\n\n  <g id=\"schema\">\n    <rect x=\"310\" y=\"255\" width=\"220\" height=\"80\" rx=\"12\" fill=\"#1e1b4b\" stroke=\"#818cf8\" stroke-width=\"2\"/>\n    <text x=\"420\" y=\"283\" fill=\"#e0e7ff\" font-size=\"13\" text-anchor=\"middle\">Schéma</text>\n    <text x=\"420\" y=\"305\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">conventions, nommage,</text>\n    <text x=\"420\" y=\"323\" fill=\"#a5b4fc\" font-size=\"11\" text-anchor=\"middle\">citations, revue</text>\n  </g>\n\n  <g id=\"query\">\n    <rect x=\"40\" y=\"255\" width=\"200\" height=\"80\" rx=\"12\" fill=\"#111827\" stroke=\"#facc15\" stroke-width=\"2\"/>\n    <text x=\"140\" y=\"283\" fill=\"#fef9c3\" font-size=\"13\" text-anchor=\"middle\">Questions</text>\n    <text x=\"140\" y=\"305\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">parcours des pages</text>\n    <text x=\"140\" y=\"323\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">réponse citée</text>\n  </g>\n\n  <g id=\"writeback\">\n    <rect x=\"600\" y=\"255\" width=\"200\" height=\"80\" rx=\"12\" fill=\"#052e16\" stroke=\"#4ade80\" stroke-width=\"2\"/>\n    <text x=\"700\" y=\"283\" fill=\"#dcfce7\" font-size=\"13\" text-anchor=\"middle\">Réutilisation</text>\n    <text x=\"700\" y=\"305\" fill=\"#bbf7d0\" font-size=\"11\" text-anchor=\"middle\">réponse conservée</text>\n    <text x=\"700\" y=\"323\" fill=\"#86efac\" font-size=\"11\" text-anchor=\"middle\">page enrichie</text>\n  </g>\n\n  <line x1=\"240\" y1=\"162\" x2=\"310\" y2=\"162\" stroke=\"#64748b\" stroke-width=\"2\"/>\n  <line x1=\"530\" y1=\"162\" x2=\"600\" y2=\"162\" stroke=\"#64748b\" stroke-width=\"2\"/>\n  <line x1=\"420\" y1=\"220\" x2=\"420\" y2=\"255\" stroke=\"#818cf8\" stroke-width=\"2\" stroke-dasharray=\"5 4\"/>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Les sources restent la référence",
+            "explanation": "Les documents bruts ne sont pas modifiés. La compilation les lit et produit une couche dérivée, qui peut se tromper.",
+            "highlight": [
+              "sources"
+            ]
+          },
+          {
+            "title": "2. La compilation écrit le wiki",
+            "explanation": "Le modèle extrait des informations, rédige des pages et met à jour les liens. C'est une transformation avec perte, pas une copie.",
+            "highlight": [
+              "compilation",
+              "wiki"
+            ]
+          },
+          {
+            "title": "3. Le schéma encadre le travail",
+            "explanation": "Les conventions de nommage, de citation et de revue sont fixées dans un document de consignes. Sans elles, les pages divergent.",
+            "highlight": [
+              "schema"
+            ]
+          },
+          {
+            "title": "4. Les questions parcourent le wiki",
+            "explanation": "L'agent cherche les pages pertinentes, les lit et répond. Une réponse utile peut être conservée et enrichir le wiki.",
+            "highlight": [
+              "query",
+              "writeback"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Quelle est la différence principale entre compiler et indexer ?",
+          "options": [
+            "Compiler supprime les sources d'origine",
+            "Indexer produit des pages ; compiler calcule des vecteurs",
+            "Les deux termes désignent exactement la même opération",
+            "Compiler produit de nouvelles pages ; indexer prépare une structure de recherche sans écrire de synthèse"
+          ],
+          "correctIndex": 3,
+          "explanation": "L'indexation rend le corpus retrouvable. La compilation transforme les sources en un texte nouveau, avec un risque de perte et d'erreur."
+        },
+        {
+          "question": "À quoi sert le fichier de schéma dans le motif de Karpathy ?",
+          "options": [
+            "À fixer les conventions de pages, de liens, de citations et de revue",
+            "À stocker les vecteurs du wiki",
+            "À remplacer le modèle de langage",
+            "À interdire toute modification du wiki"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le schéma est un document de consignes pour l'agent. Il rend le wiki cohérent et maintenable, mais ne garantit pas la vérité des pages."
+        },
+        {
+          "question": "Le wiki compilé dispense-t-il de vérifier les sources ?",
+          "options": [
+            "Oui, puisque le modèle a lu les documents",
+            "Non, une page peut être fluide, cohérente et fausse",
+            "Oui, si les pages sont bien reliées",
+            "Non, mais seulement pour les images"
+          ],
+          "correctIndex": 1,
+          "explanation": "La compilation peut omettre une condition ou généraliser à tort. Les citations et la source brute restent nécessaires pour vérifier."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Wiki compilé",
+          "definition": "Ensemble de pages Markdown reliées, écrites et maintenues par un modèle à partir de sources brutes."
+        },
+        {
+          "term": "Compilation",
+          "definition": "Transformation de sources en pages nouvelles, avec extraction, reformulation, liens et citations."
+        },
+        {
+          "term": "Indexation",
+          "definition": "Préparation d'une structure de recherche, par exemple des vecteurs et des métadonnées, sans production de synthèse."
+        },
+        {
+          "term": "Schéma",
+          "definition": "Document de consignes qui fixe la structure des pages, les conventions de liens et les règles de revue."
+        },
+        {
+          "term": "Source brute",
+          "definition": "Document d'origine, conservé sans modification, qui sert de référence pour vérifier le wiki."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Compiler, indexer, rechercher",
+          "prompt": "Un collègue affirme : « notre wiki remplace le RAG, donc nous n’avons plus besoin de recherche ». Distinguez les trois opérations du module et montrez en quoi cette phrase est ambiguë. Précisez aussi le rôle du fichier de consignes.",
+          "solution": "Indexer prépare une structure pour retrouver, sans produire de texte nouveau. Compiler lit les sources, extrait et rédige des pages : c’est une transformation avec perte, qui produit un texte absent des sources. Rechercher retrouve au moment de la question les éléments pertinents, et le wiki n’y échappe pas : il faut parcourir les pages, par index, liens ou moteur hybride. La phrase est donc ambiguë : le wiki remplace une partie de la chaîne de récupération par une compilation, mais conserve une étape de recherche, désormais sur des pages. Le fichier de consignes fixe les conventions de nommage, de citation et de revue ; sans lui, les pages divergent."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Andrej Karpathy, LLM Wiki, gist, créé le 4 avril 2026, consulté le 21 octobre 2026.",
+          "href": "https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f"
+        },
+        {
+          "label": "Theodore O. Cochran, Single-Round Vector RAG vs an LLM-Compiled Wiki, arXiv 2605.18490, v3 du 2 octobre 2026, consulté le 21 octobre 2026.",
+          "href": "https://arxiv.org/abs/2605.18490"
+        }
+      ]
+    },
+    {
+      "id": "pipeline",
+      "title": "Le pipeline de compilation",
+      "keyTakeaways": [
+        "Un pipeline de compilation enchaîne la collecte, la conversion, l'extraction, la rédaction des pages, les liens, les contrôles et la revue.",
+        "Les empreintes de contenu permettent de ne pas recompiler une source inchangée et de repérer ce qui dépend d'elle.",
+        "Les doublons et les sources contradictoires doivent être traités explicitement, sinon ils produisent des pages concurrentes.",
+        "Un contrôle automatique détecte les liens cassés, les pages orphelines et les citations manquantes, mais il ne juge pas la vérité.",
+        "La compilation déplace le coût vers l'ingestion ; l'étude de 2026 mesure 904 884 660 tokens d'ingestion pour le wiki contre 1 401 996 pour le RAG, soit un facteur d'environ 645 sur son corpus."
+      ],
+      "theory": "### Les sources d'abord\n\nLe pipeline commence par une collection de sources. Karpathy les veut immuables : le modèle les lit, mais ne les modifie jamais. Cette règle simple permet de revenir à l'original quand une page paraît suspecte. Elle suppose aussi de conserver la provenance : chemin du fichier, date, auteur, licence, éventuellement page ou plage de lignes. Sans ces informations, une citation ne peut pas être vérifiée.\n\nLa collecte doit traiter les droits et les données personnelles. Un wiki interne peut contenir des contrats, des échanges avec des clients ou des notes médicales. La compilation duplique ces informations dans de nouvelles pages. Les droits d'accès du wiki doivent donc refléter ceux des sources, et une suppression doit se propager aux pages dérivées. Un fichier de sources sans politique de rétention devient un risque.\n\n### Conversion et empreintes\n\nLes sources arrivent dans des formats divers : Markdown, PDF, pages web, transcriptions, images. Le pipeline les convertit en texte exploitable. La conversion peut introduire des erreurs : un tableau mal lu, une colonne inversée, un titre pris pour du corps de texte. Il faut conserver le fichier d'origine et signaler les conversions incertaines.\n\nChaque source reçoit une empreinte de contenu, par exemple un hachage SHA-256. Cette empreinte sert à deux choses. Elle détecte les changements : si l'empreinte est identique, la source n'a pas besoin d'être recompilée. Elle permet aussi de retrouver les pages qui dépendent de la source. Un état intermédiaire associe les pages aux empreintes des sources qui les ont alimentées.\n\nLes doublons méritent un traitement séparé. Deux fichiers peuvent avoir la même empreinte, ou des contenus proches avec des différences de forme. Une déduplication exacte est facile ; une déduplication sémantique demande un jugement. Le pipeline peut signaler les candidats et laisser une décision humaine, plutôt que de fusionner silencieusement deux documents qui se ressemblent mais divergent sur un point.\n\n### Extraction et plan de pages\n\nLe modèle lit la source et en extrait les éléments utiles : concepts, entités, affirmations, dates, relations, contradictions avec le wiki existant. Il propose ensuite un plan : créer une page, mettre à jour une page existante, fusionner deux pages ou ajouter une section. Certains outils demandent un nombre cible de concepts par source, d'autres laissent le modèle décider. Ce réglage change la granularité du wiki : trop de pages produisent des notes minuscules et redondantes, trop peu de pages produisent des fourre-tout.\n\nKarpathy décrit une source qui peut toucher dix à quinze pages. C'est une observation tirée de son usage, pas une règle mesurée. Le nombre dépend de la richesse de la source et de la taille du wiki. Une source qui introduit un concept nouveau peut créer plusieurs pages ; une source qui confirme une page existante peut n'ajouter qu'une citation et une phrase.\n\nLe plan doit être vérifiable. Avant d'écrire, le pipeline peut afficher les pages visées, les sources concernées et les contradictions détectées. Une revue rapide du plan coûte moins cher qu'une relecture de toutes les pages produites. C'est le même principe qu'un diff avant une fusion de code.\n\n### Rédaction et intégration\n\nLa rédaction suit un modèle de page : titre, résumé, sections, citations, liens, métadonnées. Le modèle ne doit pas inventer une source ni une citation. Chaque affirmation importante devrait renvoyer à un passage précis. Les liens vers les pages voisines sont ajoutés au moment de l'écriture, puis vérifiés.\n\nL'intégration ne s'arrête pas à la nouvelle page. Il faut mettre à jour l'index, les pages d'entités et de concepts, les comparaisons, et le journal. Si une source contredit une page existante, la contradiction doit être écrite, avec les deux sources et la date. Si une source rend une page obsolète, la page doit être marquée comme périmée, pas laissée intacte à côté d'une information plus récente.\n\nCette étape est celle où le wiki gagne sa valeur et celle où il accumule les erreurs. Une page isolée peut être excellente ; un ensemble de pages incohérentes est plus difficile à corriger. Les conventions de liens et de citations, fixées dans le schéma, réduisent la dérive.\n\n### Contrôle et revue\n\nUn contrôle automatique, souvent appelé lint, vérifie la structure : liens cassés, pages orphelines, titres manquants, citations absentes, métadonnées invalides, sources périmées. Il peut aussi comparer les empreintes et signaler les pages dont une source a changé. Ces contrôles sont nécessaires, mais ils ne disent pas si une affirmation est vraie. Un lien valide vers une page fausse reste un lien valide.\n\nLa revue humaine porte sur le fond : une page est-elle fidèle à ses sources ? Les nuances sont-elles conservées ? La synthèse est-elle justifiée ? Les pages sensibles, par exemple juridiques ou médicales, devraient passer par une relecture explicite. Le pipeline peut placer les pages à risque dans une file de revue avant publication. Cette file ralentit la compilation, mais elle rend le wiki auditable.\n\n### Compilation incrémentale\n\nRecompiler tout le corpus à chaque source serait coûteux. La compilation incrémentale ne traite que les sources modifiées et les pages qui en dépendent. Les empreintes fournissent le point de départ. Il faut aussi gérer les suppressions : quand une source est retirée, les pages qui n'en dépendent plus doivent être retirées, fusionnées ou marquées comme non vérifiées. Un pipeline qui ne sait qu'ajouter produit un wiki qui grossit sans se corriger.\n\nLa compilation incrémentale a ses pièges. Une page peut dépendre de plusieurs sources, et une modification peut changer une synthèse sans changer les autres pages. Un changement de schéma peut invalider toutes les pages. Il faut donc versionner le schéma et prévoir des recompilations de maintenance, pas seulement des ingestions.\n\n### Le coût et le temps\n\nLa compilation consomme des tokens au moment de l'ingestion. L'étude de Cochran (2026) mesure, sur son corpus, 904 884 660 tokens LLM pour construire le wiki contre 1 401 996 pour ingérer le RAG, soit un facteur d'environ 645. Ce chiffre dépend du modèle, des sources et du nombre de pages. Il ne faut pas le lire comme une constante, ni comme une facture en dollars.\n\nLe temps humain compte aussi. Une revue de pages, la définition du schéma, le traitement des doublons et la gestion des sources obsolètes ne sont pas automatiques. Le wiki ne supprime pas le travail de maintenance : il le déplace vers des tâches que le modèle peut préparer. La qualité dépend de la personne qui vérifie.\n\n### Une arborescence possible\n\nLe code ci-dessous montre une organisation générique, inspirée du motif et des implémentations existantes. Ce n'est pas une structure imposée : le schéma peut choisir d'autres noms. L'important est de séparer les sources, le wiki, les consignes et l'état de compilation.",
+      "code": {
+        "language": "text",
+        "code": "projet/\n  sources/                  # fichiers bruts, jamais modifiés\n    article-2026.md\n    rapport.pdf\n  wiki/\n    index.md                # catalogue des pages\n    log.md                  # journal des ingestions et requêtes\n    concepts/\n      rag.md\n      compilation.md\n    entites/\n      karpathy.md\n  schema/\n    AGENTS.md               # conventions de pages, de liens et de revue\n  .llmwiki/\n    state.json              # empreintes des sources et pages dérivées",
+        "explanation": "Arborescence générique, non exécutée. Les sources sont séparées du wiki, le schéma est versionné avec le projet, et l'état de compilation permet de retrouver les pages dépendantes. Un outil comme llm-wiki-compiler utilise une organisation voisine, sans imposer exactement ces noms."
+      },
+      "diagram": {
+        "title": "Le chemin d'une source à une page",
+        "description": "Schéma illustratif : la source est convertie, empreintée, analysée, puis intégrée au wiki, contrôlée et éventuellement soumise à revue.",
+        "svg": "<svg viewBox=\"0 0 860 420\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Pipeline de compilation, de la source à la page relue\">\n  <rect width=\"860\" height=\"420\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"430\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Du document à la page relue</text>\n  <text x=\"430\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"collecte\">\n    <rect x=\"35\" y=\"95\" width=\"155\" height=\"85\" rx=\"10\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"112\" y=\"124\" fill=\"#e0f2fe\" font-size=\"13\" text-anchor=\"middle\">Collecte</text>\n    <text x=\"112\" y=\"146\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">source brute</text>\n    <text x=\"112\" y=\"164\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">provenance</text>\n  </g>\n\n  <g id=\"extraction\">\n    <rect x=\"225\" y=\"95\" width=\"155\" height=\"85\" rx=\"10\" fill=\"#111827\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"302\" y=\"124\" fill=\"#fce7f3\" font-size=\"13\" text-anchor=\"middle\">Extraction</text>\n    <text x=\"302\" y=\"146\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">concepts, entités</text>\n    <text x=\"302\" y=\"164\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">et affirmations</text>\n  </g>\n\n  <g id=\"plan\">\n    <rect x=\"415\" y=\"95\" width=\"155\" height=\"85\" rx=\"10\" fill=\"#111827\" stroke=\"#818cf8\" stroke-width=\"2\"/>\n    <text x=\"492\" y=\"124\" fill=\"#e0e7ff\" font-size=\"13\" text-anchor=\"middle\">Plan</text>\n    <text x=\"492\" y=\"146\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">créer, mettre à jour,</text>\n    <text x=\"492\" y=\"164\" fill=\"#a5b4fc\" font-size=\"11\" text-anchor=\"middle\">fusionner</text>\n  </g>\n\n  <g id=\"pages\">\n    <rect x=\"605\" y=\"95\" width=\"220\" height=\"85\" rx=\"10\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"715\" y=\"124\" fill=\"#d1fae5\" font-size=\"13\" text-anchor=\"middle\">Rédaction des pages</text>\n    <text x=\"715\" y=\"146\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">sections et citations</text>\n    <text x=\"715\" y=\"164\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">liens et métadonnées</text>\n  </g>\n\n  <g id=\"liens\">\n    <rect x=\"605\" y=\"235\" width=\"220\" height=\"80\" rx=\"10\" fill=\"#042f2e\" stroke=\"#2dd4bf\" stroke-width=\"2\"/>\n    <text x=\"715\" y=\"263\" fill=\"#ccfbf1\" font-size=\"13\" text-anchor=\"middle\">Intégration</text>\n    <text x=\"715\" y=\"285\" fill=\"#99f6e4\" font-size=\"11\" text-anchor=\"middle\">index, journal,</text>\n    <text x=\"715\" y=\"303\" fill=\"#5eead4\" font-size=\"11\" text-anchor=\"middle\">contradictions</text>\n  </g>\n\n  <g id=\"lint\">\n    <rect x=\"315\" y=\"235\" width=\"255\" height=\"80\" rx=\"10\" fill=\"#1e1b4b\" stroke=\"#818cf8\" stroke-width=\"2\"/>\n    <text x=\"442\" y=\"263\" fill=\"#e0e7ff\" font-size=\"13\" text-anchor=\"middle\">Contrôle automatique</text>\n    <text x=\"442\" y=\"285\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">liens, orphelines,</text>\n    <text x=\"442\" y=\"303\" fill=\"#a5b4fc\" font-size=\"11\" text-anchor=\"middle\">citations, fraîcheur</text>\n  </g>\n\n  <g id=\"revue\">\n    <rect x=\"35\" y=\"235\" width=\"240\" height=\"80\" rx=\"10\" fill=\"#052e16\" stroke=\"#4ade80\" stroke-width=\"2\"/>\n    <text x=\"155\" y=\"263\" fill=\"#dcfce7\" font-size=\"13\" text-anchor=\"middle\">Revue humaine</text>\n    <text x=\"155\" y=\"285\" fill=\"#bbf7d0\" font-size=\"11\" text-anchor=\"middle\">fidélité et nuances</text>\n    <text x=\"155\" y=\"303\" fill=\"#86efac\" font-size=\"11\" text-anchor=\"middle\">publication ou rejet</text>\n  </g>\n\n  <line x1=\"190\" y1=\"137\" x2=\"225\" y2=\"137\" stroke=\"#64748b\" stroke-width=\"2\"/>\n  <line x1=\"380\" y1=\"137\" x2=\"415\" y2=\"137\" stroke=\"#64748b\" stroke-width=\"2\"/>\n  <line x1=\"570\" y1=\"137\" x2=\"605\" y2=\"137\" stroke=\"#64748b\" stroke-width=\"2\"/>\n  <line x1=\"715\" y1=\"180\" x2=\"715\" y2=\"235\" stroke=\"#64748b\" stroke-width=\"2\"/>\n  <line x1=\"605\" y1=\"275\" x2=\"570\" y2=\"275\" stroke=\"#64748b\" stroke-width=\"2\"/>\n  <line x1=\"315\" y1=\"275\" x2=\"275\" y2=\"275\" stroke=\"#64748b\" stroke-width=\"2\"/>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Collecter et extraire",
+            "explanation": "La source brute est conservée, convertie et analysée. Le modèle en tire des concepts, des entités et des affirmations, avec leur provenance.",
+            "highlight": [
+              "collecte",
+              "extraction"
+            ]
+          },
+          {
+            "title": "2. Planifier puis rédiger",
+            "explanation": "Le pipeline décide quelles pages créer, mettre à jour ou fusionner, puis rédige en citant les sources et en ajoutant les liens.",
+            "highlight": [
+              "plan",
+              "pages"
+            ]
+          },
+          {
+            "title": "3. Intégrer et contrôler",
+            "explanation": "L'index, le journal et les pages voisines sont mis à jour. Les contrôles détectent les liens cassés, les orphelines et les pages périmées.",
+            "highlight": [
+              "liens",
+              "lint"
+            ]
+          },
+          {
+            "title": "4. Faire relire",
+            "explanation": "Une page peut être publiée ou placée en revue. Le contrôle automatique ne juge pas la vérité ; la fidélité aux sources demande un lecteur.",
+            "highlight": [
+              "revue"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "À quoi sert l'empreinte de contenu d'une source ?",
+          "options": [
+            "À chiffrer le wiki pour le rendre secret",
+            "À remplacer les citations dans les pages",
+            "À détecter les changements et à retrouver les pages qui en dépendent",
+            "À mesurer la qualité littéraire de la source"
+          ],
+          "correctIndex": 2,
+          "explanation": "Le hachage identifie une version de la source. Il évite de recompiler à l'identique et aide à repérer les pages dérivées à réviser."
+        },
+        {
+          "question": "Que ne peut pas faire un contrôle automatique de type lint ?",
+          "options": [
+            "Détecter un lien cassé",
+            "Signaler une page orpheline",
+            "Repérer une citation manquante",
+            "Vérifier qu'une affirmation est fidèle à sa source"
+          ],
+          "correctIndex": 3,
+          "explanation": "Le lint vérifie la structure et la présence des éléments. La fidélité d'une affirmation demande une lecture, humaine ou assistée, du passage source."
+        },
+        {
+          "question": "Pourquoi la compilation incrémentale doit-elle gérer les suppressions ?",
+          "options": [
+            "Parce qu'une source retirée peut laisser des pages dérivées sans fondement",
+            "Parce que les sources ne changent jamais",
+            "Parce que le modèle refuse les fichiers absents",
+            "Parce que cela supprime les citations"
+          ],
+          "correctIndex": 0,
+          "explanation": "Un pipeline qui ne sait qu'ajouter accumule des pages dont la source n'existe plus. Il faut retirer, fusionner ou marquer ces pages."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Ingestion",
+          "definition": "Entrée d'une source dans le pipeline : collecte, conversion, empreinte et préparation à la compilation."
+        },
+        {
+          "term": "Compilation incrémentale",
+          "definition": "Compilation qui ne retraite que les sources modifiées et les pages qui en dépendent."
+        },
+        {
+          "term": "Empreinte de contenu",
+          "definition": "Valeur calculée à partir du contenu d'un fichier, qui identifie une version et détecte les changements."
+        },
+        {
+          "term": "Lint",
+          "definition": "Contrôle automatique de structure : liens, titres, citations, métadonnées et fraîcheur des pages."
+        },
+        {
+          "term": "File de revue",
+          "definition": "Ensemble de pages produites mais non publiées, en attente d'une vérification humaine."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Ce qu’un lint ne voit pas",
+          "prompt": "Un pipeline de compilation signale zéro lien cassé, zéro page orpheline et zéro citation manquante. Peut-on en conclure que le wiki est fiable ? Expliquez ce que ce contrôle couvre et ce qu’il laisse à la revue. Ajoutez le rôle des empreintes dans une recompilation.",
+          "solution": "Non. Le lint vérifie la structure : liens, orphelines, titres, citations présentes, métadonnées valides. Il ne juge pas la fidélité d’une affirmation à sa source, et un lien valide vers une page fausse reste valide. La revue humaine porte sur le fond : une condition a-t-elle été omise, une nuance conservée, une synthèse justifiée, une contradiction signalée. Les empreintes de contenu servent à deux choses : ne pas recompiler une source inchangée, et retrouver les pages qui en dépendent pour les réviser quand elle change. Un pipeline qui ne traite que les ajouts accumule des pages dont la source a disparu."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Andrej Karpathy, LLM Wiki, gist, créé le 4 avril 2026, consulté le 21 octobre 2026.",
+          "href": "https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f"
+        },
+        {
+          "label": "atomicstrata, llm-wiki-compiler, dépôt GitHub, consulté le 21 octobre 2026.",
+          "href": "https://github.com/atomicstrata/llm-wiki-compiler"
+        }
+      ]
+    },
+    {
+      "id": "structure",
+      "title": "Structure Markdown et liens",
+      "keyTakeaways": [
+        "Une page de wiki combine un en-tête de métadonnées, un titre, des sections, des liens, des citations et un état de revue.",
+        "CommonMark définit la syntaxe Markdown de base ; les liens wiki, les métadonnées YAML et les tableaux GFM sont des extensions à vérifier selon l'outil.",
+        "Le fichier index.md sert de catalogue et le fichier log.md de journal chronologique.",
+        "Les liens internes rendent le graphe lisible, mais ils doivent être contrôlés : une page orpheline ou un lien cassé réduit la valeur du wiki.",
+        "La provenance, la date et l'état de la page permettent de savoir sur quelle version de source une affirmation repose."
+      ],
+      "theory": "### Markdown comme format commun\n\nLe wiki est fait de fichiers texte. Ce choix a des conséquences pratiques : un fichier Markdown se lit dans n'importe quel éditeur, se versionne dans Git, se compare ligne à ligne et se déplace sans base de données. Une page peut être relue par un humain, corrigée à la main ou régénérée par un modèle. Le format ne dépend pas d'un fournisseur de modèle ni d'un service de stockage.\n\nMarkdown n'est pas une norme unique. CommonMark définit une syntaxe de base pour les titres, les paragraphes, les listes, les liens, les citations et le code. Il ne définit ni les métadonnées YAML en tête de fichier, ni les liens de la forme double crochet, ni les tableaux étendus. Ces éléments viennent d'extensions, souvent associées à Obsidian ou au dialecte GFM. Un wiki qui les utilise doit le documenter dans son schéma, car un autre outil peut ne pas les comprendre.\n\nCette distinction paraît technique, mais elle décide de la portabilité. Un lien standard fonctionne dans un convertisseur CommonMark ; un lien wiki dépend d'Obsidian ou d'un outil qui l'interprète. Les deux peuvent coexister, à condition de savoir lequel est la source de vérité et comment les résoudre.\n\n### Anatomie d'une page\n\nUne page de wiki comporte souvent quatre parties. D'abord un en-tête de métadonnées, ou frontmatter, entre deux lignes de trois tirets. Il contient le titre, les tags, les sources, la date de mise à jour, l'état de revue, parfois un niveau de confiance. Ensuite un titre de niveau un, qui doit correspondre au titre des métadonnées. Puis le corps, organisé en sections : définition, contexte, exemples, limites, contradictions. Enfin une section de sources et de liens, qui permet de vérifier et de naviguer.\n\nLe corps doit rester lisible sans le modèle. Une page qui n'est qu'une suite de phrases générées, sans structure ni citation, est difficile à corriger. Les sections courtes, les listes et les tableaux aident le lecteur à voir ce qui est affirmé et ce qui est omis. Les citations doivent pointer vers un passage précis, pas seulement vers un fichier entier.\n\nLes métadonnées ne sont pas décoratives. Une date de mise à jour permet de repérer une page ancienne. Un état de revue indique si la page a été vérifiée. Une liste de sources permet de retrouver les dépendances. Un champ de confiance, s'il existe, doit être défini et utilisé avec prudence : un modèle qui s'autoévalue n'est pas une mesure de vérité.\n\n### Liens et graphe\n\nDeux familles de liens coexistent. Le lien Markdown standard s'écrit entre crochets et parenthèses, avec un chemin relatif. Il est compris par CommonMark et par la plupart des convertisseurs. Le lien wiki s'écrit avec des doubles crochets autour du nom de la page. Il est plus court et plus lisible, mais il dépend d'un outil qui sait le résoudre. Obsidian le prend en charge, affiche les liens entrants et construit une vue de graphe.\n\nLe choix a des conséquences. Un lien standard est explicite et portable, mais il casse si le fichier est déplacé. Un lien wiki est stable par nom, mais il peut pointer vers une page absente ou ambiguë. Dans les deux cas, il faut un contrôle des liens. Les pages sans lien entrant, dites orphelines, sont souvent invisibles pour le lecteur et pour l'agent. Elles peuvent contenir une information utile, mais personne ne les trouve.\n\nLes alias et les redirections aident à renommer une page sans casser les liens. Une page peut avoir un titre, un identifiant stable et des synonymes. Le schéma doit dire lequel sert aux liens. Sans cette règle, le même concept apparaît sous plusieurs noms et le graphe se fragmente.\n\n### Index et journal\n\nKarpathy distingue deux fichiers spéciaux. index.md est orienté contenu : il liste les pages par catégorie, avec un lien, un résumé d'une ligne et parfois des métadonnées. À chaque ingestion, l'agent le met à jour. Pour répondre à une question, il peut lire l'index d'abord, puis ouvrir les pages pertinentes. Karpathy indique que cette approche fonctionne à une échelle modérée, de l'ordre d'une centaine de sources et de quelques centaines de pages, sans infrastructure d'embeddings.\n\nlog.md est chronologique. C'est un journal en ajout seul des ingestions, des requêtes et des contrôles. Si chaque entrée commence par un préfixe stable, par exemple une date et un type d'opération, le journal devient interrogeable avec des outils simples. Il donne une chronologie du wiki et aide l'agent à comprendre ce qui a été fait récemment. Il ne remplace pas les métadonnées des pages, mais il les complète.\n\nAu-delà de cette échelle, l'index seul devient insuffisant. Il faut une recherche lexicale ou hybride. Certaines implémentations proposent un moteur local, avec BM25, vecteurs et reranking, accessible en ligne de commande ou par un serveur d'outils. Le wiki reste un ensemble de fichiers, mais la recherche devient un composant à part entière.\n\n### Métadonnées, provenance et revue\n\nLa provenance est la capacité de dire d'où vient une affirmation. Elle peut prendre plusieurs formes : un chemin de fichier, une plage de lignes, un identifiant de source, une date, une empreinte. Plus la provenance est précise, plus la vérification est facile. Une page qui cite seulement « un article » n'est pas vérifiable.\n\nLa revue est un état, pas une propriété magique. Une page peut être brouillon, en revue, approuvée, périmée ou rejetée. Ces états doivent être définis dans le schéma et respectés par le pipeline. Une page approuvée peut encore devenir fausse si sa source change ; il faut donc suivre la fraîcheur séparément de l'approbation.\n\nLes métadonnées peuvent alimenter des vues dynamiques, par exemple des tableaux de pages par tag ou par source. Ces vues sont utiles pour l'audit, mais elles ne corrigent rien. Un tableau de pages périmées ne remplace pas la décision de les mettre à jour.\n\n### Un exemple de page\n\nLe code ci-dessous montre une page courte, avec des métadonnées, un lien wiki et des sources. Il est destiné à être lu, pas exécuté. Les champs de métadonnées sont un exemple : le schéma du projet peut en imposer d'autres.",
+      "code": {
+        "language": "text",
+        "code": "---\ntitle: \"Compilation et recherche\"\ntags: [wiki, rag]\nsources:\n  - sources/karpathy-llm-wiki.md\nupdated: 2026-10-21\nstatus: revu\n---\n\n# Compilation et recherche\n\nLa compilation transforme les sources en pages persistantes ; la recherche\nretrouve des passages au moment de la question.\n\n## Différence principale\n\n- La compilation déplace le travail vers l'ingestion.\n- La recherche vectorielle retrouve des morceaux bruts.\n\nVoir [[RAG]] et [[Indexation]].\n\n## Sources\n\n- Karpathy, LLM Wiki, 2026, sections Architecture et Operations.",
+        "explanation": "Exemple de page, non exécuté. Le frontmatter et le lien wiki sont des extensions : CommonMark ne les définit pas. Le schéma doit préciser leur syntaxe et la façon de les résoudre."
+      },
+      "diagram": {
+        "title": "L'anatomie d'une page",
+        "description": "Schéma illustratif : métadonnées, titre, corps, liens et sources forment une page ; l'index et le journal donnent une vue d'ensemble.",
+        "svg": "<svg viewBox=\"0 0 860 420\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Anatomie d'une page Markdown avec métadonnées, titre, corps, liens et sources\">\n  <rect width=\"860\" height=\"420\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"430\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Une page et son contexte</text>\n  <text x=\"430\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"page\">\n    <rect x=\"40\" y=\"90\" width=\"470\" height=\"285\" rx=\"12\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <g id=\"frontmatter\">\n      <rect x=\"60\" y=\"110\" width=\"430\" height=\"55\" rx=\"8\" fill=\"#111827\" stroke=\"#818cf8\"/>\n      <text x=\"275\" y=\"132\" fill=\"#e0e7ff\" font-size=\"12\" text-anchor=\"middle\">Métadonnées</text>\n      <text x=\"275\" y=\"151\" fill=\"#a5b4fc\" font-size=\"11\" text-anchor=\"middle\">titre, tags, sources, date, état</text>\n    </g>\n    <g id=\"titre\">\n      <rect x=\"60\" y=\"180\" width=\"430\" height=\"40\" rx=\"8\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\"/>\n      <text x=\"275\" y=\"205\" fill=\"#e0f2fe\" font-size=\"13\" text-anchor=\"middle\">Titre de la page</text>\n    </g>\n    <g id=\"corps\">\n      <rect x=\"60\" y=\"235\" width=\"430\" height=\"65\" rx=\"8\" fill=\"#111827\" stroke=\"#38bdf8\"/>\n      <text x=\"275\" y=\"258\" fill=\"#bae6fd\" font-size=\"12\" text-anchor=\"middle\">Corps en sections</text>\n      <text x=\"275\" y=\"278\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">définition, contexte, limites, contradictions</text>\n    </g>\n    <g id=\"liens\">\n      <rect x=\"60\" y=\"315\" width=\"205\" height=\"40\" rx=\"8\" fill=\"#042f2e\" stroke=\"#2dd4bf\"/>\n      <text x=\"162\" y=\"340\" fill=\"#ccfbf1\" font-size=\"12\" text-anchor=\"middle\">Liens et backlinks</text>\n    </g>\n    <g id=\"sources\">\n      <rect x=\"285\" y=\"315\" width=\"205\" height=\"40\" rx=\"8\" fill=\"#052e16\" stroke=\"#4ade80\"/>\n      <text x=\"387\" y=\"340\" fill=\"#dcfce7\" font-size=\"12\" text-anchor=\"middle\">Sources citées</text>\n    </g>\n  </g>\n\n  <g id=\"index\">\n    <rect x=\"565\" y=\"100\" width=\"255\" height=\"95\" rx=\"10\" fill=\"#111827\" stroke=\"#facc15\" stroke-width=\"2\"/>\n    <text x=\"692\" y=\"128\" fill=\"#fef9c3\" font-size=\"13\" text-anchor=\"middle\">index.md</text>\n    <text x=\"692\" y=\"150\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">catalogue des pages</text>\n    <text x=\"692\" y=\"170\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">lien, résumé, catégorie</text>\n  </g>\n\n  <g id=\"journal\">\n    <rect x=\"565\" y=\"225\" width=\"255\" height=\"95\" rx=\"10\" fill=\"#111827\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"692\" y=\"253\" fill=\"#fce7f3\" font-size=\"13\" text-anchor=\"middle\">log.md</text>\n    <text x=\"692\" y=\"275\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">journal chronologique</text>\n    <text x=\"692\" y=\"295\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">ingestions et requêtes</text>\n  </g>\n\n  <g id=\"graphe\">\n    <rect x=\"565\" y=\"340\" width=\"255\" height=\"35\" rx=\"8\" fill=\"#1e1b4b\" stroke=\"#818cf8\"/>\n    <text x=\"692\" y=\"362\" fill=\"#e0e7ff\" font-size=\"12\" text-anchor=\"middle\">Vue de graphe et pages voisines</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Les métadonnées et le titre",
+            "explanation": "L'en-tête fixe l'identité de la page, ses sources et son état. Le titre doit rester stable pour que les liens ne cassent pas.",
+            "highlight": [
+              "frontmatter",
+              "titre"
+            ]
+          },
+          {
+            "title": "2. Le corps et les liens",
+            "explanation": "Le corps est organisé en sections lisibles. Les liens internes et les backlinks rendent les pages voisines accessibles.",
+            "highlight": [
+              "corps",
+              "liens"
+            ]
+          },
+          {
+            "title": "3. Les sources et les vues d'ensemble",
+            "explanation": "Les sources citées permettent la vérification. L'index catalogue les pages, le journal date les opérations, le graphe montre les relations.",
+            "highlight": [
+              "sources",
+              "index",
+              "journal",
+              "graphe"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Pourquoi un lien wiki en doubles crochets n'est-il pas toujours portable ?",
+          "options": [
+            "Parce que les liens wiki ne peuvent pas être cliquables",
+            "Parce que CommonMark ne définit pas cette syntaxe",
+            "Parce qu'ils contiennent toujours des caractères interdits",
+            "Parce qu'ils remplacent les titres"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le lien wiki est une extension, popularisée par Obsidian. Un convertisseur CommonMark peut l'afficher comme du texte brut."
+        },
+        {
+          "question": "À quoi sert index.md dans le motif de Karpathy ?",
+          "options": [
+            "À stocker les vecteurs de chaque page",
+            "À remplacer les citations",
+            "À cataloguer les pages avec un lien et un résumé",
+            "À verrouiller les pages approuvées"
+          ],
+          "correctIndex": 2,
+          "explanation": "L'index est un catalogue orienté contenu. L'agent peut le lire d'abord, puis ouvrir les pages pertinentes, à une échelle modérée."
+        },
+        {
+          "question": "Quel élément rend une affirmation vérifiable dans une page ?",
+          "options": [
+            "Un titre en gras",
+            "Une couleur différente",
+            "Un paragraphe plus long",
+            "Une citation précise vers une source, avec un emplacement ou une empreinte"
+          ],
+          "correctIndex": 3,
+          "explanation": "La provenance permet de retrouver le passage d'origine. Un simple nom d'article ne suffit pas à vérifier une affirmation détaillée."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Frontmatter",
+          "definition": "Bloc de métadonnées en tête d'une page, souvent en YAML, qui décrit le titre, les tags, les sources et l'état."
+        },
+        {
+          "term": "Wikilink",
+          "definition": "Lien interne écrit avec des doubles crochets, popularisé par Obsidian, qui n'appartient pas à CommonMark."
+        },
+        {
+          "term": "Backlink",
+          "definition": "Lien entrant vers une page, qui permet de voir quelles autres pages la citent."
+        },
+        {
+          "term": "CommonMark",
+          "definition": "Spécification de la syntaxe Markdown de base ; elle ne couvre ni le frontmatter ni les wikilinks."
+        },
+        {
+          "term": "Page orpheline",
+          "definition": "Page sans lien entrant, difficile à trouver depuis l'index ou le graphe."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Portabilité d’une page",
+          "prompt": "Une page de wiki utilise un en-tête YAML, un lien en doubles crochets et un tableau GFM. Un convertisseur CommonMark la lit et affiche le lien comme du texte brut. Expliquez pourquoi, et indiquez ce que le schéma du projet doit préciser pour éviter ce genre de surprise.",
+          "solution": "CommonMark définit les titres, paragraphes, listes, liens standards, citations et blocs de code. Il ne définit ni les métadonnées YAML en tête de fichier, ni les liens en doubles crochets, ni les tableaux étendus : ce sont des extensions associées à Obsidian ou au dialecte GFM. Le convertisseur ne connaît donc pas le lien wiki et le rend comme du texte. Le schéma doit documenter les extensions utilisées, la syntaxe des liens, la façon de les résoudre, le rôle de l’identifiant stable et des alias, ainsi que les champs de métadonnées obligatoires. Il doit aussi indiquer quel lien fait référence, pour que le graphe ne se fragmente pas entre plusieurs noms."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Andrej Karpathy, LLM Wiki, gist, créé le 4 avril 2026, consulté le 21 octobre 2026.",
+          "href": "https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f"
+        },
+        {
+          "label": "Obsidian, documentation, consultée le 21 octobre 2026.",
+          "href": "https://obsidian.md/help/"
+        },
+        {
+          "label": "CommonMark, spécification, consultée le 21 octobre 2026.",
+          "href": "https://spec.commonmark.org/"
+        }
+      ]
+    },
+    {
+      "id": "rag-vs-wiki",
+      "title": "Wiki contre RAG",
+      "keyTakeaways": [
+        "Un wiki compilé et un RAG ne sont pas deux produits isolés : ce sont des familles d'architectures, avec de nombreux réglages.",
+        "L'étude de 2026 trouve un avantage de synthèse pour le wiki, mais faiblement soutenu, et un avantage de coût inversé : environ 21 fois plus de tokens par requête, sans point d'équilibre.",
+        "Une variante de RAG avec décomposition de la requête réduit l'essentiel de l'écart de synthèse à un coût plus faible.",
+        "Le résultat dépend du corpus, du modèle, du juge et de la manière de servir le wiki ; il ne désigne pas de gagnant universel.",
+        "Le choix doit se faire sur des critères séparés : synthèse, fidélité des citations, fraîcheur, coût et maintenance."
+      ],
+      "theory": "### Deux familles, pas deux produits\n\nComparer « le wiki » et « le RAG » comme deux logiciels conduit à une conclusion trop simple. Le RAG regroupe la recherche vectorielle simple, la recherche hybride, le reranking, la recherche itérative, la décomposition de requête et les graphes d'entités. Le wiki regroupe des pages compilées parcourues par un agent, des pages servies directement dans le contexte, des wikis avec recherche hybride et des variantes inspirées de GraphRAG. Les résultats dépendent de l'implémentation exacte, pas seulement de l'étiquette.\n\nCette précision n'est pas une échappatoire. Elle explique pourquoi deux études peuvent sembler se contredire. Un wiki lu par un agent qui paie chaque page visitée n'a pas le même coût qu'un wiki dont les pages sont injectées en bloc dans une fenêtre de contexte. Un RAG à un tour n'a pas la même capacité de synthèse qu'un RAG qui décompose la question en sous-requêtes. Les architectures se ressemblent de loin et diffèrent de près.\n\n### Où le travail se déplace\n\nDans un RAG, l'ingestion est surtout une indexation. Le travail cognitif est fait à la question : retrouver, sélectionner, assembler et rédiger. Dans un wiki, une partie de ce travail est faite à l'ingestion : lire, extraire, relier, rédiger des pages. La question devient un parcours dans un artefact déjà organisé.\n\nCe déplacement change la structure des coûts. Le wiki paie avant la première question, puis continue à payer pour maintenir les pages. Le RAG paie à chaque question, avec un coût qui dépend du nombre de passages et de la longueur du contexte. Pour un corpus stable et beaucoup de questions, la compilation peut amortir son coût. Pour un corpus qui change souvent et peu de questions, elle peut coûter plus qu'elle ne rapporte.\n\nIl change aussi la fraîcheur. Un RAG bien mis à jour voit immédiatement un nouveau document dans son index. Un wiki doit recompiler la source, mettre à jour les pages dépendantes et vérifier les contradictions. La fraîcheur n'est pas impossible, mais elle demande un pipeline de maintenance.\n\n### Ce que l'étude de 2026 mesure\n\nTheodore O. Cochran a publié en mai 2026, puis révisé en octobre, une comparaison préenregistrée entre un RAG vectoriel à un tour et un wiki Markdown compilé, parcouru par un agent. Le corpus contient 24 articles scientifiques répartis en trois domaines : éthique et droit de l'IA, climat, médecine de précision. Les deux systèmes répondent aux mêmes 13 questions, réparties en six catégories. Le même modèle, Claude Opus 4.7, répond aux questions des deux systèmes, compile le wiki et enrichit l'index du RAG. Les réponses sont notées à l'aveugle par deux juges LLM, GPT-5.4 et Gemini 2.5 Pro.\n\nLe RAG est appelé « single-round » parce qu'il ne relance pas de recherche pendant la génération, mais il est multi-étapes : découpage de 512 tokens avec 50 tokens de chevauchement, enrichissement contextuel, expansion de requête, recherche hybride dense et lexicale, reranking Cohere vers cinq passages, validation corrective inspirée de CRAG. Le wiki est compilé hors ligne avec le même modèle, puis parcouru par un agent qui dispose de trois outils : lister les pages, lire une page, soumettre une réponse. L'agent est limité à 30 tours.\n\nTrois prédictions étaient préenregistrées. La première (H1) attendait un avantage du wiki d'au moins 2 points sur deux critères de synthèse pour quatre questions multi-documents. Avec la moyenne des deux juges, l'écart est de +6,625 sur la connexion entre articles et de +1,625 sur l'intégrité structurelle. Le second critère passe donc sous le seuil de +2 points. La prédiction est faiblement soutenue.\n\nLa deuxième (H2) attendait que le RAG fasse au moins aussi bien sur la groundedness de trois questions factuelles. L'écart moyen entre juges est de +0,667 en faveur du RAG, mais le second juge seul donne -0,667, et le contrôle bayésien donne une probabilité de 0,660 que l'écart soit positif, sous le seuil de 0,95. Le résultat va dans le sens attendu, mais reste fragile et dépendant du juge.\n\nLa troisième (H3) attendait un wiki coûteux à construire et peu coûteux à interroger, avec un point d'équilibre après assez de questions. L'ingestion du wiki a consommé 904 884 660 tokens LLM contre 1 401 996 pour le RAG, soit un facteur d'environ 645. Chaque requête du wiki a ensuite consommé environ 21 fois plus de tokens que celle du RAG. Le wiki dépense donc plus à chaque question, et aucun point d'équilibre n'apparaît. La prédiction est réfutée. Après pondération des tokens de cache, le facteur d'ingestion tombe entre 97 et 115, mais reste largement supérieur à 1.\n\n### Les analyses exploratoires\n\nL'étude ajoute plusieurs analyses non préenregistrées. Une variante de RAG qui décompose la requête en sous-questions réduit l'essentiel de l'écart de synthèse : environ 94 pour cent de l'écart H1 après ajustement entre juges, environ 88 pour cent avec le juge principal seul. Elle le fait à un coût en tokens plus faible que le wiki. L'avantage du wiki dépend donc fortement de la force du baseline RAG.\n\nL'accord entre les deux juges varie fortement selon le critère. Il est presque nul sur la groundedness holistique (rho = 0,04) et élevé sur le critère le plus concret, la connexion entre articles (rho = 0,81). Autrement dit, les juges s'accordent mieux quand la consigne est opérationnelle que quand elle demande une appréciation globale. Ce n'est pas une mesure de vérité : deux modèles peuvent être cohérents entre eux et se tromper ensemble.\n\nL'analyse des citations a été ajoutée après coup. Elle porte sur un échantillon de 100 affirmations citées, évaluées par deux annotateurs humains. Le scoreur automatique est d'accord avec eux sur 50 à 54 pour cent des affirmations au premier passage, et sur 65 à 69 pour cent après correction d'une troncature, en dessous du seuil fixé à l'avance. Sur les étiquettes humaines, les affirmations citées sont soutenues dans 78 pour cent des cas pour le RAG, et dans 78 ou 86 pour cent des cas pour le wiki selon l'annotateur. L'étude ne conclut donc pas à un avantage du wiki sur la fidélité des citations. L'analyse compare chaque affirmation à l'artefact cité, pas au document d'origine : elle ne mesure pas la fidélité à la source primaire.\n\n### Les limites de l'étude\n\nLe corpus est petit : 24 articles, 13 questions, un seul modèle de réponse, un jeu de prompts. Les deux systèmes diffèrent à la fois par la représentation du corpus, la stratégie de récupération et le calcul au moment de la question. Aucune différence ne peut être attribuée à la seule compilation. La longueur des réponses n'est pas contrôlée : celles du wiki font environ 1,9 fois celles du RAG, ce qui peut avantager les scores de synthèse. L'exécution du wiki a été lancée 77 minutes avant l'enregistrement, puis s'est terminée 13 minutes après, ce que les auteurs signalent explicitement.\n\nLe coût mesuré est un proxy en tokens LLM : il exclut les embeddings, le reranker, le stockage vectoriel et les prix réels. Les tokens de cache ne sont pas facturés au même tarif que les autres, et le ratio de 21 fois ne se transpose pas directement en dollars. L'abstract de la v3 indique un wiki « cheaper to build », alors que le corps et les chiffres déposés montrent une ingestion plus coûteuse ; ce cours suit le corps. Les juges sont des modèles, et leur accord ne mesure pas l'accord avec des humains. Enfin, l'échantillon ne donne ni puissance statistique ni représentativité.\n\n### Quand préférer l'un ou l'autre\n\nUn wiki compilé peut convenir à un corpus stable, réutilisé, où les questions demandent des recoupements et où une revue humaine est possible. Il peut aussi convenir à un usage hors ligne ou à un corpus dont on veut inspecter la structure. Le RAG reste préférable pour un corpus changeant, des questions factuelles, une mise à jour immédiate et une infrastructure déjà en place. Ces préférences sont des hypothèses de travail, à vérifier sur votre corpus.\n\nLes architectures hybrides sont souvent plus intéressantes que le choix exclusif. On peut rechercher dans les pages compilées, exposer le wiki comme un ensemble de ressources à un agent, ou combiner une recherche de passages et une synthèse de pages. L'étude de 2026 montre qu'une décomposition de la requête peut rapprocher un RAG d'un wiki. Elle ne montre pas que l'hybride est toujours meilleur : elle montre que le baseline et la méthode de mesure changent la conclusion.\n\n### Comment décider\n\nLa décision devrait séparer trois mesures : la qualité de synthèse, la fidélité des citations et le coût. Une évaluation unique, surtout jugée par un seul modèle, masque les désaccords. Il faut aussi vérifier le taux de pages périmées, le temps de maintenance et la couverture des questions. Un wiki qui répond bien à dix questions mais dont la moitié des pages est périmée n'est pas un système entretenu.",
+      "diagram": {
+        "title": "Deux architectures, des compromis séparés",
+        "description": "Schéma illustratif : le RAG paie à la question et suit les changements ; le wiki paie à l'ingestion et doit entretenir ses pages. Aucun gagnant n'est représenté.",
+        "svg": "<svg viewBox=\"0 0 860 430\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Comparaison des compromis entre RAG et wiki compilé\">\n  <rect width=\"860\" height=\"430\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"430\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Comparer sans désigner un gagnant</text>\n  <text x=\"430\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"rag-col\">\n    <rect x=\"35\" y=\"90\" width=\"370\" height=\"300\" rx=\"12\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"220\" y=\"120\" fill=\"#e0f2fe\" font-size=\"14\" font-weight=\"bold\" text-anchor=\"middle\">RAG</text>\n    <text x=\"220\" y=\"142\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">indexation puis recherche à la question</text>\n  </g>\n  <g id=\"wiki-col\">\n    <rect x=\"455\" y=\"90\" width=\"370\" height=\"300\" rx=\"12\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"640\" y=\"120\" fill=\"#d1fae5\" font-size=\"14\" font-weight=\"bold\" text-anchor=\"middle\">Wiki compilé</text>\n    <text x=\"640\" y=\"142\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">compilation puis parcours des pages</text>\n  </g>\n\n  <g id=\"cost\">\n    <rect x=\"55\" y=\"165\" width=\"330\" height=\"55\" rx=\"8\" fill=\"#111827\" stroke=\"#38bdf8\"/>\n    <text x=\"220\" y=\"188\" fill=\"#bae6fd\" font-size=\"12\" text-anchor=\"middle\">Coût plutôt à la question</text>\n    <text x=\"220\" y=\"207\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">contexte et passages à chaque appel</text>\n  </g>\n  <g id=\"cost-wiki\">\n    <rect x=\"475\" y=\"165\" width=\"330\" height=\"55\" rx=\"8\" fill=\"#111827\" stroke=\"#34d399\"/>\n    <text x=\"640\" y=\"188\" fill=\"#a7f3d0\" font-size=\"12\" text-anchor=\"middle\">Coût à l'ingestion, puis par requête</text>\n    <text x=\"640\" y=\"207\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">pages à maintenir et à parcourir</text>\n  </g>\n\n  <g id=\"fresh\">\n    <rect x=\"55\" y=\"235\" width=\"330\" height=\"55\" rx=\"8\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\"/>\n    <text x=\"220\" y=\"258\" fill=\"#e0f2fe\" font-size=\"12\" text-anchor=\"middle\">Fraîcheur immédiate</text>\n    <text x=\"220\" y=\"277\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">un document mis à jour entre dans l'index</text>\n  </g>\n  <g id=\"fresh-wiki\">\n    <rect x=\"475\" y=\"235\" width=\"330\" height=\"55\" rx=\"8\" fill=\"#042f2e\" stroke=\"#2dd4bf\"/>\n    <text x=\"640\" y=\"258\" fill=\"#ccfbf1\" font-size=\"12\" text-anchor=\"middle\">Fraîcheur à entretenir</text>\n    <text x=\"640\" y=\"277\" fill=\"#99f6e4\" font-size=\"11\" text-anchor=\"middle\">recompiler et réviser les pages dépendantes</text>\n  </g>\n\n  <g id=\"synth\">\n    <rect x=\"55\" y=\"305\" width=\"330\" height=\"60\" rx=\"8\" fill=\"#1e1b4b\" stroke=\"#818cf8\"/>\n    <text x=\"220\" y=\"328\" fill=\"#e0e7ff\" font-size=\"12\" text-anchor=\"middle\">Synthèse refaite à la demande</text>\n    <text x=\"220\" y=\"348\" fill=\"#a5b4fc\" font-size=\"11\" text-anchor=\"middle\">dépend des passages retrouvés</text>\n  </g>\n  <g id=\"synth-wiki\">\n    <rect x=\"475\" y=\"305\" width=\"330\" height=\"60\" rx=\"8\" fill=\"#052e16\" stroke=\"#4ade80\"/>\n    <text x=\"640\" y=\"328\" fill=\"#dcfce7\" font-size=\"12\" text-anchor=\"middle\">Synthèse déjà écrite</text>\n    <text x=\"640\" y=\"348\" fill=\"#86efac\" font-size=\"11\" text-anchor=\"middle\">à vérifier et à tenir à jour</text>\n  </g>\n\n  <g id=\"judge\">\n    <rect x=\"270\" y=\"390\" width=\"320\" height=\"26\" rx=\"6\" fill=\"#111827\" stroke=\"#facc15\"/>\n    <text x=\"430\" y=\"408\" fill=\"#fef9c3\" font-size=\"11\" text-anchor=\"middle\">La conclusion dépend du corpus, du baseline et du juge</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Le RAG déplace le coût vers la question",
+            "explanation": "Chaque question paie la recherche et le contexte. Un document mis à jour est disponible immédiatement, mais la synthèse est refaite à chaque fois.",
+            "highlight": [
+              "rag-col",
+              "cost",
+              "fresh",
+              "synth"
+            ]
+          },
+          {
+            "title": "2. Le wiki déplace le coût vers l'ingestion",
+            "explanation": "La compilation paie avant les questions, puis chaque requête parcourt des pages qu'il faut entretenir. La synthèse existe déjà, mais elle peut vieillir.",
+            "highlight": [
+              "wiki-col",
+              "cost-wiki",
+              "fresh-wiki",
+              "synth-wiki"
+            ]
+          },
+          {
+            "title": "3. Le résultat dépend du montage",
+            "explanation": "Un baseline plus fort, une autre méthode de notation ou un autre corpus peuvent changer la conclusion. Aucun des deux camps ne gagne partout.",
+            "highlight": [
+              "judge"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Que montrent les résultats de l'étude de 2026 sur la synthèse multi-documents ?",
+          "options": [
+            "Le wiki relie mieux les articles, mais son avantage d'organisation passe sous le seuil préenregistré une fois les deux juges combinés",
+            "Le wiki dépasse le RAG sur tous les critères, sans réserve",
+            "Le RAG est toujours meilleur pour relier cinq articles",
+            "Les deux systèmes obtiennent exactement les mêmes scores"
+          ],
+          "correctIndex": 0,
+          "explanation": "La prédiction H1 est faiblement soutenue : l'avantage de connexion est net, mais le second critère passe sous le seuil de 2 points avec les deux juges."
+        },
+        {
+          "question": "Que dit l'étude sur le coût des requêtes du wiki ?",
+          "options": [
+            "Il est plus faible que celui du RAG, comme prévu",
+            "Il est environ 21 fois plus élevé en tokens LLM que celui du RAG, et aucun point d'équilibre n'apparaît",
+            "Il est identique à celui du RAG",
+            "Il ne peut pas être mesuré"
+          ],
+          "correctIndex": 1,
+          "explanation": "La prédiction H3 est réfutée : la construction coûte plus cher, et chaque requête du wiki consomme environ 21 fois plus de tokens que celle du RAG."
+        },
+        {
+          "question": "Quelle variante réduit l'essentiel de l'écart de synthèse observé ?",
+          "options": [
+            "Un wiki qui ne fait aucune revue",
+            "Un RAG qui supprime les citations",
+            "Un RAG qui décompose la requête en sous-questions",
+            "Un modèle plus petit pour les juges"
+          ],
+          "correctIndex": 2,
+          "explanation": "Dans l'ablation exploratoire, la décomposition de la requête réduit environ 94 pour cent de l'écart H1 après ajustement, à un coût en tokens plus faible."
+        },
+        {
+          "question": "Pourquoi l'étude ne désigne-t-elle pas un gagnant universel ?",
+          "options": [
+            "Parce que les deux systèmes sont identiques",
+            "Parce que le RAG n'a pas été exécuté",
+            "Parce que les auteurs refusent de conclure",
+            "Parce qu'un seul corpus, un seul modèle et un protocole précis ne représentent pas tous les usages"
+          ],
+          "correctIndex": 3,
+          "explanation": "Le corpus est petit, les systèmes diffèrent sur plusieurs axes et le coût est un proxy en tokens. Les auteurs limitent explicitement leurs conclusions."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "RAG à un tour",
+          "definition": "RAG qui effectue une seule phase de récupération avant de générer, sans relancer de recherche pendant la rédaction."
+        },
+        {
+          "term": "Wiki compilé",
+          "definition": "Ensemble de pages Markdown produites à l'ingestion, que l'on parcourt ou interroge au moment de la question."
+        },
+        {
+          "term": "Point d'équilibre",
+          "definition": "Nombre de questions à partir duquel le surcoût de construction du wiki serait compensé par des requêtes moins coûteuses."
+        },
+        {
+          "term": "Décomposition de requête",
+          "definition": "Technique qui divise une question complexe en sous-questions, puis récupère des passages pour chacune."
+        },
+        {
+          "term": "Juge LLM",
+          "definition": "Modèle chargé de noter des réponses selon une grille, à la place ou en complément d'annotateurs humains."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Lire un résultat sans conclure trop vite",
+          "prompt": "Une étude annonce que le wiki relié à un agent obtient de meilleurs scores de synthèse que le RAG, mais consomme environ 21 fois plus de tokens par requête et environ 645 fois plus de tokens à l’ingestion. Quelles précautions faut-il prendre avant de transférer ce résultat à un projet, et quels critères séparer ?",
+          "solution": "Il faut d’abord regarder le montage : corpus de 24 articles, 13 questions, un seul modèle, un baseline de RAG précis et des juges LLM. Les deux systèmes diffèrent par la représentation, la récupération et le calcul, donc l’écart ne s’attribue pas à la seule compilation. Le coût est un proxy en tokens, qui exclut embeddings, reranker et stockage. Une variante de RAG avec décomposition de la requête réduit l’essentiel de l’écart de synthèse. Il faut donc séparer qualité de synthèse, fidélité des citations, fraîcheur, coût et maintenance, puis mesurer sur son propre corpus avant de choisir, ou de combiner les deux."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Theodore O. Cochran, Single-Round Vector RAG vs an LLM-Compiled Wiki, arXiv 2605.18490, v3 du 2 octobre 2026, consulté le 21 octobre 2026.",
+          "href": "https://arxiv.org/abs/2605.18490"
+        },
+        {
+          "label": "Patrick Lewis et al., Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks, NeurIPS 2020, consulté le 21 octobre 2026.",
+          "href": "https://arxiv.org/abs/2005.11401"
+        },
+        {
+          "label": "Darren Edge et al., From Local to Global : A Graph RAG Approach to Query-Focused Summarization, 2024, consulté le 21 octobre 2026.",
+          "href": "https://arxiv.org/abs/2404.16130"
+        }
+      ]
+    },
+    {
+      "id": "limites",
+      "title": "Limites, dérive et maintenance",
+      "keyTakeaways": [
+        "Une page compilée peut être fluide et fausse : l'erreur se propage d'autant plus vite qu'elle est réutilisée.",
+        "La fraîcheur demande un suivi des dépendances entre sources et pages, puis une recompilation ou une révision des pages touchées.",
+        "Les doublons, les pages orphelines et les contradictions non signalées fragilisent le wiki plus sûrement qu'un mauvais prompt.",
+        "La revue humaine et la gouvernance des accès sont des coûts réels, sans lesquels le wiki devient une accumulation de synthèses plausibles.",
+        "L'étude de 2026 reste limitée à un petit corpus, un modèle et un protocole : elle ne prouve pas qu'un wiki gagne toujours contre un RAG."
+      ],
+      "theory": "### La compilation peut se tromper\n\nUn modèle qui lit une source et écrit une page ne recopie pas le document. Il sélectionne, reformule et relie. Cette transformation est utile, mais elle peut introduire des erreurs : une condition omise, une exception transformée en règle générale, une date mal associée, deux entités confondues, une citation attribuée au mauvais passage. La page peut rester parfaitement lisible. C'est ce qui rend l'erreur difficile à voir.\n\nLe risque augmente avec la réutilisation. Une page fausse peut alimenter une autre page, puis une réponse, puis une décision. Le wiki donne une apparence de stabilité à une erreur qui, dans un RAG, aurait pu disparaître à la question suivante. La source brute reste la référence, mais elle n'est consultée que si quelqu'un doute. La citation précise, la date et l'état de revue sont donc des protections, pas des ornements.\n\nLa compilation peut aussi produire des pages trop générales. Un modèle résume volontiers, et un résumé peut gommer la nuance qui rendait la source utile. Une page sur une méthode peut omettre les conditions de validité, une page sur un contrat peut omettre une exception. Le contrôle de fidélité ne consiste pas à vérifier que la page parle du bon sujet, mais à vérifier qu'elle ne dit rien de plus que ses sources.\n\n### Dérive, fraîcheur et doublons\n\nUne source change, mais les pages dérivées ne changent pas automatiquement. C'est la dérive. Une page peut citer une version ancienne d'un rapport tout en étant reliée à la version récente. Elle peut affirmer une chose que la source a corrigée. Le wiki doit donc suivre les dépendances : quelle page dépend de quelle source, et quelle version de la source. Une empreinte de contenu permet de détecter le changement, mais il faut encore décider quelles pages réviser.\n\nLa fraîcheur n'est pas un état binaire. Une page peut être à jour pour une source et périmée pour une autre, ou partiellement vérifiée. Il faut définir des états et des règles : page fraîche, page à revoir, page périmée, page orpheline. Un tableau de bord peut signaler les pages dont une source a changé, mais il ne corrige rien. La maintenance demande du temps.\n\nLes doublons sont un autre piège. Deux sources peuvent décrire le même concept avec des noms différents, ou la même entité avec des variantes. Le modèle peut créer deux pages, puis les relier comme si elles étaient distinctes. À l'inverse, il peut fusionner deux concepts proches mais différents. Une déduplication exacte par empreinte ne suffit pas : il faut des règles de nommage, des alias et une revue des fusions.\n\nLes contradictions doivent être explicites. Si deux sources se contredisent, une page qui choisit silencieusement l'une des deux perd une information. Il vaut mieux écrire la contradiction, dater les sources et indiquer laquelle est la plus récente ou la plus fiable. Cette écriture est un jugement, et elle doit être visible pour le lecteur.\n\n### Pages orphelines et navigation\n\nUne page sans lien entrant est difficile à trouver, même si elle est excellente. Elle peut rester dans le dossier sans être lue par l'agent ni par l'humain. Les contrôles de liens détectent les orphelines, mais la correction demande de décider où les rattacher. Une page peut aussi être liée depuis une page obsolète, ce qui donne une fausse impression de pertinence.\n\nLe graphe de liens n'est pas une preuve de qualité. Deux pages peuvent être reliées parce qu'elles partagent un mot, sans que le lien aide le lecteur. Un graphe dense peut cacher des pages faibles. La navigation doit être testée par des questions réelles : peut-on partir de l'index et atteindre la bonne page en quelques clics ? La réponse dépend du corpus et des usages.\n\n### Revue humaine et gouvernance\n\nLa revue humaine est le contrôle de référence pour juger la fidélité et le sens. Un modèle peut vérifier qu'une citation existe ; juger qu'elle soutient l'affirmation demande un contrôle humain ou un scoreur dont la fiabilité a été mesurée. Un relecteur peut comparer la page à la source, repérer une omission et corriger. Cette revue a un coût, et ce coût doit être prévu dans le projet.\n\nToutes les pages n'ont pas besoin du même niveau de revue. Une page de vulgarisation interne et une page juridique n'ont pas les mêmes conséquences. Le schéma peut définir des seuils : revue obligatoire pour certains domaines, revue par échantillon pour d'autres, publication automatique pour les pages sans risque. Ces règles doivent être explicites et versionnées.\n\nLa gouvernance couvre aussi les accès. Un wiki qui compile des sources confidentielles duplique leur contenu. Les droits de lecture doivent refléter ceux des sources. Une page dérivée ne doit pas devenir visible par une personne qui n'aurait pas accès au document d'origine. La suppression d'une source doit entraîner la révision ou le retrait des pages dérivées. Ces questions ne sont pas résolues par le format Markdown.\n\n### Sécurité et données personnelles\n\nLes sources peuvent contenir des instructions destinées à un modèle, des données personnelles, des secrets ou des contenus piégés. La compilation lit ces textes et peut les recopier dans le wiki. Une instruction cachée dans une source peut influencer la rédaction d'une page, surtout si l'agent qui compile dispose d'outils. Il faut traiter les sources comme des données non fiables, limiter les outils de l'agent et séparer la lecture de l'écriture.\n\nLe wiki peut aussi conserver des informations que la source avait vocation à oublier. Une note interne supprimée peut rester dans une page compilée. Il faut une politique de rétention, une procédure de suppression et un contrôle des pages dérivées. La simplicité du Markdown ne dispense pas de ces obligations.\n\n### Coût, échelle et exploitation\n\nLe coût de compilation dépend du corpus, du modèle et du nombre de pages. L'étude de 2026 mesure, sur son corpus, une construction environ 645 fois plus coûteuse en tokens LLM que l'ingestion du RAG, soit près de trois ordres de grandeur, et des requêtes environ 21 fois plus coûteuses en tokens. Ces chiffres ne sont pas des constantes, mais ils montrent que le wiki n'est pas gratuit.\n\nÀ mesure que le wiki grandit, l'index seul ne suffit plus. Il faut une recherche, des métadonnées et des contrôles plus nombreux. Le temps de parcours par un agent augmente, et le risque de pages périmées aussi. Un wiki de quelques centaines de pages peut être inspecté à la main ; un wiki de plusieurs milliers demande une infrastructure et une équipe.\n\nLe wiki est aussi un engagement de maintenance. Si personne ne met à jour les pages, leur valeur diminue. Le pire état n'est pas l'absence de wiki, mais un wiki qui paraît à jour et ne l'est plus. La fraîcheur doit être visible, et les pages anciennes doivent être signalées.\n\n### Ce que l'étude de 2026 ne dit pas\n\nL'étude de Cochran compare deux implémentations sur 24 articles, 13 questions et un modèle. Elle ne dit pas que le wiki gagne toujours, ni que le RAG perd toujours. Elle ne dit pas que la compilation est plus fiable : l'analyse des citations ne montre pas d'avantage du wiki, et le scoreur automatique a échoué au seuil d'accord fixé avec les annotateurs.\n\nElle ne dit pas non plus que le coût en tokens se traduit directement en dollars. Le compte exclut les embeddings, le reranker, le stockage et les prix réels. Le ratio de 21 fois est un rapport de tokens, pas une facture. Enfin, les deux systèmes diffèrent sur plusieurs axes à la fois, et l'exécution du wiki a été lancée 77 minutes avant l'enregistrement, puis s'est terminée 13 minutes après. Ces limites restreignent la portée des conclusions.\n\n### Une checklist de prudence\n\nAvant de déployer un wiki compilé, il faut pouvoir répondre à quelques questions. Qui possède les sources ? Qui peut lire le wiki ? Comment une source modifiée déclenche-t-elle une révision ? Combien de pages sont orphelines ? Quelles pages ont été relues par un humain ? Quel est le coût de compilation par source ? Quel est le taux de citations vérifiables ? Que se passe-t-il quand une source est supprimée ? Sans réponses, le wiki reste une démonstration.\n\nLa comparaison avec un RAG devrait être faite sur votre corpus, avec un baseline solide et des mesures séparées. Il faut regarder la synthèse, la fidélité des citations, la fraîcheur et le coût. Un avantage sur une démonstration ne garantit pas un avantage en production. La conclusion raisonnable est de tester, de mesurer et de garder les sources comme référence.",
+      "diagram": {
+        "title": "Le cycle de maintenance",
+        "description": "Schéma illustratif : une source change, les pages dépendantes sont signalées, révisées et journalisées. Les doublons et les orphelines demandent aussi une décision.",
+        "svg": "<svg viewBox=\"0 0 860 420\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Cycle de maintenance d'un wiki compilé, de la source modifiée à la revue\">\n  <rect width=\"860\" height=\"420\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"430\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Maintenir un wiki compilé</text>\n  <text x=\"430\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"source-change\">\n    <rect x=\"40\" y=\"105\" width=\"180\" height=\"95\" rx=\"10\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"130\" y=\"135\" fill=\"#e0f2fe\" font-size=\"13\" text-anchor=\"middle\">Source modifiée</text>\n    <text x=\"130\" y=\"157\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">nouvelle version</text>\n    <text x=\"130\" y=\"177\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">ou source retirée</text>\n  </g>\n\n  <g id=\"hash\">\n    <rect x=\"255\" y=\"105\" width=\"180\" height=\"95\" rx=\"10\" fill=\"#111827\" stroke=\"#f472b6\" stroke-width=\"2\"/>\n    <text x=\"345\" y=\"135\" fill=\"#fce7f3\" font-size=\"13\" text-anchor=\"middle\">Empreinte</text>\n    <text x=\"345\" y=\"157\" fill=\"#fbcfe8\" font-size=\"11\" text-anchor=\"middle\">détection du changement</text>\n    <text x=\"345\" y=\"177\" fill=\"#f9a8d4\" font-size=\"11\" text-anchor=\"middle\">dépendances</text>\n  </g>\n\n  <g id=\"stale\">\n    <rect x=\"470\" y=\"105\" width=\"180\" height=\"95\" rx=\"10\" fill=\"#1e1b4b\" stroke=\"#818cf8\" stroke-width=\"2\"/>\n    <text x=\"560\" y=\"135\" fill=\"#e0e7ff\" font-size=\"13\" text-anchor=\"middle\">Pages signalées</text>\n    <text x=\"560\" y=\"157\" fill=\"#c7d2fe\" font-size=\"11\" text-anchor=\"middle\">périmées ou non</text>\n    <text x=\"560\" y=\"177\" fill=\"#a5b4fc\" font-size=\"11\" text-anchor=\"middle\">vérifiées</text>\n  </g>\n\n  <g id=\"refresh\">\n    <rect x=\"685\" y=\"105\" width=\"140\" height=\"95\" rx=\"10\" fill=\"#042f2e\" stroke=\"#2dd4bf\" stroke-width=\"2\"/>\n    <text x=\"755\" y=\"135\" fill=\"#ccfbf1\" font-size=\"13\" text-anchor=\"middle\">Révision</text>\n    <text x=\"755\" y=\"157\" fill=\"#99f6e4\" font-size=\"11\" text-anchor=\"middle\">recompiler</text>\n    <text x=\"755\" y=\"177\" fill=\"#5eead4\" font-size=\"11\" text-anchor=\"middle\">ou corriger</text>\n  </g>\n\n  <g id=\"review\">\n    <rect x=\"470\" y=\"255\" width=\"355\" height=\"80\" rx=\"10\" fill=\"#052e16\" stroke=\"#4ade80\" stroke-width=\"2\"/>\n    <text x=\"647\" y=\"283\" fill=\"#dcfce7\" font-size=\"13\" text-anchor=\"middle\">Revue humaine</text>\n    <text x=\"647\" y=\"305\" fill=\"#bbf7d0\" font-size=\"11\" text-anchor=\"middle\">fidélité, nuances, contradictions</text>\n    <text x=\"647\" y=\"323\" fill=\"#86efac\" font-size=\"11\" text-anchor=\"middle\">approbation, rejet ou nouvelle rédaction</text>\n  </g>\n\n  <g id=\"log\">\n    <rect x=\"255\" y=\"255\" width=\"180\" height=\"80\" rx=\"10\" fill=\"#111827\" stroke=\"#facc15\" stroke-width=\"2\"/>\n    <text x=\"345\" y=\"283\" fill=\"#fef9c3\" font-size=\"13\" text-anchor=\"middle\">Journal</text>\n    <text x=\"345\" y=\"305\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">date et opération</text>\n    <text x=\"345\" y=\"323\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">traçabilité</text>\n  </g>\n\n  <g id=\"orphan\">\n    <rect x=\"40\" y=\"255\" width=\"180\" height=\"80\" rx=\"10\" fill=\"#3b0f1a\" stroke=\"#f87171\" stroke-width=\"2\"/>\n    <text x=\"130\" y=\"283\" fill=\"#fecaca\" font-size=\"13\" text-anchor=\"middle\">Doublons et</text>\n    <text x=\"130\" y=\"305\" fill=\"#fca5a5\" font-size=\"11\" text-anchor=\"middle\">pages orphelines</text>\n    <text x=\"130\" y=\"323\" fill=\"#f87171\" font-size=\"11\" text-anchor=\"middle\">à fusionner ou relier</text>\n  </g>\n\n  <line x1=\"220\" y1=\"152\" x2=\"255\" y2=\"152\" stroke=\"#64748b\" stroke-width=\"2\"/>\n  <line x1=\"435\" y1=\"152\" x2=\"470\" y2=\"152\" stroke=\"#64748b\" stroke-width=\"2\"/>\n  <line x1=\"650\" y1=\"152\" x2=\"685\" y2=\"152\" stroke=\"#64748b\" stroke-width=\"2\"/>\n  <line x1=\"755\" y1=\"200\" x2=\"755\" y2=\"255\" stroke=\"#64748b\" stroke-width=\"2\"/>\n  <line x1=\"470\" y1=\"295\" x2=\"435\" y2=\"295\" stroke=\"#64748b\" stroke-width=\"2\"/>\n  <line x1=\"255\" y1=\"295\" x2=\"220\" y2=\"295\" stroke=\"#64748b\" stroke-width=\"2\"/>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Détecter le changement",
+            "explanation": "Une source est modifiée ou retirée. Son empreinte change, et les pages qui en dépendent peuvent être signalées comme à revoir.",
+            "highlight": [
+              "source-change",
+              "hash",
+              "stale"
+            ]
+          },
+          {
+            "title": "2. Réviser les pages",
+            "explanation": "La page est recompilée ou corrigée. La révision doit vérifier la fidélité, les nuances et les contradictions, pas seulement les liens.",
+            "highlight": [
+              "refresh",
+              "review"
+            ]
+          },
+          {
+            "title": "3. Traiter les doublons et les orphelines",
+            "explanation": "Deux pages peuvent décrire le même concept, ou une page peut rester sans lien entrant. Ces cas demandent une décision de fusion ou de rattachement.",
+            "highlight": [
+              "orphan"
+            ]
+          },
+          {
+            "title": "4. Journaliser la décision",
+            "explanation": "Le journal conserve la date, l'opération et la raison. Il permet de comprendre l'état du wiki et de revenir sur une décision.",
+            "highlight": [
+              "log"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Pourquoi une erreur de compilation est-elle plus difficile à voir qu'une erreur de RAG ?",
+          "options": [
+            "Parce que la page peut être fluide, cohérente et réutilisée sans être relue",
+            "Parce que le wiki ne cite jamais ses sources",
+            "Parce que les modèles de langage ne se trompent pas en RAG",
+            "Parce que le Markdown empêche les corrections"
+          ],
+          "correctIndex": 0,
+          "explanation": "Une page compilée peut sembler fiable et servir plusieurs fois. L'erreur persiste, alors qu'une réponse RAG est refaite à chaque question."
+        },
+        {
+          "question": "Que se passe-t-il quand une source est modifiée sans recompilation ?",
+          "options": [
+            "Les pages dépendantes restent automatiquement à jour",
+            "Les pages dépendantes peuvent devenir périmées ou mélanger deux versions",
+            "Le wiki supprime la page automatiquement",
+            "Le journal devient illisible"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le changement de la source ne modifie pas les pages dérivées. Il faut suivre les dépendances, signaler les pages et les réviser."
+        },
+        {
+          "question": "Quel contrôle la revue humaine apporte-t-elle qu'un lint ne peut pas apporter ?",
+          "options": [
+            "La vérification des liens cassés",
+            "Le calcul des empreintes",
+            "La vérification de la fidélité et du sens des affirmations",
+            "La détection des fichiers absents"
+          ],
+          "correctIndex": 2,
+          "explanation": "Le lint vérifie la structure. La fidélité d'une page à ses sources, les nuances et les omissions demandent une lecture de fond."
+        },
+        {
+          "question": "Que peut-on conclure de l'étude de 2026 sur la supériorité d'un wiki ?",
+          "options": [
+            "Le wiki gagne sur tous les corpus et tous les modèles",
+            "Le wiki gagne toujours sur la fidélité des citations",
+            "Le RAG ne peut pas être comparé",
+            "Les résultats sont limités à un corpus, un modèle et un protocole précis"
+          ],
+          "correctIndex": 3,
+          "explanation": "L'étude ne montre pas de supériorité universelle : elle porte sur 24 articles, 13 questions, un modèle, et plusieurs de ses analyses sont fragiles ou non concluantes."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Dérive",
+          "definition": "Écart entre une page compilée et les sources à jour, souvent causé par une modification non répercutée."
+        },
+        {
+          "term": "Page orpheline",
+          "definition": "Page sans lien entrant, difficile à atteindre depuis l'index ou le graphe."
+        },
+        {
+          "term": "Revue humaine",
+          "definition": "Vérification par une personne de la fidélité, des nuances et de la pertinence d'une page."
+        },
+        {
+          "term": "Provenance",
+          "definition": "Information qui indique d'où vient une affirmation : source, emplacement, date, version."
+        },
+        {
+          "term": "Péremption",
+          "definition": "État d'une page dont une source a changé ou dont la synthèse n'est plus à jour."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Erreur compilée",
+          "prompt": "Pourquoi une page de wiki compilée peut-elle devenir plus dangereuse qu’une erreur dans un RAG, et quelles protections faut-il prévoir ?",
+          "solution": "La page est lisible et réutilisée : une erreur peut se propager. Il faut suivre les dépendances entre sources et pages, citer la source et la date, marquer l’état de revue, détecter les doublons et contradictions et maintenir une relecture humaine."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Theodore O. Cochran, Single-Round Vector RAG vs an LLM-Compiled Wiki, arXiv 2605.18490, v3 du 2 octobre 2026, consulté le 21 octobre 2026.",
+          "href": "https://arxiv.org/abs/2605.18490"
+        },
+        {
+          "label": "Andrej Karpathy, LLM Wiki, gist, créé le 4 avril 2026, consulté le 21 octobre 2026.",
+          "href": "https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f"
+        }
+      ]
+    }
+  ]
+}

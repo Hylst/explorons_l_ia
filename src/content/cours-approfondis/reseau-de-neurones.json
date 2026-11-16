@@ -1,0 +1,1114 @@
+{
+  "slug": "reseau-de-neurones",
+  "title": "Dans les entrailles d'un réseau de neurones : comprendre le deep learning de zéro",
+  "subtitle": "Une lecture concrète de ce qui se passe entre l'entrée et la sortie",
+  "level": "Intermédiaire",
+  "tags": [
+    "Réseaux de neurones",
+    "Deep learning",
+    "Rétropropagation",
+    "Fonctions d'activation",
+    "Descente de gradient",
+    "PyTorch"
+  ],
+  "summary": "Un parcours en huit étapes, du neurone artificiel aux liens avec les LLM. Les calculs sont faits à la main, puis vérifiés avec du code NumPy et PyTorch exécuté.",
+  "introduction": "La métaphore du cerveau biologique aide à intuitionner un réseau de neurones, mais elle masque ce qui est réellement calculé. Le perceptron, puis la rétropropagation, ont transformé cette intuition en une suite d'opérations sur des matrices. Avant de commencer, il suffit de savoir dériver une fonction simple et de lire une multiplication de matrices. À la fin, le lecteur saura expliquer ce qu'est un poids, pourquoi une fonction d'activation est nécessaire et comment un gradient met à jour un réseau ; il connaîtra aussi les limites de cette présentation.",
+  "prerequisites": [
+    "Savoir ce qu'est une fonction et une dérivée simple",
+    "Avoir déjà vu une matrice",
+    "Savoir lancer un script Python",
+    "Aucune expérience de PyTorch requise"
+  ],
+  "checkedOn": "2026-10-26",
+  "cover": {
+    "src": "pics/cours/reseau-de-neurones.webp",
+    "alt": "Neurone artificiel lumineux aux prolongements ramifiés, dans un dégradé de bleu nuit, de cyan et de violet."
+  },
+  "modules": [
+    {
+      "id": "mythe",
+      "title": "Le mythe du cerveau artificiel",
+      "keyTakeaways": [
+        "Le vocabulaire des réseaux de neurones vient de la biologie, mais une unité artificielle calcule une somme pondérée suivie d'une fonction d'activation, pas une simulation de neurone.",
+        "Goodfellow, Bengio et Courville (2016) présentent le cerveau comme une source d'inspiration historique, tout en décrivant l'apprentissage profond comme un ensemble de méthodes mathématiques et informatiques.",
+        "Un neurone biologique est une cellule dynamique, aux types et aux connexions variés. Une unité artificielle est une fonction simple, appliquée à des nombres.",
+        "Un perceptron sépare l'espace par un hyperplan. Une couche cachée transforme les entrées pour rendre séparables des classes qui ne le sont pas dans l'espace d'origine.",
+        "Le réseau ne comprend pas les données : il ajuste des paramètres pour réduire une perte, et ses performances ne garantissent rien hors de la distribution observée."
+      ],
+      "theory": "### Une métaphore utile, pas une description\n\nLe vocabulaire des réseaux de neurones vient de la biologie. Un neurone réel reçoit des signaux par ses dendrites, les intègre dans son corps cellulaire, puis transmet un signal le long de son axone vers d'autres neurones par des synapses. Les premiers modèles artificiels ont repris ce vocabulaire parce qu'il fournissait une image simple de ce que l'on cherchait à construire. Goodfellow, Bengio et Courville (2016) rappellent cette inspiration dans le premier chapitre de leur ouvrage, tout en insistant sur le fait que l'apprentissage profond contemporain est d'abord un ensemble de méthodes mathématiques et informatiques.\n\nLa métaphore aide à retenir l'architecture générale. Elle trompe dès qu'on lui demande de décrire le calcul. Un neurone biologique est une cellule vivante, avec une dynamique chimique, des types très variés, des connexions qui ne forment pas des couches propres, et des mécanismes d'apprentissage qui ne ressemblent pas à une descente de gradient. Une unité artificielle, elle, est une fonction mathématique précise, appliquée à des nombres. Le mot « neurone » est donc un héritage historique, pas une promesse de simulation du cerveau.\n\n> **Repère.** Dans ce cours, « neurone » désigne une fonction mathématique, pas une cellule biologique.\n\nL'outil interactif TensorFlow Playground, cité en fin de page, illustre cette différence. On y règle le nombre de couches, le nombre d'unités, la fonction d'activation et les données, puis on regarde la frontière de décision évoluer pendant l'entraînement. Ce que l'on manipule est un petit graphe de calculs, pas un tissu nerveux.\n\n### Ce que calcule une unité\n\nUne unité artificielle reçoit un vecteur d'entrées $x = (x_1, \\dots, x_n)$. Elle possède un vecteur de poids $w = (w_1, \\dots, w_n)$ et un biais $b$. Elle calcule d'abord une somme pondérée, appelée pré-activation :\n\n$$z = w \\cdot x + b = \\sum_{i=1}^{n} w_i x_i + b$$\n\nPuis elle applique une fonction d'activation $\\varphi$, souvent non linéaire :\n\n$$a = \\varphi(z)$$\n\nLa sortie $a$ peut être envoyée à d'autres unités, ou lue comme une prédiction. Tout le reste du cours consiste à préciser ces trois objets : les nombres d'entrée, les paramètres $w$ et $b$, et la fonction $\\varphi$.\n\nLe poids $w_i$ mesure l'importance et le sens de l'entrée $x_i$ pour cette unité. Un poids positif pousse la sortie vers le haut quand l'entrée augmente ; un poids négatif la pousse vers le bas. Le biais déplace le seuil : il permet à l'unité de s'activer même quand toutes les entrées sont nulles, ou au contraire de rester inactive malgré des entrées positives. Sans biais, la frontière de décision passerait obligatoirement par l'origine, ce qui est une contrainte rarement souhaitable.\n\n### Du perceptron aux réseaux profonds\n\nUn seul neurone muni d'un seuil, le perceptron, sépare l'espace en deux par un hyperplan. Il peut apprendre une fonction linéairement séparable, mais pas une fonction comme le OU exclusif, dont les classes ne sont pas séparables par une droite. Cet exemple classique, discuté dans l'ouvrage de Goodfellow et al. (2016), montre la limite d'une unité isolée. Une couche cachée change la donne : elle transforme les entrées en une nouvelle représentation, dans laquelle la couche de sortie peut séparer ce qui ne l'était pas.\n\nEmpiler des couches revient à composer des fonctions. Chaque couche applique une transformation affine suivie d'une non-linéarité. La composition de plusieurs transformations de ce type produit une fonction plus riche qu'une seule transformation affine. C'est cette composition qui donne au réseau sa capacité à représenter des relations complexes, pas une ressemblance avec le cerveau.\n\n### Ce que le réseau n'est pas\n\nUn réseau de neurones ne comprend pas le sens des données. Il ajuste des nombres pour réduire une mesure d'erreur. Il ne possède ni intention, ni conscience, ni connaissance du monde au sens humain. Les termes « apprendre », « reconnaître » ou « décider » décrivent un comportement observable, pas une expérience vécue. Cette précision n'est pas une coquetterie : elle évite de prêter au modèle des capacités qu'il n'a pas, et de lui faire confiance hors de son domaine.\n\nLa métaphore biologique a aussi une conséquence pratique. Elle peut donner l'impression qu'un réseau est une copie simplifiée du cerveau, donc qu'il hérite de sa robustesse et de sa flexibilité. Ce n'est pas le cas. Un réseau entraîné sur une distribution de données peut échouer brutalement sur une autre, et rien dans son fonctionnement ne garantit qu'il a appris la règle visée plutôt qu'un raccourci corrélé aux étiquettes.\n\n### Le programme du cours\n\nLes sept modules suivants suivent le trajet d'un calcul réel. Le module 2 montre comment des images, des textes ou des catégories deviennent des tableaux de nombres. Le module 3 détaille l'unité artificielle et le rôle du biais. Le module 4 explique pourquoi une non-linéarité est indispensable. Le module 5 assemble des unités en couches et décrit la propagation avant. Le module 6 introduit la perte et la descente de gradient. Le module 7 explique la rétropropagation, l'algorithme qui calcule les gradients de tous les paramètres. Le module 8 relie ce réseau jouet aux LLM.\n\nÀ la fin, le lecteur saura écrire une passe avant en NumPy, calculer une perte, vérifier un gradient à la main et lire un graphe d'autodifférenciation. Il connaîtra aussi les limites de cette présentation : un petit réseau dense, entraîné sur un exemple jouet, ne dit rien des architectures spécialisées, des données massives ni des problèmes d'optimisation à grande échelle.",
+      "analogy": {
+        "title": "Le plan d'architecte et la maison",
+        "text": "Un plan d'architecte et une maison partagent un vocabulaire : murs, portes, toiture. Le plan ne contient pourtant ni plâtre ni courant électrique. De la même façon, le vocabulaire du cerveau décrit l'allure générale d'un réseau sans décrire son calcul.\n\n**Limite de l'analogie :** un plan est une représentation fidèle d'un bâtiment précis, alors que la métaphore du cerveau ne décrit qu'une inspiration lointaine. Les deux objets diffèrent par leur matière, leur dynamique et leur mode de construction."
+      },
+      "diagram": {
+        "title": "Du neurone biologique à l'unité artificielle",
+        "description": "Schéma illustratif : à gauche, les parties d'un neurone biologique ; à droite, les opérations d'une unité artificielle. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 420\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Neurone biologique et unité artificielle : entrées, poids, somme, biais et activation\">\n  <rect width=\"800\" height=\"420\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Deux objets différents, un vocabulaire commun</text>\n  <text x=\"400\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"bio-neurone\">\n    <circle cx=\"180\" cy=\"225\" r=\"42\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2.5\"/>\n    <circle cx=\"180\" cy=\"225\" r=\"8\" fill=\"#7dd3fc\"/>\n    <g stroke=\"#38bdf8\" stroke-width=\"2\">\n      <line x1=\"92\" y1=\"160\" x2=\"148\" y2=\"202\"/>\n      <line x1=\"82\" y1=\"225\" x2=\"138\" y2=\"225\"/>\n      <line x1=\"92\" y1=\"290\" x2=\"148\" y2=\"248\"/>\n      <line x1=\"180\" y1=\"142\" x2=\"180\" y2=\"183\"/>\n    </g>\n    <g fill=\"#7dd3fc\">\n      <circle cx=\"92\" cy=\"160\" r=\"4\"/><circle cx=\"82\" cy=\"225\" r=\"4\"/><circle cx=\"92\" cy=\"290\" r=\"4\"/><circle cx=\"180\" cy=\"142\" r=\"4\"/>\n    </g>\n    <line x1=\"222\" y1=\"225\" x2=\"330\" y2=\"225\" stroke=\"#fbbf24\" stroke-width=\"3\"/>\n    <g stroke=\"#fbbf24\" stroke-width=\"2\">\n      <line x1=\"330\" y1=\"225\" x2=\"356\" y2=\"205\"/>\n      <line x1=\"330\" y1=\"225\" x2=\"356\" y2=\"225\"/>\n      <line x1=\"330\" y1=\"225\" x2=\"356\" y2=\"245\"/>\n    </g>\n    <text x=\"180\" y=\"120\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">dendrites</text>\n    <text x=\"180\" y=\"300\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">corps cellulaire</text>\n    <text x=\"276\" y=\"212\" fill=\"#fcd34d\" font-size=\"12\" text-anchor=\"middle\">axone</text>\n    <text x=\"345\" y=\"278\" fill=\"#fcd34d\" font-size=\"12\" text-anchor=\"middle\">synapses</text>\n  </g>\n\n  <line x1=\"390\" y1=\"90\" x2=\"390\" y2=\"360\" stroke=\"#334155\" stroke-width=\"1\" stroke-dasharray=\"4,4\"/>\n\n  <g id=\"unite-somme\">\n    <g fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\">\n      <circle cx=\"452\" cy=\"145\" r=\"18\"/><circle cx=\"452\" cy=\"210\" r=\"18\"/><circle cx=\"452\" cy=\"275\" r=\"18\"/>\n    </g>\n    <text x=\"452\" y=\"150\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">x1</text>\n    <text x=\"452\" y=\"215\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">x2</text>\n    <text x=\"452\" y=\"280\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">x3</text>\n    <g stroke=\"#64748b\" stroke-width=\"1.8\">\n      <line x1=\"470\" y1=\"145\" x2=\"548\" y2=\"190\"/>\n      <line x1=\"470\" y1=\"210\" x2=\"548\" y2=\"210\"/>\n      <line x1=\"470\" y1=\"275\" x2=\"548\" y2=\"230\"/>\n    </g>\n    <text x=\"505\" y=\"156\" fill=\"#7dd3fc\" font-size=\"11\">w1</text>\n    <text x=\"505\" y=\"203\" fill=\"#7dd3fc\" font-size=\"11\">w2</text>\n    <text x=\"505\" y=\"264\" fill=\"#7dd3fc\" font-size=\"11\">w3</text>\n    <rect x=\"548\" y=\"170\" width=\"118\" height=\"80\" rx=\"10\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"607\" y=\"205\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">somme</text>\n    <text x=\"607\" y=\"225\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">+ biais</text>\n    <line x1=\"607\" y1=\"250\" x2=\"607\" y2=\"292\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <text x=\"628\" y=\"304\" fill=\"#fcd34d\" font-size=\"11\">b</text>\n  </g>\n\n  <g id=\"unite-activation\">\n    <line x1=\"666\" y1=\"210\" x2=\"696\" y2=\"210\" stroke=\"#64748b\" stroke-width=\"2\"/>\n    <rect x=\"696\" y=\"176\" width=\"62\" height=\"68\" rx=\"10\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"727\" y=\"215\" fill=\"#6ee7b7\" font-size=\"18\" text-anchor=\"middle\">φ</text>\n    <line x1=\"758\" y1=\"210\" x2=\"786\" y2=\"210\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"772\" y=\"196\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">sortie</text>\n    <text x=\"727\" y=\"270\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">activation</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Le neurone biologique",
+            "explanation": "Les dendrites reçoivent des signaux, le corps cellulaire les intègre et l'axone transmet un signal aux synapses. Cette organisation inspire le vocabulaire, pas le calcul.",
+            "highlight": [
+              "bio-neurone"
+            ]
+          },
+          {
+            "title": "2. La somme pondérée",
+            "explanation": "Chaque entrée est multipliée par un poids, puis les produits sont additionnés et un biais est ajouté. Le résultat est la pré-activation.",
+            "highlight": [
+              "unite-somme"
+            ]
+          },
+          {
+            "title": "3. L'activation",
+            "explanation": "Une fonction non linéaire transforme la pré-activation en sortie. C'est cette étape qui distingue un réseau d'une simple combinaison linéaire.",
+            "highlight": [
+              "unite-activation"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Que calcule une unité artificielle ?",
+          "options": [
+            "Une somme pondérée des entrées, plus un biais, suivie d'une fonction d'activation",
+            "Une copie exacte du potentiel électrique d'un neurone biologique",
+            "Une table de correspondance entre toutes les entrées possibles et leurs sorties",
+            "Un tirage aléatoire corrigé par le nombre de couches"
+          ],
+          "correctIndex": 0,
+          "explanation": "Une unité artificielle est une fonction mathématique : produit scalaire, ajout du biais, puis activation. Aucune simulation électrique ni table exhaustive n'est impliquée."
+        },
+        {
+          "question": "Pourquoi la métaphore du cerveau est-elle trompeuse ?",
+          "options": [
+            "Parce qu'un neurone biologique et une unité artificielle diffèrent par leur dynamique, leur organisation et leur mode d'apprentissage",
+            "Parce que le cerveau ne contient aucun neurone",
+            "Parce qu'un réseau de neurones n'utilise jamais de nombres",
+            "Parce que les fonctions d'activation sont des cellules vivantes"
+          ],
+          "correctIndex": 0,
+          "explanation": "La ressemblance est de vocabulaire et d'inspiration. Le neurone biologique est une cellule complexe ; l'unité artificielle est une fonction simple, entraînée par optimisation."
+        },
+        {
+          "question": "Quel rôle joue le biais dans une unité artificielle ?",
+          "options": [
+            "Il déplace le seuil d'activation indépendamment des entrées",
+            "Il multiplie chaque entrée par un facteur appris",
+            "Il ajoute une non-linéarité à la sortie",
+            "Il normalise les données avant la somme pondérée"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le biais est ajouté à la somme pondérée. Il permet à l'unité de s'activer ou de rester inactive sans dépendre uniquement des entrées, et déplace la frontière de décision."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Neurone artificiel",
+          "definition": "Unité de calcul qui applique une somme pondérée, ajoute un biais et passe le résultat dans une fonction d'activation."
+        },
+        {
+          "term": "Poids",
+          "definition": "Paramètre qui multiplie une entrée. Son signe et sa valeur déterminent l'influence de cette entrée sur la pré-activation."
+        },
+        {
+          "term": "Biais",
+          "definition": "Paramètre ajouté à la somme pondérée. Il déplace le seuil d'activation de l'unité."
+        },
+        {
+          "term": "Perceptron",
+          "definition": "Unité artificielle à seuil, capable de séparer deux classes par un hyperplan lorsque celles-ci sont linéairement séparables."
+        },
+        {
+          "term": "Fonction d'activation",
+          "definition": "Fonction appliquée à la pré-activation. Elle introduit la non-linéarité qui permet à un réseau de représenter des relations complexes."
+        }
+      ],
+      "example": {
+        "title": "Un classifieur de chiffres n’est pas un cerveau",
+        "text": "**Scénario illustratif.** Un petit réseau apprend à distinguer des chiffres manuscrits. Il ne comprend ni le concept de chiffre ni le contexte d'écriture. Il ajuste des poids pour réduire une erreur sur des pixels. Un cerveau fait beaucoup d'autres choses, avec une architecture et une plasticité différentes. L'analogie biologique aide à intuiter, pas à expliquer le modèle."
+      },
+      "exercises": [
+        {
+          "title": "Analogie biologique",
+          "prompt": "Pourquoi l’analogie avec le cerveau est-elle utile mais limitée ?",
+          "solution": "Elle aide à intuiter des notions comme les connexions et l’apprentissage, mais un réseau artificiel ne reproduit ni la biologie ni la cognition. Il ajuste des poids pour réduire une perte."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Goodfellow, Bengio et Courville, Deep Learning, MIT Press, 2016.",
+          "href": "https://www.deeplearningbook.org/"
+        },
+        {
+          "label": "TensorFlow Playground, outil interactif, consulté le 21 octobre 2026.",
+          "href": "https://playground.tensorflow.org/"
+        }
+      ]
+    },
+    {
+      "id": "donnees",
+      "title": "Traduire le monde en nombres",
+      "keyTakeaways": [
+        "Un tenseur est un tableau de nombres avec un rang et une forme. Une image, un lot d'images ou une phrase encodée deviennent des tenseurs de formes différentes.",
+        "La convention PyTorch place les canaux avant la hauteur et la largeur (lot, canaux, hauteur, largeur) ; la convention TensorFlow les place après (lot, hauteur, largeur, canaux).",
+        "Une variable catégorielle peut être encodée en one-hot ou par un embedding. Un one-hot suivi d'une couche linéaire revient à sélectionner une ligne de la matrice des poids.",
+        "La normalisation ramène les entrées à une échelle comparable. Ses statistiques doivent être calculées sur l'entraînement, puis réutilisées telles quelles sur la validation et le test.",
+        "Une forme incorrecte est une source d'erreur fréquente : vérifier les dimensions avant de conclure que le modèle est mauvais."
+      ],
+      "theory": "### Des objets aux tableaux\n\nUn réseau de neurones ne reçoit pas une image, un mot ou une catégorie. Il reçoit des nombres, organisés en tableaux. Le vocabulaire courant pour ces tableaux est celui des **tenseurs** : un tenseur possède un **rang** (le nombre de dimensions) et une **forme** (la taille de chaque dimension). Un nombre seul est un tenseur de rang 0, une liste de nombres un tenseur de rang 1, une grille un tenseur de rang 2. Une image en couleurs ajoute une dimension de canaux, et un lot d'images ajoute une dimension de lot.\n\nCette description est celle que l'on retrouve dans les notes du cours CS231n et dans l'ouvrage de Goodfellow et al. (2016). Elle paraît technique, mais elle règle une question très concrète : avant d'écrire une couche, il faut savoir quelle est la forme de son entrée et quelle sera la forme de sa sortie.\n\nPrenons une image en niveaux de gris de 4 pixels sur 4. Elle se représente par une matrice de forme $(4, 4)$. Une image en couleurs de même taille a trois canaux, par exemple rouge, vert et bleu. Selon la bibliothèque, sa forme est $(3, 4, 4)$ ou $(4, 4, 3)$. Les deux conventions décrivent la même information, mais elles ne sont pas interchangeables : une couche écrite pour l'une ne fonctionne pas directement avec l'autre. PyTorch place généralement les canaux avant la hauteur et la largeur, TensorFlow les place après. Il faut donc lire la documentation de la couche utilisée, pas se fier à l'habitude.\n\nUn lot de plusieurs images ajoute une dimension au début. Un lot de 2 images en niveaux de gris de 4 sur 4 a la forme $(2, 4, 4)$ : deux matrices empilées. Un lot de 2 images en couleurs a la forme $(2, 3, 4, 4)$ dans la convention de PyTorch. La première dimension, souvent appelée dimension de lot, permet de traiter plusieurs exemples en une seule opération matricielle. C'est ce qui rend le calcul efficace sur un processeur graphique.\n\n### Images, tableaux et texte\n\nPour une image, chaque pixel devient un nombre. En niveaux de gris, une valeur suffit, souvent entre 0 et 255 avant normalisation. En couleurs, trois valeurs décrivent une teinte. Une image de 4 sur 4 en couleurs contient donc 48 nombres, et un lot de 2 en contient 96. Ces nombres ne sont pas des catégories : ce sont des mesures, et leur ordre dans le tableau porte une information spatiale.\n\nPour des données tabulaires, chaque ligne est un exemple et chaque colonne une variable. Un tableau de 100 lignes et 5 colonnes a la forme $(100, 5)$. Une colonne catégorielle, comme un pays ou un type de contrat, ne peut pas être utilisée telle quelle si elle contient du texte. On l'encode. L'encodage **one-hot** crée un vecteur de la taille du vocabulaire, avec un 1 à la position de la catégorie et des 0 ailleurs. Pour trois catégories, la deuxième devient $(0, 1, 0)$. Cet encodage est simple, mais il devient volumineux quand le vocabulaire grandit.\n\nUn **embedding** remplace le one-hot par un vecteur dense de dimension fixe, appris pendant l'entraînement. Mathématiquement, un one-hot multiplié par une matrice de poids sélectionne une ligne de cette matrice. Un embedding est donc une manière compacte de faire la même sélection, avec des vecteurs de taille plus petite que le vocabulaire. Pour du texte, on découpe d'abord la phrase en unités appelées jetons, on associe à chaque jeton un identifiant entier, puis on convertit cet identifiant en vecteur par un embedding.\n\n### Normaliser et découper\n\nLes valeurs d'entrée n'ont pas toujours la même échelle. Une variable peut varier entre 0 et 1, une autre entre 0 et 100 000. La descente de gradient, présentée au module 6, est plus facile à régler quand les variables ont des ordres de grandeur comparables. Une normalisation courante soustrait la moyenne et divise par l'écart-type :\n\n$$x' = \\frac{x - \\mu}{\\sigma}$$\n\noù $\\mu$ et $\\sigma$ sont calculés sur le jeu d'entraînement. Il faut ensuite appliquer les mêmes valeurs à la validation et au test.\n\n> **Fuite de données.** Calculer une nouvelle moyenne sur chaque lot de test ferait fuiter de l'information et rendrait l'évaluation trompeuse.\n\nUne autre normalisation ramène les valeurs entre 0 et 1, mais elle est sensible aux valeurs extrêmes.\n\nLe découpage des données compte autant que leur forme. On sépare généralement un jeu d'entraînement, un jeu de validation pour régler les choix, et un jeu de test gardé pour l'évaluation finale. Mélanger les trois, ou normaliser avant de découper, produit une évaluation trop optimiste. Ces règles ne sont pas propres aux réseaux de neurones, mais elles conditionnent tout ce qui suit.\n\n### Vérifier les formes\n\nUne erreur de forme se manifeste souvent par un message technique peu lisible. Le réflexe utile est d'afficher la forme de chaque tenseur au moment où il est créé, puis de la comparer à ce qu'attend la couche suivante. Le code ci-dessous construit un petit lot, l'aplatit, le normalise et encode des étiquettes. Il ne fait aucun apprentissage : il montre seulement comment les nombres sont organisés avant d'entrer dans un réseau.",
+      "example": {
+        "title": "Compter les nombres d'une image",
+        "text": "Une image en couleurs de 4 pixels sur 4 contient $4 \\times 4 \\times 3 = 48$ valeurs. Un lot de 2 images en contient 96. Si on aplatit chaque image, on obtient un vecteur de 48 valeurs par image, donc une matrice de forme $(2, 48)$.\n\n**Ce que cet exemple ne dit pas :** il ne présage ni de la qualité d'un modèle ni du nombre de paramètres nécessaires. Il vérifie seulement l'arithmétique des formes."
+      },
+      "diagram": {
+        "title": "D'une image à un tenseur, puis à un vecteur",
+        "description": "Schéma illustratif : une image devient une matrice, un lot devient un tenseur de rang 3, et une catégorie devient un vecteur one-hot ou un embedding. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 460\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Image transformée en tenseur puis en vecteur, et catégorie encodée en one-hot ou en embedding\">\n  <defs>\n    <marker id=\"fleche-droite\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"800\" height=\"460\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Les données deviennent des tableaux de nombres</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"image-grid\">\n    <text x=\"105\" y=\"92\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">image 4 x 4</text>\n    <g fill=\"#0ea5e9\" stroke=\"#0f172a\" stroke-width=\"1\">\n      <rect x=\"45\" y=\"110\" width=\"30\" height=\"30\" opacity=\"0.25\"/><rect x=\"75\" y=\"110\" width=\"30\" height=\"30\" opacity=\"0.35\"/><rect x=\"105\" y=\"110\" width=\"30\" height=\"30\" opacity=\"0.45\"/><rect x=\"135\" y=\"110\" width=\"30\" height=\"30\" opacity=\"0.55\"/>\n      <rect x=\"45\" y=\"140\" width=\"30\" height=\"30\" opacity=\"0.35\"/><rect x=\"75\" y=\"140\" width=\"30\" height=\"30\" opacity=\"0.45\"/><rect x=\"105\" y=\"140\" width=\"30\" height=\"30\" opacity=\"0.55\"/><rect x=\"135\" y=\"140\" width=\"30\" height=\"30\" opacity=\"0.65\"/>\n      <rect x=\"45\" y=\"170\" width=\"30\" height=\"30\" opacity=\"0.45\"/><rect x=\"75\" y=\"170\" width=\"30\" height=\"30\" opacity=\"0.55\"/><rect x=\"105\" y=\"170\" width=\"30\" height=\"30\" opacity=\"0.65\"/><rect x=\"135\" y=\"170\" width=\"30\" height=\"30\" opacity=\"0.75\"/>\n      <rect x=\"45\" y=\"200\" width=\"30\" height=\"30\" opacity=\"0.55\"/><rect x=\"75\" y=\"200\" width=\"30\" height=\"30\" opacity=\"0.65\"/><rect x=\"105\" y=\"200\" width=\"30\" height=\"30\" opacity=\"0.75\"/><rect x=\"135\" y=\"200\" width=\"30\" height=\"30\" opacity=\"0.85\"/>\n    </g>\n    <text x=\"105\" y=\"258\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">(4, 4)</text>\n  </g>\n\n  <g id=\"tenseur\">\n    <line x1=\"205\" y1=\"170\" x2=\"255\" y2=\"170\" stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#fleche-droite)\"/>\n    <text x=\"230\" y=\"156\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">lot</text>\n    <g fill=\"#0ea5e9\" stroke=\"#0f172a\" stroke-width=\"1\">\n      <rect x=\"270\" y=\"120\" width=\"80\" height=\"80\" opacity=\"0.25\"/>\n      <rect x=\"282\" y=\"132\" width=\"80\" height=\"80\" opacity=\"0.45\"/>\n      <rect x=\"294\" y=\"144\" width=\"80\" height=\"80\" opacity=\"0.65\"/>\n    </g>\n    <text x=\"330\" y=\"258\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">tenseur (2, 4, 4)</text>\n  </g>\n\n  <g id=\"vecteur\">\n    <line x1=\"390\" y1=\"180\" x2=\"440\" y2=\"180\" stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#fleche-droite)\"/>\n    <text x=\"415\" y=\"166\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">aplatir</text>\n    <g fill=\"#34d399\" stroke=\"#0f172a\" stroke-width=\"1\">\n      <rect x=\"455\" y=\"150\" width=\"18\" height=\"18\" opacity=\"0.3\"/><rect x=\"475\" y=\"150\" width=\"18\" height=\"18\" opacity=\"0.4\"/><rect x=\"495\" y=\"150\" width=\"18\" height=\"18\" opacity=\"0.5\"/><rect x=\"515\" y=\"150\" width=\"18\" height=\"18\" opacity=\"0.6\"/>\n      <rect x=\"535\" y=\"150\" width=\"18\" height=\"18\" opacity=\"0.7\"/><rect x=\"555\" y=\"150\" width=\"18\" height=\"18\" opacity=\"0.8\"/><rect x=\"575\" y=\"150\" width=\"18\" height=\"18\" opacity=\"0.5\"/><rect x=\"595\" y=\"150\" width=\"18\" height=\"18\" opacity=\"0.6\"/>\n    </g>\n    <text x=\"535\" y=\"190\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">vecteur (16)</text>\n  </g>\n\n  <line x1=\"45\" y1=\"300\" x2=\"755\" y2=\"300\" stroke=\"#334155\" stroke-width=\"1\" stroke-dasharray=\"4,4\"/>\n\n  <g id=\"one-hot\">\n    <text x=\"170\" y=\"332\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">catégorie 2 sur 3</text>\n    <g stroke=\"#fbbf24\" stroke-width=\"1.5\">\n      <rect x=\"95\" y=\"348\" width=\"46\" height=\"30\" fill=\"#0f172a\"/><rect x=\"141\" y=\"348\" width=\"46\" height=\"30\" fill=\"#78350f\"/><rect x=\"187\" y=\"348\" width=\"46\" height=\"30\" fill=\"#0f172a\"/>\n    </g>\n    <text x=\"118\" y=\"369\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">0</text>\n    <text x=\"164\" y=\"369\" fill=\"#fef3c7\" font-size=\"12\" text-anchor=\"middle\">1</text>\n    <text x=\"210\" y=\"369\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">0</text>\n    <text x=\"164\" y=\"402\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">one-hot</text>\n  </g>\n\n  <g id=\"embedding\">\n    <line x1=\"300\" y1=\"365\" x2=\"390\" y2=\"365\" stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#fleche-droite)\"/>\n    <text x=\"345\" y=\"351\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">ou</text>\n    <text x=\"520\" y=\"332\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">vecteur dense appris</text>\n    <g fill=\"#a78bfa\" stroke=\"#0f172a\" stroke-width=\"1\">\n      <rect x=\"410\" y=\"348\" width=\"30\" height=\"30\" opacity=\"0.5\"/><rect x=\"440\" y=\"348\" width=\"30\" height=\"30\" opacity=\"0.7\"/><rect x=\"470\" y=\"348\" width=\"30\" height=\"30\" opacity=\"0.4\"/><rect x=\"500\" y=\"348\" width=\"30\" height=\"30\" opacity=\"0.8\"/><rect x=\"530\" y=\"348\" width=\"30\" height=\"30\" opacity=\"0.6\"/><rect x=\"560\" y=\"348\" width=\"30\" height=\"30\" opacity=\"0.3\"/>\n    </g>\n    <text x=\"500\" y=\"402\" fill=\"#c4b5fd\" font-size=\"11\" text-anchor=\"middle\">embedding</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Une image devient une matrice",
+            "explanation": "Chaque pixel devient un nombre. Une image en niveaux de gris de 4 sur 4 forme une matrice de forme (4, 4).",
+            "highlight": [
+              "image-grid"
+            ]
+          },
+          {
+            "title": "2. Un lot ajoute une dimension",
+            "explanation": "Deux images empilées forment un tenseur de forme (2, 4, 4). La première dimension est celle du lot.",
+            "highlight": [
+              "tenseur"
+            ]
+          },
+          {
+            "title": "3. Aplatir pour une couche dense",
+            "explanation": "Chaque image peut être lue comme un vecteur de 16 valeurs. Le lot devient une matrice de forme (2, 16).",
+            "highlight": [
+              "vecteur"
+            ]
+          },
+          {
+            "title": "4. Encoder une catégorie",
+            "explanation": "Le one-hot place un 1 à la position de la classe. L'embedding remplace ce vecteur creux par un vecteur dense appris.",
+            "highlight": [
+              "one-hot",
+              "embedding"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Construction d'un lot de deux images, aplatissement, normalisation par la moyenne et l'écart-type du lot, puis encodage one-hot de trois étiquettes. Le script affiche les formes et les valeurs. Ici, les statistiques sont celles du lot pour montrer les formes ; en pratique, on réutilise les statistiques calculées sur l'entraînement.",
+        "code": "import numpy as np\n\n# Un lot de 2 images en niveaux de gris, 4 x 4 pixels, valeurs 0-255.\nbatch = np.array([\n    [[0, 10, 20, 30], [40, 50, 60, 70], [80, 90, 100, 110], [120, 130, 140, 150]],\n    [[255, 250, 245, 240], [235, 230, 225, 220], [215, 210, 205, 200], [195, 190, 185, 180]],\n], dtype=np.float32)\n\nprint(\"forme du lot :\", batch.shape)          # (2, 4, 4)\nprint(\"rang :\", batch.ndim)\nprint(\"taille :\", batch.size)\n\nflat = batch.reshape(2, -1)\nprint(\"forme aplatie :\", flat.shape)\n\n# Normalisation : moyenne et écart-type calculés sur ce lot.\nmean, std = flat.mean(), flat.std()\nnormalized = (flat - mean) / std\nprint(f\"moyenne du lot : {mean:.1f}, écart-type : {std:.1f}\")\nprint(f\"moyenne après normalisation : {normalized.mean():.2e}, écart-type : {normalized.std():.2f}\")\n\n# Encodage one-hot de trois classes.\nlabels = np.array([0, 2, 1])\none_hot = np.eye(3, dtype=np.float32)[labels]\nprint(\"one-hot :\\n\", one_hot)",
+        "output": "forme du lot : (2, 4, 4)\nrang : 3\ntaille : 32\nforme aplatie : (2, 16)\nmoyenne du lot : 146.2, écart-type : 80.0\nmoyenne après normalisation : -3.73e-09, écart-type : 1.00\none-hot :\n [[1. 0. 0.]\n [0. 0. 1.]\n [0. 1. 0.]]",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Un lot de 8 images en couleurs de 32 pixels sur 32, stocké dans la convention PyTorch (lot, canaux, hauteur, largeur), a quelle forme ?",
+          "options": [
+            "(8, 3, 32, 32)",
+            "(8, 32, 32, 3)",
+            "(3, 8, 32, 32)",
+            "(32, 32, 3, 8)"
+          ],
+          "correctIndex": 0,
+          "explanation": "La convention PyTorch place les canaux juste après le lot. La forme est donc (8, 3, 32, 32). La convention TensorFlow utiliserait (8, 32, 32, 3)."
+        },
+        {
+          "question": "Pourquoi faut-il calculer la moyenne et l'écart-type de normalisation sur le jeu d'entraînement seulement ?",
+          "options": [
+            "Pour éviter de faire fuiter dans l'entraînement des informations provenant de la validation ou du test",
+            "Parce que les autres jeux ne contiennent pas de nombres",
+            "Parce que la moyenne du test est toujours nulle",
+            "Pour supprimer la nécessité d'un jeu de validation"
+          ],
+          "correctIndex": 0,
+          "explanation": "Utiliser les statistiques du test revient à lui emprunter de l'information. Les valeurs calculées sur l'entraînement sont appliquées telles quelles aux autres jeux."
+        },
+        {
+          "question": "Quel est le rapport entre un one-hot et un embedding ?",
+          "options": [
+            "Un one-hot multiplié par une matrice de poids sélectionne une ligne, ce qui est équivalent à un embedding de cette ligne",
+            "Un embedding est toujours un vecteur de la taille du vocabulaire",
+            "Un one-hot ne peut encoder que des nombres réels",
+            "Les deux encodages interdisent l'apprentissage des représentations"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le one-hot suivi d'une couche linéaire revient à choisir une ligne de la matrice. L'embedding est une version dense et directe de cette sélection."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Tenseur",
+          "definition": "Tableau de nombres à plusieurs dimensions, caractérisé par un rang et une forme."
+        },
+        {
+          "term": "Rang",
+          "definition": "Nombre de dimensions d'un tenseur. Un vecteur a un rang de 1, une matrice un rang de 2."
+        },
+        {
+          "term": "Forme",
+          "definition": "Liste des tailles de chaque dimension d'un tenseur, par exemple (2, 4, 4)."
+        },
+        {
+          "term": "One-hot",
+          "definition": "Encodage d'une catégorie par un vecteur rempli de zéros, avec un 1 à la position de la catégorie."
+        },
+        {
+          "term": "Embedding",
+          "definition": "Vecteur dense appris associé à une catégorie ou à un jeton, souvent de dimension plus petite que le vocabulaire."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Normalisation",
+          "prompt": "Pourquoi normaliser des entrées de tailles très différentes ?",
+          "solution": "Sans normalisation, certaines variables dominent la somme pondérée et le gradient. La normalisation aide l’optimisation, mais elle doit être appliquée de la même manière à l’entraînement et au test."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Goodfellow, Bengio et Courville, Deep Learning, MIT Press, 2016.",
+          "href": "https://www.deeplearningbook.org/"
+        },
+        {
+          "label": "Stanford CS231n, notes sur les réseaux de neurones, consulté le 21 octobre 2026.",
+          "href": "https://cs231n.github.io/neural-networks-1/"
+        }
+      ]
+    },
+    {
+      "id": "neurone",
+      "title": "Anatomie du neurone artificiel",
+      "keyTakeaways": [
+        "La pré-activation d'une unité est le produit scalaire des entrées et des poids, plus le biais. L'activation transforme ensuite ce nombre en sortie.",
+        "Le signe d'un poids indique le sens de l'influence d'une entrée : positif, il pousse la sortie vers le haut quand l'entrée augmente ; négatif, il la pousse vers le bas.",
+        "Le biais déplace la frontière de décision. Sans lui, cette frontière passerait par l'origine de l'espace des entrées.",
+        "Pour un lot d'exemples, la même opération s'écrit comme une multiplication de matrices. Le biais est alors ajouté à chaque ligne.",
+        "Le produit scalaire mesure l'alignement entre l'entrée et le vecteur de poids. C'est une intuition géométrique utile, pas une explication du sens des données."
+      ],
+      "theory": "### Une unité, trois opérations\n\nLe module précédent a montré comment les données deviennent des tableaux. Ce module isole une unité et détaille son calcul. Une unité artificielle reçoit un vecteur $x$ de dimension $n$, possède un vecteur de poids $w$ de même dimension et un biais $b$, puis produit une sortie $a$ :\n\n$$z = \\sum_{i=1}^{n} w_i x_i + b$$\n$$a = \\varphi(z)$$\n\nLa première ligne est un **produit scalaire** suivi d'un ajout. La seconde applique une fonction d'activation. Cette structure est celle que décrivent les notes CS231n et l'ouvrage de Goodfellow et al. (2016). Elle paraît minimale, et c'est justement l'intérêt : tout réseau, même très profond, est construit à partir de cette brique.\n\nLe produit scalaire $w \\cdot x$ peut se lire de deux façons. En algèbre, c'est la somme des produits terme à terme. En géométrie, c'est le produit des normes par le cosinus de l'angle entre les deux vecteurs. Cette seconde lecture explique pourquoi le signe du produit dépend de l'orientation relative de $x$ et de $w$ : si les deux vecteurs pointent dans des directions opposées, le produit est négatif. Le poids n'est donc pas seulement un coefficient d'importance, c'est une direction dans l'espace des entrées.\n\n### Le rôle du biais\n\nLe biais $b$ est un nombre ajouté après la somme. Il ne dépend d'aucune entrée. Son effet est de déplacer la frontière où la pré-activation change de signe. Pour une unité à seuil, la sortie change lorsque $w \\cdot x + b = 0$, c'est-à-dire sur l'hyperplan $w \\cdot x = -b$. Sans biais, cet hyperplan passerait par l'origine. Avec un biais, il peut se déplacer parallèlement à lui-même.\n\nCette liberté compte en pratique. Imaginez une unité qui doit s'activer seulement quand une entrée dépasse un certain seuil. Sans biais, il faudrait que l'entrée elle-même soit centrée de façon à ce que le seuil tombe en zéro. Avec un biais, l'unité peut apprendre le seuil. Le biais joue donc le rôle d'un paramètre de décalage, et il est entraîné comme les poids.\n\n### Un calcul à la main\n\nPrenons $x = (2, -1, 0{,}5)$, $w = (0{,}5, 1{,}5, -2)$ et $b = 0{,}1$. Le produit scalaire vaut :\n\n$$\n\\begin{aligned}\nw \\cdot x &= 0{,}5 \\times 2 + 1{,}5 \\times (-1) \\\\\n&\\quad + (-2) \\times 0{,}5 \\\\\n&= 1 - 1{,}5 - 1 = -1{,}5\n\\end{aligned}\n$$\n\nLa pré-activation vaut donc $z = -1{,}5 + 0{,}1 = -1{,}4$. Avec une ReLU, la sortie est $\\max(0, -1{,}4) = 0$. Avec une tangente hyperbolique, la sortie vaut environ $-0{,}885$. Le même couple entrée-poids donne donc deux sorties différentes selon l'activation. C'est normal : l'activation fait partie de la définition de l'unité.\n\nCe calcul montre aussi qu'un poids négatif peut annuler l'effet d'une entrée positive. Ici, la troisième entrée vaut $0{,}5$ et son poids vaut $-2$ : sa contribution est $-1$, du même ordre que la contribution négative de la deuxième entrée ($-1{,}5$). Si l'on changeait le signe de ce poids, la pré-activation deviendrait $0{,}6$, et la ReLU donnerait $0{,}6$ au lieu de $0$.\n\n### Du vecteur au lot\n\nDans un réseau réel, on ne traite pas un exemple à la fois. On regroupe les exemples en un lot. Si $X$ est une matrice de forme $(m, n)$, où $m$ est le nombre d'exemples et $n$ le nombre d'entrées, alors la pré-activation de chaque exemple s'écrit :\n\n$$Z = X w + b$$\n\nLe vecteur $w$ est de forme $(n, 1)$ ou $(n,)$ selon la convention, et $b$ est ajouté à chaque ligne. Le résultat $Z$ a une forme $(m, 1)$ ou $(m,)$. Cette écriture est identique au calcul exemple par exemple, mais elle laisse la bibliothèque enchaîner les multiplications de matrices de façon efficace.\n\nLa forme des tenseurs devient alors un sujet de premier plan. Une erreur fréquente consiste à confondre le nombre d'exemples et le nombre de variables. Une autre consiste à oublier le biais, ou à l'ajouter avec une forme incompatible. Le code du module affiche les formes et les valeurs pour rendre ces vérifications concrètes.\n\n### Ce que l'unité ne fait pas\n\nAvec une activation monotone et un seuil, une unité isolée ne peut représenter qu'une frontière linéaire. La non-linéarité transforme la valeur de la sortie, elle ne crée pas à elle seule une frontière courbe dans l'espace d'entrée. C'est l'empilement de plusieurs unités, avec des activations non linéaires, qui permet de construire des frontières plus complexes. Le module suivant précise ce point, souvent mal compris.\n\nUne unité n'a pas non plus de mémoire. Elle calcule une sortie à partir de ses entrées et de ses paramètres, puis oublie tout. La récurrence, les états cachés et les mécanismes d'attention sont des architectures différentes, qui ajoutent des connexions ou des structures entre unités. Ils ne changent pas la définition de base de l'unité.",
+      "analogy": {
+        "title": "Le jury qui pondère des avis",
+        "text": "Imaginez un jury qui reçoit trois notes, les pondère selon leur importance, ajoute une tendance générale, puis applique une règle pour rendre un verdict. Les poids disent combien chaque note compte, le biais représente la tendance du jury, et la règle correspond à l'activation.\n\n**Limite de l'analogie :** un jury délibère et peut expliquer son choix. Une unité artificielle ne fait qu'un calcul, et ses poids ne sont pas nécessairement interprétables comme des préférences."
+      },
+      "example": {
+        "title": "Vérifier le calcul à la main",
+        "text": "Avec $x = (2, -1, 0{,}5)$, $w = (0{,}5, 1{,}5, -2)$ et $b = 0{,}1$, on obtient $w \\cdot x = -1{,}5$, puis $z = -1{,}4$. La ReLU donne $0$ et la tangente hyperbolique donne environ $-0{,}885$.\n\n**Ce que cet exemple ne dit pas :** il ne mesure pas la qualité de l'unité. Il vérifie seulement l'ordre des opérations et le signe des contributions."
+      },
+      "diagram": {
+        "title": "Entrées, poids, biais et activation",
+        "description": "Schéma illustratif du calcul d'une unité : trois entrées pondérées, une somme, un biais et une fonction d'activation. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 400\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Unité artificielle : entrées x1, x2, x3, poids w1, w2, w3, somme, biais et activation\">\n  <rect width=\"800\" height=\"400\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Le calcul d'une unité artificielle</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"entrees\">\n    <g fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\">\n      <circle cx=\"105\" cy=\"130\" r=\"24\"/><circle cx=\"105\" cy=\"200\" r=\"24\"/><circle cx=\"105\" cy=\"270\" r=\"24\"/>\n    </g>\n    <text x=\"105\" y=\"136\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">x1</text>\n    <text x=\"105\" y=\"206\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">x2</text>\n    <text x=\"105\" y=\"276\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">x3</text>\n    <g stroke=\"#64748b\" stroke-width=\"1.8\">\n      <line x1=\"129\" y1=\"130\" x2=\"300\" y2=\"188\"/>\n      <line x1=\"129\" y1=\"200\" x2=\"300\" y2=\"200\"/>\n      <line x1=\"129\" y1=\"270\" x2=\"300\" y2=\"212\"/>\n    </g>\n    <text x=\"210\" y=\"140\" fill=\"#7dd3fc\" font-size=\"12\">w1</text>\n    <text x=\"210\" y=\"192\" fill=\"#7dd3fc\" font-size=\"12\">w2</text>\n    <text x=\"210\" y=\"262\" fill=\"#7dd3fc\" font-size=\"12\">w3</text>\n  </g>\n\n  <g id=\"somme-biais\">\n    <rect x=\"300\" y=\"160\" width=\"150\" height=\"80\" rx=\"12\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"375\" y=\"194\" fill=\"#e2e8f0\" font-size=\"14\" text-anchor=\"middle\">Σ wi xi</text>\n    <text x=\"375\" y=\"216\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">+ biais b</text>\n    <line x1=\"375\" y1=\"240\" x2=\"375\" y2=\"300\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <text x=\"396\" y=\"316\" fill=\"#fcd34d\" font-size=\"12\">b = 0,1</text>\n    <line x1=\"450\" y1=\"200\" x2=\"500\" y2=\"200\" stroke=\"#64748b\" stroke-width=\"2\"/>\n    <text x=\"475\" y=\"186\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">z</text>\n  </g>\n\n  <g id=\"activation\">\n    <rect x=\"500\" y=\"166\" width=\"90\" height=\"68\" rx=\"12\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"545\" y=\"207\" fill=\"#6ee7b7\" font-size=\"20\" text-anchor=\"middle\">φ</text>\n    <line x1=\"590\" y1=\"200\" x2=\"650\" y2=\"200\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"620\" y=\"186\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">a</text>\n    <text x=\"545\" y=\"258\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">activation</text>\n    <text x=\"700\" y=\"205\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">sortie</text>\n  </g>\n\n  <text x=\"105\" y=\"340\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">entrées</text>\n  <text x=\"375\" y=\"340\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">pré-activation</text>\n  <text x=\"545\" y=\"340\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">non-linéarité</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Les entrées et les poids",
+            "explanation": "Chaque entrée est multipliée par son poids. Le signe du poids donne le sens de sa contribution, sa valeur donne son amplitude.",
+            "highlight": [
+              "entrees"
+            ]
+          },
+          {
+            "title": "2. La somme et le biais",
+            "explanation": "Les produits sont additionnés, puis le biais est ajouté. Le résultat est la pré-activation z.",
+            "highlight": [
+              "somme-biais"
+            ]
+          },
+          {
+            "title": "3. L'activation",
+            "explanation": "La fonction φ transforme z en sortie. Elle peut couper les valeurs négatives, les comprimer ou les laisser passer.",
+            "highlight": [
+              "activation"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Calcul du produit scalaire et de la pré-activation pour un exemple, puis pour un lot de trois entrées. Le script montre aussi la sortie de deux fonctions d'activation.",
+        "code": "import numpy as np\n\nx = np.array([2.0, -1.0, 0.5])\nw = np.array([0.5, 1.5, -2.0])\nb = 0.1\n\nz = w @ x + b\nprint(f\"produit scalaire w·x = {w @ x:.2f}\")\nprint(f\"pré-activation z = {z:.2f}\")\nprint(f\"ReLU(z) = {max(0.0, z):.2f}\")\nprint(f\"tanh(z) = {np.tanh(z):.4f}\")\n\n# Un lot de trois entrées : une seule multiplication de matrices.\nX = np.array([[2.0, -1.0, 0.5], [0.0, 0.0, 0.0], [-1.0, 2.0, 1.0]])\nZ = X @ w + b\nprint(\"forme de X :\", X.shape, \"forme de Z :\", Z.shape)\nprint(\"pré-activations :\", np.round(Z, 2))",
+        "output": "produit scalaire w·x = -1.50\npré-activation z = -1.40\nReLU(z) = 0.00\ntanh(z) = -0.8854\nforme de X : (3, 3) forme de Z : (3,)\npré-activations : [-1.4  0.1  0.6]",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Quel est l'effet d'un biais positif sur la frontière de décision d'une unité à seuil ?",
+          "options": [
+            "Il déplace l'hyperplan où la pré-activation s'annule, sans changer l'orientation donnée par les poids",
+            "Il change la direction du vecteur de poids",
+            "Il supprime la nécessité d'une fonction d'activation",
+            "Il multiplie toutes les entrées par la même valeur"
+          ],
+          "correctIndex": 0,
+          "explanation": "La frontière est définie par w · x + b = 0. Le biais déplace cette frontière parallèlement à elle-même ; l'orientation dépend des poids."
+        },
+        {
+          "question": "Une entrée positive reçoit un poids négatif. Que peut-on dire de sa contribution à la pré-activation ?",
+          "options": [
+            "Elle est négative et pousse la pré-activation vers le bas",
+            "Elle est positive et pousse la pré-activation vers le haut",
+            "Elle est nulle dans tous les cas",
+            "Elle dépend uniquement du biais"
+          ],
+          "correctIndex": 0,
+          "explanation": "La contribution vaut w_i x_i. Avec x_i positif et w_i négatif, le produit est négatif. Le signe du poids inverse le sens de l'influence de l'entrée."
+        },
+        {
+          "question": "Dans l'écriture Z = Xw + b pour un lot de m exemples et n entrées, quelle est la forme de X ?",
+          "options": [
+            "(m, n)",
+            "(n, m)",
+            "(m, 1)",
+            "(1, n)"
+          ],
+          "correctIndex": 0,
+          "explanation": "Chaque ligne de X est un exemple et chaque colonne une variable. X a donc m lignes et n colonnes. Le produit Xw donne une valeur par exemple."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Produit scalaire",
+          "definition": "Somme des produits terme à terme de deux vecteurs. Il mesure aussi l'alignement entre leurs directions."
+        },
+        {
+          "term": "Pré-activation",
+          "definition": "Résultat de la somme pondérée plus le biais, avant application de la fonction d'activation."
+        },
+        {
+          "term": "Frontière de décision",
+          "definition": "Ensemble des entrées pour lesquelles la pré-activation d'une unité à seuil s'annule et où sa sortie change de classe."
+        },
+        {
+          "term": "Biais",
+          "definition": "Paramètre ajouté à la somme pondérée qui déplace le seuil d'activation."
+        },
+        {
+          "term": "Lot",
+          "definition": "Groupe d'exemples traités ensemble dans une même opération matricielle."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Rôle du biais",
+          "prompt": "À quoi sert le biais dans un neurone artificiel ?",
+          "solution": "Il décale la somme pondérée avant l’activation. Il permet d’ajuster le seuil de déclenchement indépendamment des entrées."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Goodfellow, Bengio et Courville, Deep Learning, MIT Press, 2016.",
+          "href": "https://www.deeplearningbook.org/"
+        },
+        {
+          "label": "Stanford CS231n, notes sur les réseaux de neurones, consulté le 21 octobre 2026.",
+          "href": "https://cs231n.github.io/neural-networks-1/"
+        },
+        {
+          "label": "Andrej Karpathy, micrograd, dépôt GitHub, consulté le 21 octobre 2026.",
+          "href": "https://github.com/karpathy/micrograd"
+        }
+      ]
+    },
+    {
+      "id": "activation",
+      "title": "Fonctions d'activation et non-linéarité",
+      "keyTakeaways": [
+        "Sans fonction d'activation non linéaire, la composition de plusieurs couches affines se réduit à une seule transformation affine. La profondeur n'apporte alors rien.",
+        "La ReLU, définie par max(0, z), est simple et préserve les gradients pour les valeurs positives. Elle peut devenir inactive pour toujours si une unité ne reçoit plus que des pré-activations négatives.",
+        "La sigmoïde et la tangente hyperbolique compriment leurs entrées. Leurs dérivées deviennent très petites loin de zéro, ce qui contribue au gradient qui disparaît.",
+        "Le théorème d'approximation universelle dit qu'un réseau à une couche cachée suffisamment large peut approcher une fonction continue sur un domaine compact. Il ne dit rien de la facilité à trouver les poids ni de la généralisation.",
+        "Le choix de l'activation dépend de la couche : ReLU ou variantes pour les couches cachées, softmax pour une sortie de classification à plusieurs classes, sortie linéaire pour une régression."
+      ],
+      "theory": "### Pourquoi une non-linéarité\n\nUne couche affine transforme son entrée $x$ en $Wx + b$. Si l'on empile deux couches affines, on obtient :\n\n$$\n\\begin{aligned}\nW_2(W_1 x + b_1) + b_2 &= (W_2 W_1)x \\\\\n&\\quad + (W_2 b_1 + b_2)\n\\end{aligned}\n$$\n\nLe membre de droite est encore une transformation affine, avec une matrice $W_2 W_1$ et un biais $W_2 b_1 + b_2$. Empiler des couches affines ne change donc pas la classe de fonctions représentées : le réseau reste équivalent à une seule couche. C'est un fait d'algèbre, pas une opinion.\n\nUne fonction d'activation non linéaire casse cette réduction. Si chaque couche applique $\\varphi(Wx + b)$ avec une $\\varphi$ non linéaire, la composition ne se simplifie plus en une seule matrice. Le réseau peut alors représenter des fonctions plus riches. C'est la raison d'être des activations, et le point que les notes CS231n et Goodfellow et al. (2016) mettent en avant.\n\n### La ReLU\n\nLa fonction ReLU (rectified linear unit) est définie par :\n\n$$\\mathrm{ReLU}(z) = \\max(0, z)$$\n\nElle vaut zéro pour les valeurs négatives et $z$ pour les valeurs positives. Sa dérivée vaut 0 pour $z < 0$ et 1 pour $z > 0$. En $z = 0$, elle n'est pas dérivable au sens strict ; les bibliothèques choisissent conventionnellement une valeur, souvent 0. Cette simplicité a un coût et un avantage. L'avantage est que le gradient ne sature pas pour les valeurs positives : il reste égal à 1, ce qui facilite la propagation du signal dans un réseau profond. Le coût est qu'une unité dont les pré-activations restent négatives ne reçoit plus de gradient et peut rester inactive. On parle de **ReLU morte**.\n\nDes variantes corrigent en partie ce problème. La Leaky ReLU laisse passer une petite fraction des valeurs négatives, par exemple $0{,}01z$. La ReLU paramétrique apprend ce coefficient. La GELU, utilisée dans certains modèles récents, remplace la cassure par une courbe lisse. Aucune variante n'est universellement meilleure : le choix dépend de l'architecture et des données.\n\n### Sigmoïde et tangente hyperbolique\n\nLa sigmoïde comprime toute valeur réelle dans l'intervalle $(0, 1)$ :\n\n$$\\sigma(z) = \\frac{1}{1 + e^{-z}}$$\n\nLa tangente hyperbolique comprime dans $(-1, 1)$ :\n\n$$\\tanh(z) = \\frac{e^{z} - e^{-z}}{e^{z} + e^{-z}}$$\n\nToutes deux sont lisses et dérivables partout. Leurs dérivées valent respectivement $\\sigma(z)(1 - \\sigma(z))$ et $1 - \\tanh^2(z)$. Ces dérivées atteignent leur maximum en zéro, puis diminuent rapidement quand $|z|$ grandit. Pour une sigmoïde, le maximum vaut $0{,}25$. Pour une tangente hyperbolique, il vaut $1$. Dans les deux cas, une pré-activation très grande ou très petite produit une dérivée proche de zéro.\n\nCette saturation a une conséquence pour l'apprentissage. La rétropropagation multiplie des dérivées couche après couche. Si chaque facteur est petit, le produit devient minuscule, et les couches proches de l'entrée reçoivent un gradient presque nul. C'est le **gradient qui disparaît**, détaillé au module 7. La ReLU atténue ce phénomène sur les valeurs positives, mais elle ne le supprime pas dans toutes les architectures.\n\n### Softmax et sortie\n\nPour une classification à plusieurs classes, la dernière couche produit souvent un vecteur de scores appelés **logits**. La fonction softmax transforme ces scores en probabilités qui somment à 1 :\n\n$$\\mathrm{softmax}(z)_i = \\frac{e^{z_i}}{\\sum_{j} e^{z_j}}$$\n\nElle n'est pas une activation de couche cachée au sens habituel : elle sert à normaliser la sortie. Pour une régression, on laisse souvent la dernière couche linéaire, car la cible est un nombre réel et non une classe. Pour une classification binaire, une sigmoïde sur un seul logit suffit.\n\n### Le théorème d'approximation universelle\n\nUn résultat classique, présenté dans Goodfellow et al. (2016), dit qu'un réseau à une couche cachée suffisamment large, muni d'une activation non linéaire adaptée, peut approcher une fonction continue sur un domaine compact avec une erreur arbitrairement petite. Ce théorème justifie l'idée qu'une non-linéarité donne au réseau un pouvoir de représentation élevé.\n\nIl ne faut pas en tirer plus qu'il ne dit. Le théorème ne garantit pas que l'entraînement trouvera les bons poids, ni que le réseau généralisera à des données nouvelles, ni que la largeur nécessaire sera raisonnable. Il dit qu'une solution existe dans la famille de fonctions considérée. La difficulté pratique reste l'optimisation et la quantité de données.\n\n### Ce que le code montre\n\nLe code ci-dessous applique ReLU et tangente hyperbolique à cinq valeurs, puis calcule leurs dérivées. Il vérifie aussi qu'une composition de deux matrices reste une matrice de même forme, ce qui illustre la réduction des couches affines. Les valeurs sont petites et choisies pour rendre les effets visibles.",
+      "analogy": {
+        "title": "Les feuilles transparentes",
+        "text": "Empilez des feuilles transparentes quadrillées et regardez à travers : chaque feuille déforme la grille, mais l'ensemble reste une grille. Une feuille qui plie la grille change la nature du résultat. Sans ce pli, empiler des feuilles ne fait que combiner des déformations linéaires.\n\n**Limite de l'analogie :** une fonction non linéaire ne « plie » pas physiquement l'espace. L'image aide à comprendre la composition, pas la géométrie exacte des fonctions d'activation."
+      },
+      "example": {
+        "title": "Deux couches affines valent une couche",
+        "text": "Prenons $W_1 = \\begin{pmatrix} 2 & 0 \\\\ 0 & 3 \\end{pmatrix}$, $b_1 = (1, -1)$, $W_2 = (1, 1)$ et $b_2 = 0{,}5$. Alors $W_2(W_1 x + b_1) + b_2 = 2x_1 + 3x_2 + 0{,}5$. Une seule couche affine de poids $(2, 3)$ et de biais $0{,}5$ donne exactement le même résultat.\n\n**Ce que cet exemple ne dit pas :** avec une activation non linéaire entre les deux couches, cette simplification n'est plus possible. C'est précisément l'effet recherché."
+      },
+      "diagram": {
+        "title": "Fonction linéaire, ReLU et empilement",
+        "description": "Schéma illustratif : une droite reste une droite, la ReLU introduit un coude, et deux couches affines sans activation se réduisent à une seule. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Comparaison d'une fonction linéaire et de la ReLU, et réduction de deux couches affines en une seule\">\n  <rect width=\"800\" height=\"440\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">La non-linéarité change la classe de fonctions</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"droite-lineaire\">\n    <text x=\"210\" y=\"92\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">Une fonction affine</text>\n    <line x1=\"90\" y1=\"300\" x2=\"330\" y2=\"300\" stroke=\"#64748b\" stroke-width=\"1.5\"/>\n    <line x1=\"90\" y1=\"300\" x2=\"90\" y2=\"120\" stroke=\"#64748b\" stroke-width=\"1.5\"/>\n    <line x1=\"100\" y1=\"280\" x2=\"310\" y2=\"140\" stroke=\"#38bdf8\" stroke-width=\"3\"/>\n    <text x=\"210\" y=\"330\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">z</text>\n    <text x=\"210\" y=\"352\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">une seule pente</text>\n  </g>\n\n  <g id=\"courbe-relu\">\n    <text x=\"590\" y=\"92\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">La ReLU</text>\n    <line x1=\"470\" y1=\"300\" x2=\"710\" y2=\"300\" stroke=\"#64748b\" stroke-width=\"1.5\"/>\n    <line x1=\"470\" y1=\"300\" x2=\"470\" y2=\"120\" stroke=\"#64748b\" stroke-width=\"1.5\"/>\n    <line x1=\"480\" y1=\"300\" x2=\"570\" y2=\"300\" stroke=\"#34d399\" stroke-width=\"3\"/>\n    <line x1=\"570\" y1=\"300\" x2=\"700\" y2=\"140\" stroke=\"#34d399\" stroke-width=\"3\"/>\n    <text x=\"590\" y=\"330\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">z</text>\n    <text x=\"590\" y=\"352\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">deux régimes</text>\n  </g>\n\n  <g id=\"empilement-lineaire\">\n    <rect x=\"90\" y=\"378\" width=\"620\" height=\"42\" rx=\"8\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"1.5\"/>\n    <text x=\"400\" y=\"404\" fill=\"#fcd34d\" font-size=\"12\" text-anchor=\"middle\">Deux couches affines sans φ se réduisent à une seule couche affine</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Une fonction affine",
+            "explanation": "La sortie est une droite. Empiler deux fonctions affines revient encore à une fonction affine, donc la profondeur n'ajoute pas de pouvoir de représentation.",
+            "highlight": [
+              "droite-lineaire"
+            ]
+          },
+          {
+            "title": "2. La ReLU",
+            "explanation": "La ReLU coupe les valeurs négatives et laisse passer les positives. Cette cassure introduit une non-linéarité.",
+            "highlight": [
+              "courbe-relu"
+            ]
+          },
+          {
+            "title": "3. L'empilement",
+            "explanation": "Sans activation entre les couches, la composition reste affine. Avec une activation, elle ne se simplifie plus et le réseau peut représenter des fonctions plus complexes.",
+            "highlight": [
+              "empilement-lineaire"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Application de ReLU et de tanh à cinq valeurs, calcul de leurs dérivées, puis vérification qu'une composition de deux matrices reste une matrice de même forme.",
+        "code": "import numpy as np\n\nz = np.array([-3.0, -1.0, 0.0, 1.0, 3.0])\nrelu = np.maximum(0.0, z)\ntanh = np.tanh(z)\n\nprint(\"z      :\", z)\nprint(\"ReLU(z):\", relu)\nprint(\"tanh(z):\", np.round(tanh, 4))\n\n# Dérivées : ReLU vaut 0 ou 1, tanh vaut 1 - tanh^2.\nd_relu = (z > 0).astype(float)\nd_tanh = 1.0 - tanh ** 2\nprint(\"ReLU'(z):\", d_relu)\nprint(\"tanh'(z):\", np.round(d_tanh, 4))\n\n# Sans non-linéarité, deux couches se réduisent à une seule.\nrng = np.random.default_rng(0)\nW1 = rng.normal(size=(3, 3))\nW2 = rng.normal(size=(3, 3))\nW_combined = W2 @ W1\nprint(\"forme de la matrice combinée :\", W_combined.shape)",
+        "output": "z      : [-3. -1.  0.  1.  3.]\nReLU(z): [0. 0. 0. 1. 3.]\ntanh(z): [-0.9951 -0.7616  0.      0.7616  0.9951]\nReLU'(z): [0. 0. 0. 1. 1.]\ntanh'(z): [0.0099 0.42   1.     0.42   0.0099]\nforme de la matrice combinée : (3, 3)",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Pourquoi une non-linéarité est-elle nécessaire entre deux couches ?",
+          "options": [
+            "Parce que deux transformations affines composées restent une transformation affine, ce qui annule l'apport de la profondeur",
+            "Parce qu'une matrice ne peut pas être multipliée par un vecteur",
+            "Parce que les poids deviennent négatifs sans activation",
+            "Parce que le biais disparaît dans une couche affine"
+          ],
+          "correctIndex": 0,
+          "explanation": "La composition de deux applications affines est affine. Sans non-linéarité, un réseau de plusieurs couches est équivalent à une seule couche."
+        },
+        {
+          "question": "Qu'appelle-t-on une ReLU morte ?",
+          "options": [
+            "Une unité dont les pré-activations restent négatives, de sorte que son gradient est nul et qu'elle cesse d'apprendre",
+            "Une unité dont la sortie dépasse toujours 1",
+            "Une unité qui utilise la fonction softmax",
+            "Une unité dont le biais est initialisé à zéro"
+          ],
+          "correctIndex": 0,
+          "explanation": "Pour z négatif, la ReLU a une dérivée nulle. Si une unité ne reçoit plus que des pré-activations négatives, elle ne reçoit plus de gradient et peut rester inactive."
+        },
+        {
+          "question": "Que dit le théorème d'approximation universelle ?",
+          "options": [
+            "Qu'un réseau à une couche cachée suffisamment large peut approcher une fonction continue sur un domaine compact, sans garantir que l'entraînement trouvera les bons poids",
+            "Que tout réseau entraîné généralise parfaitement",
+            "Que la profondeur est inutile",
+            "Que la ReLU est la seule activation possible"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le théorème porte sur l'existence d'une approximation dans une famille de fonctions. Il ne dit rien de l'optimisation, du nombre de données nécessaires ni de la généralisation."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Non-linéarité",
+          "definition": "Propriété d'une fonction dont le graphe n'est pas une droite ou un plan. Elle permet à un réseau de représenter des relations plus complexes qu'une transformation affine."
+        },
+        {
+          "term": "ReLU",
+          "definition": "Fonction d'activation définie par max(0, z). Elle est nulle pour les valeurs négatives et égale à z pour les valeurs positives."
+        },
+        {
+          "term": "Saturation",
+          "definition": "Situation où une fonction d'activation varie très peu pour de grandes entrées, ce qui rend sa dérivée proche de zéro."
+        },
+        {
+          "term": "Softmax",
+          "definition": "Fonction qui transforme un vecteur de scores en probabilités positives sommant à 1."
+        },
+        {
+          "term": "Théorème d'approximation universelle",
+          "definition": "Résultat qui garantit qu'un réseau à une couche cachée suffisamment large peut approcher une fonction continue sur un domaine compact."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Non-linéarité",
+          "prompt": "Que se passe-t-il si on retire toutes les fonctions d’activation d’un réseau profond ?",
+          "solution": "La composition de couches linéaires reste une transformation linéaire. Le réseau perd la capacité de représenter des frontières non linéaires, même s’il a beaucoup de couches."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Goodfellow, Bengio et Courville, Deep Learning, MIT Press, 2016.",
+          "href": "https://www.deeplearningbook.org/"
+        },
+        {
+          "label": "Stanford CS231n, notes sur les réseaux de neurones, consulté le 21 octobre 2026.",
+          "href": "https://cs231n.github.io/neural-networks-1/"
+        }
+      ]
+    },
+    {
+      "id": "couches-forward",
+      "title": "Couches, hiérarchie et propagation avant",
+      "keyTakeaways": [
+        "Une couche dense applique une transformation affine suivie d'une activation. Pour un lot de m exemples et n entrées, la matrice des poids a la forme (n, p) si la couche produit p valeurs.",
+        "Un perceptron multicouche (MLP) alterne des couches cachées et une couche de sortie. La propagation avant calcule les sorties couche après couche, sans modifier les paramètres.",
+        "Le nombre de paramètres d'une couche dense vaut n fois p plus p biais. Pour un réseau 3-4-2, le total est de 26 paramètres.",
+        "Les couches cachées construisent des représentations intermédiaires. Rien ne garantit qu'elles correspondent à des concepts lisibles par un humain.",
+        "La profondeur et la largeur augmentent la capacité de représentation, mais aussi le coût de calcul et le risque de surapprentissage. Le bon réglage dépend de la tâche et des données."
+      ],
+      "theory": "### Une couche comme transformation\n\nUne couche dense, aussi appelée couche entièrement connectée, prend un lot d'entrées et lui applique une transformation affine, puis une activation. Si l'entrée est une matrice $X$ de forme $(m, n)$, où $m$ est le nombre d'exemples et $n$ le nombre de variables, et si la couche produit $p$ valeurs, alors :\n\n$$A = \\varphi(X W + b)$$\n\nLa matrice $W$ a la forme $(n, p)$ et le biais $b$ a la forme $(p,)$. Le produit $XW$ a la forme $(m, p)$, et le biais est ajouté à chaque ligne. La sortie $A$ a la forme $(m, p)$. Cette écriture, décrite dans les notes CS231n, est la brique de base d'un perceptron multicouche.\n\n> **Règle de forme.** Pour une couche dense, une entrée de forme $(m, n)$ multipliée par des poids de forme $(n, p)$ donne une sortie de forme $(m, p)$.\n\nLe nombre de paramètres d'une telle couche est $n \\times p + p$. Le premier terme compte les poids, le second les biais. Pour une couche qui passe de 3 à 4 valeurs, cela fait $3 \\times 4 + 4 = 16$ paramètres. Pour une couche qui passe de 4 à 2 valeurs, $4 \\times 2 + 2 = 10$. Un réseau 3-4-2 totalise donc 26 paramètres. Ce calcul est utile pour vérifier qu'un modèle reste petit, ou pour estimer la mémoire nécessaire.\n\n### Un réseau 3-4-2\n\nPrenons un réseau à trois entrées, une couche cachée de quatre unités et une sortie de deux valeurs. La propagation avant s'écrit :\n\n$$H = \\mathrm{ReLU}(X W_1 + b_1)$$\n$$\\text{logits} = H W_2 + b_2$$\n\n$W_1$ a la forme $(3, 4)$, $b_1$ la forme $(4,)$, $W_2$ la forme $(4, 2)$ et $b_2$ la forme $(2,)$. Pour un lot de 4 exemples, $X$ a la forme $(4, 3)$, $H$ la forme $(4, 4)$ et les logits la forme $(4, 2)$. Chaque ligne des logits correspond à un exemple, chaque colonne à une classe.\n\nLa couche cachée ne voit pas les données brutes de la même façon que la sortie. Elle combine les entrées pour former quatre nombres par exemple. La couche de sortie combine ensuite ces quatre nombres pour produire deux scores. C'est cette composition qui permet de représenter des relations que la couche de sortie seule ne pourrait pas traiter.\n\n### Hiérarchie et représentations\n\nDans un réseau profond, les couches successives construisent des représentations de plus en plus abstraites. Sur des images, les premières couches réagissent à des motifs locaux simples, les suivantes à des combinaisons de ces motifs. Cette description est qualitative : elle dépend de l'architecture et de l'entraînement, et elle n'est pas garantie couche par couche.\n\nUne représentation intermédiaire n'est pas nécessairement interprétable. Une unité cachée peut réagir à une combinaison de plusieurs facteurs sans qu'on puisse lui donner un nom. Les travaux d'interprétabilité cherchent parfois à identifier des directions ou des circuits, mais leurs résultats ne se transposent pas automatiquement à tous les modèles.\n\n### Profondeur, largeur et coût\n\nAugmenter le nombre de couches ou le nombre d'unités augmente la capacité du réseau. Cela ne signifie pas qu'un réseau plus gros sera meilleur : il peut surapprendre, être plus lent à entraîner ou plus difficile à régler. La profondeur permet de composer des transformations, mais elle allonge le chemin du gradient et peut favoriser le gradient qui disparaît. La largeur donne plus de capacité dans une couche, au prix d'un plus grand nombre de paramètres.\n\nLe choix d'architecture est donc un compromis. Les notes CS231n insistent sur l'importance de commencer simple, de vérifier les formes et de comparer les variantes sur un jeu de validation. Le code du module construit un petit MLP en NumPy et affiche les formes, le nombre de paramètres et les probabilités de sortie.\n\n### Propagation avant et propagation arrière\n\nLa propagation avant ne modifie aucun paramètre. Elle calcule une prédiction et, si l'on dispose des étiquettes, une perte. C'est la propagation arrière, présentée au module 7, qui calcule la contribution de chaque paramètre à cette perte. Les deux passes utilisent le même graphe de calcul, l'une dans le sens des entrées vers la sortie, l'autre dans le sens inverse.\n\nCette séparation explique pourquoi un réseau peut être évalué sans entraînement : la passe avant suffit. Elle explique aussi pourquoi l'entraînement coûte plus cher qu'une simple prédiction : il faut conserver les valeurs intermédiaires de la passe avant pour calculer les gradients.\n\n### Vérifier les dimensions\n\nAvant d'entraîner, il est prudent de vérifier la forme de chaque tenseur. Une couche dense mal dimensionnée produit une erreur explicite, mais une erreur de forme peut aussi passer inaperçue si les dimensions sont compatibles par hasard. Afficher les formes, le nombre de paramètres et la somme des probabilités permet de détecter plusieurs erreurs classiques.\n\nLe code ci-dessous utilise une graine fixée pour que les valeurs soient reproductibles. Il ne fait aucun apprentissage : les poids sont tirés au hasard, puis la passe avant est calculée. Les probabilités affichées n'ont donc aucune signification sur des données réelles.",
+      "example": {
+        "title": "Compter les paramètres",
+        "text": "Pour un réseau 3-4-2, la première couche a $3 \\times 4 + 4 = 16$ paramètres et la seconde $4 \\times 2 + 2 = 10$. Le total est de 26.\n\n**Ce que cet exemple ne dit pas :** le nombre de paramètres ne mesure ni la qualité du modèle ni sa capacité à généraliser. Il sert à vérifier l'architecture et à estimer le coût."
+      },
+      "diagram": {
+        "title": "Un MLP 3-4-2 et les formes des matrices",
+        "description": "Schéma illustratif : trois entrées, quatre unités cachées et deux sorties, avec les formes des tenseurs à chaque étape. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 420\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Perceptron multicouche 3-4-2 avec les formes des matrices et le nombre de paramètres\">\n  <rect width=\"800\" height=\"420\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Un réseau 3-4-2 et ses formes</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"couche-entree\">\n    <g fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\">\n      <circle cx=\"100\" cy=\"130\" r=\"20\"/><circle cx=\"100\" cy=\"200\" r=\"20\"/><circle cx=\"100\" cy=\"270\" r=\"20\"/>\n    </g>\n    <text x=\"100\" y=\"135\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">x1</text>\n    <text x=\"100\" y=\"205\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">x2</text>\n    <text x=\"100\" y=\"275\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">x3</text>\n    <text x=\"100\" y=\"330\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">X (lot, 3)</text>\n  </g>\n\n  <g stroke=\"#475569\" stroke-width=\"1.2\">\n    <line x1=\"120\" y1=\"130\" x2=\"310\" y2=\"115\"/><line x1=\"120\" y1=\"130\" x2=\"310\" y2=\"165\"/><line x1=\"120\" y1=\"130\" x2=\"310\" y2=\"215\"/><line x1=\"120\" y1=\"130\" x2=\"310\" y2=\"265\"/>\n    <line x1=\"120\" y1=\"200\" x2=\"310\" y2=\"115\"/><line x1=\"120\" y1=\"200\" x2=\"310\" y2=\"165\"/><line x1=\"120\" y1=\"200\" x2=\"310\" y2=\"215\"/><line x1=\"120\" y1=\"200\" x2=\"310\" y2=\"265\"/>\n    <line x1=\"120\" y1=\"270\" x2=\"310\" y2=\"115\"/><line x1=\"120\" y1=\"270\" x2=\"310\" y2=\"165\"/><line x1=\"120\" y1=\"270\" x2=\"310\" y2=\"215\"/><line x1=\"120\" y1=\"270\" x2=\"310\" y2=\"265\"/>\n  </g>\n  <text x=\"215\" y=\"98\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">W1 (3, 4)</text>\n\n  <g id=\"couche-cachee\">\n    <g fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"2\">\n      <circle cx=\"330\" cy=\"115\" r=\"20\"/><circle cx=\"330\" cy=\"165\" r=\"20\"/><circle cx=\"330\" cy=\"215\" r=\"20\"/><circle cx=\"330\" cy=\"265\" r=\"20\"/>\n    </g>\n    <text x=\"330\" y=\"120\" fill=\"#e2e8f0\" font-size=\"11\" text-anchor=\"middle\">h1</text>\n    <text x=\"330\" y=\"170\" fill=\"#e2e8f0\" font-size=\"11\" text-anchor=\"middle\">h2</text>\n    <text x=\"330\" y=\"220\" fill=\"#e2e8f0\" font-size=\"11\" text-anchor=\"middle\">h3</text>\n    <text x=\"330\" y=\"270\" fill=\"#e2e8f0\" font-size=\"11\" text-anchor=\"middle\">h4</text>\n    <text x=\"330\" y=\"330\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">H (lot, 4)</text>\n  </g>\n\n  <g stroke=\"#475569\" stroke-width=\"1.2\">\n    <line x1=\"350\" y1=\"115\" x2=\"520\" y2=\"165\"/><line x1=\"350\" y1=\"115\" x2=\"520\" y2=\"235\"/>\n    <line x1=\"350\" y1=\"165\" x2=\"520\" y2=\"165\"/><line x1=\"350\" y1=\"165\" x2=\"520\" y2=\"235\"/>\n    <line x1=\"350\" y1=\"215\" x2=\"520\" y2=\"165\"/><line x1=\"350\" y1=\"215\" x2=\"520\" y2=\"235\"/>\n    <line x1=\"350\" y1=\"265\" x2=\"520\" y2=\"165\"/><line x1=\"350\" y1=\"265\" x2=\"520\" y2=\"235\"/>\n  </g>\n  <text x=\"435\" y=\"148\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">W2 (4, 2)</text>\n\n  <g id=\"couche-sortie\">\n    <g fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"2\">\n      <circle cx=\"540\" cy=\"165\" r=\"20\"/><circle cx=\"540\" cy=\"235\" r=\"20\"/>\n    </g>\n    <text x=\"540\" y=\"170\" fill=\"#e2e8f0\" font-size=\"11\" text-anchor=\"middle\">y1</text>\n    <text x=\"540\" y=\"240\" fill=\"#e2e8f0\" font-size=\"11\" text-anchor=\"middle\">y2</text>\n    <text x=\"540\" y=\"330\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">logits (lot, 2)</text>\n  </g>\n\n  <g id=\"formes\">\n    <rect x=\"610\" y=\"110\" width=\"150\" height=\"150\" rx=\"10\" fill=\"#0f172a\" stroke=\"#334155\" stroke-width=\"1.5\"/>\n    <text x=\"685\" y=\"136\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">paramètres</text>\n    <text x=\"685\" y=\"162\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">3 x 4 + 4 = 16</text>\n    <text x=\"685\" y=\"184\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">4 x 2 + 2 = 10</text>\n    <text x=\"685\" y=\"218\" fill=\"#6ee7b7\" font-size=\"12\" text-anchor=\"middle\">total : 26</text>\n    <text x=\"685\" y=\"244\" fill=\"#94a3b8\" font-size=\"10\" text-anchor=\"middle\">poids et biais</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. L'entrée",
+            "explanation": "Chaque ligne de X est un exemple, chaque colonne une variable. Pour un lot de 4 exemples et 3 variables, X a la forme (4, 3).",
+            "highlight": [
+              "couche-entree"
+            ]
+          },
+          {
+            "title": "2. La couche cachée",
+            "explanation": "La multiplication par W1 de forme (3, 4) produit quatre valeurs par exemple. Après l'activation, H a la forme (4, 4) pour un lot de 4.",
+            "highlight": [
+              "couche-cachee"
+            ]
+          },
+          {
+            "title": "3. La couche de sortie",
+            "explanation": "W2 de forme (4, 2) transforme les quatre valeurs en deux scores par exemple. Les logits ont la forme (4, 2).",
+            "highlight": [
+              "couche-sortie"
+            ]
+          },
+          {
+            "title": "4. Le compte des paramètres",
+            "explanation": "Chaque couche compte ses poids et ses biais. Le réseau 3-4-2 totalise 26 paramètres, sans compter les activations qui n'en ont pas.",
+            "highlight": [
+              "formes"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Construction d'un MLP 3-4-2 en NumPy avec une graine fixée, calcul de la passe avant et de la fonction softmax, puis affichage des formes et du nombre de paramètres.",
+        "code": "import numpy as np\n\nrng = np.random.default_rng(42)\nX = rng.normal(size=(4, 3))          # 4 exemples, 3 entrées\nW1 = rng.normal(size=(3, 4)) * 0.5   # 3 -> 4\nb1 = np.zeros(4)\nW2 = rng.normal(size=(4, 2)) * 0.5   # 4 -> 2\nb2 = np.zeros(2)\n\nH = np.maximum(0.0, X @ W1 + b1)     # couche cachée, ReLU\nlogits = H @ W2 + b2                 # couche de sortie, linéaire\n\ndef softmax(a):\n    e = np.exp(a - a.max(axis=1, keepdims=True))\n    return e / e.sum(axis=1, keepdims=True)\n\nprint(\"X :\", X.shape, \"W1 :\", W1.shape, \"H :\", H.shape, \"W2 :\", W2.shape, \"logits :\", logits.shape)\nprint(\"paramètres :\", W1.size + b1.size + W2.size + b2.size)\nprint(\"probabilités du premier exemple :\", np.round(softmax(logits)[0], 3))\nprint(\"somme des probabilités :\", np.round(softmax(logits).sum(axis=1), 3))",
+        "output": "X : (4, 3) W1 : (3, 4) H : (4, 4) W2 : (4, 2) logits : (4, 2)\nparamètres : 26\nprobabilités du premier exemple : [0.508 0.492]\nsomme des probabilités : [1. 1. 1. 1.]",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Une couche dense reçoit un lot de 4 exemples de 3 variables et produit 4 valeurs par exemple. Quelles sont les formes de W et de la sortie ?",
+          "options": [
+            "W a la forme (3, 4) et la sortie (4, 4)",
+            "W a la forme (4, 3) et la sortie (4, 3)",
+            "W a la forme (4, 4) et la sortie (3, 4)",
+            "W a la forme (3, 4) et la sortie (3, 4)"
+          ],
+          "correctIndex": 0,
+          "explanation": "La matrice des poids relie n entrées à p sorties, donc (3, 4). Le produit XW avec X de forme (4, 3) donne une sortie de forme (4, 4)."
+        },
+        {
+          "question": "Quel est le rôle d'une couche cachée dans un MLP ?",
+          "options": [
+            "Transformer les entrées en une représentation intermédiaire que la couche suivante combine",
+            "Stocker les étiquettes du jeu d'entraînement",
+            "Garantir que le modèle généralise",
+            "Remplacer la fonction de perte"
+          ],
+          "correctIndex": 0,
+          "explanation": "La couche cachée combine les entrées pour former de nouvelles valeurs. Ces valeurs servent d'entrée à la couche suivante. Elles ne garantissent ni la généralisation ni la mémorisation des étiquettes."
+        },
+        {
+          "question": "Combien de paramètres contient un réseau 3-4-2 avec des biais sur les deux couches ?",
+          "options": [
+            "26",
+            "24",
+            "20",
+            "32"
+          ],
+          "correctIndex": 0,
+          "explanation": "Première couche : 3 x 4 + 4 = 16. Seconde couche : 4 x 2 + 2 = 10. Total : 26."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Couche dense",
+          "definition": "Couche qui applique une transformation affine à toutes ses entrées, puis une activation. Chaque entrée est reliée à chaque sortie."
+        },
+        {
+          "term": "MLP",
+          "definition": "Perceptron multicouche : réseau composé d'au moins une couche cachée dense et d'une couche de sortie."
+        },
+        {
+          "term": "Propagation avant",
+          "definition": "Calcul des sorties couche après couche, des entrées vers la sortie, sans modification des paramètres."
+        },
+        {
+          "term": "Logits",
+          "definition": "Scores bruts produits par la dernière couche avant une normalisation éventuelle en probabilités."
+        },
+        {
+          "term": "Paramètre",
+          "definition": "Valeur apprise par le réseau, par exemple un poids ou un biais."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Propagation avant",
+          "prompt": "Pourquoi la forme des tenseurs doit-elle être vérifiée à chaque couche ?",
+          "solution": "Une forme incompatible provoque une erreur ou une diffusion incorrecte. Vérifier les dimensions, le lot et les canaux permet de localiser le problème avant l’entraînement."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Goodfellow, Bengio et Courville, Deep Learning, MIT Press, 2016.",
+          "href": "https://www.deeplearningbook.org/"
+        },
+        {
+          "label": "Stanford CS231n, notes sur les réseaux de neurones, consulté le 21 octobre 2026.",
+          "href": "https://cs231n.github.io/neural-networks-1/"
+        },
+        {
+          "label": "TensorFlow Playground, outil interactif, consulté le 21 octobre 2026.",
+          "href": "https://playground.tensorflow.org/"
+        }
+      ]
+    },
+    {
+      "id": "perte-gradient",
+      "title": "Erreur, coût et descente de gradient",
+      "keyTakeaways": [
+        "Une fonction de perte transforme l'écart entre une prédiction et une cible en un nombre à minimiser. L'entropie croisée convient à une classification, l'erreur quadratique moyenne à une régression.",
+        "Le gradient indique la direction dans laquelle la perte augmente le plus vite. La descente de gradient déplace les paramètres dans la direction opposée.",
+        "Le taux d'apprentissage fixe la taille du pas. Trop petit, il ralentit la convergence ; trop grand, il peut faire osciller ou diverger la suite des paramètres.",
+        "Sur une quadratique, la convergence dépend du taux d'apprentissage. Pour une courbure de 2, le facteur de contraction vaut |1 - 2η|, et la suite converge si ce facteur est strictement inférieur à 1.",
+        "La descente de gradient stochastique utilise des lots de taille réduite. Le gradient estimé est bruité, mais chaque pas coûte moins cher que sur l'ensemble des données."
+      ],
+      "theory": "### Mesurer l'erreur\n\nUn réseau produit une prédiction. Pour l'entraîner, il faut mesurer l'écart entre cette prédiction et la cible, puis réduire cet écart. Cette mesure s'appelle une **fonction de perte** ou **coût**. Le choix dépend de la tâche.\n\nPour une régression, où la cible est un nombre réel, l'erreur quadratique moyenne est courante :\n\n$$\\mathcal{L} = \\frac{1}{m} \\sum_{i=1}^{m} (\\hat{y}_i - y_i)^2$$\n\nPour une classification à plusieurs classes, on utilise souvent l'entropie croisée. Si le modèle produit des probabilités $\\hat{p}_i$ pour la classe correcte $y_i$, la perte s'écrit :\n\n$$\\mathcal{L} = -\\frac{1}{m} \\sum_{i=1}^{m} \\log \\hat{p}_{i,y_i}$$\n\nCette perte pénalise fortement une probabilité faible donnée à la bonne classe. Elle est décrite dans Goodfellow et al. (2016) comme une conséquence de la vraisemblance négative. Les détails changent selon la tâche, mais le principe reste : produire un nombre unique, dérivable par rapport aux paramètres, qui résume la qualité des prédictions sur un lot.\n\nLa perte calculée sur un lot est une estimation de la perte moyenne sur l'ensemble des données. On appelle parfois cette moyenne le **risque empirique**. L'entraînement cherche des paramètres qui le rendent petit, sans garantie que le risque sur des données nouvelles le sera aussi. Cette distinction entre erreur d'entraînement et erreur de généralisation traverse tout l'apprentissage automatique.\n\n### Le gradient\n\nLe gradient d'une fonction de plusieurs variables rassemble ses dérivées partielles. Pour une perte $\\mathcal{L}(\\theta)$ qui dépend d'un vecteur de paramètres $\\theta$, le gradient est le vecteur :\n\n$$\\nabla_\\theta \\mathcal{L} = \\left( \\frac{\\partial \\mathcal{L}}{\\partial \\theta_1}, \\dots, \\frac{\\partial \\mathcal{L}}{\\partial \\theta_k} \\right)$$\n\nIl pointe dans la direction où la perte augmente le plus vite localement. Pour diminuer la perte, on se déplace donc dans la direction opposée :\n\n$$\\theta \\leftarrow \\theta - \\eta \\nabla_\\theta \\mathcal{L}$$\n\nLe nombre $\\eta$ est le **taux d'apprentissage**. Cette règle est la descente de gradient. Elle ne promet pas d'atteindre le minimum global d'une fonction quelconque : elle suit la pente locale, pas une carte du paysage entier.\n\n### Un exemple quadratique\n\nPrenons une perte simple à un paramètre :\n\n$$\\mathcal{L}(w) = (w - 3)^2 + 1$$\n\nSon gradient vaut $2(w - 3)$. Le minimum est en $w = 3$, où la perte vaut 1. La règle de mise à jour devient :\n\n$$w_{k+1} = w_k - 2\\eta(w_k - 3)$$\n\nSi l'on pose $u_k = w_k - 3$, alors $u_{k+1} = (1 - 2\\eta)u_k$. La suite converge vers zéro si $|1 - 2\\eta| < 1$, c'est-à-dire si $0 < \\eta < 1$. Avec $\\eta = 0{,}1$, le facteur vaut $0{,}8$ : l'écart au minimum est multiplié par $0{,}8$ à chaque pas. Avec $\\eta = 1{,}1$, le facteur vaut $-1{,}2$ : l'écart change de signe et grandit. La divergence n'est pas une fatalité du réseau, c'est une conséquence directe du pas choisi.\n\nCe calcul est instructif, mais il ne décrit pas un réseau profond. La perte d'un réseau est généralement non convexe, avec des vallées, des plateaux et des points de selle. La descente de gradient n'y offre pas de garantie d'optimum global. En pratique, on cherche un point assez bon, pas le meilleur possible.\n\n### Lots et stochasticité\n\nCalculer le gradient sur l'ensemble des données à chaque pas est coûteux. La descente de gradient stochastique (SGD) estime le gradient sur un petit lot tiré au hasard. L'estimation est bruitée, mais elle est bien moins chère, et le bruit peut aider à sortir de certains plateaux. Le choix de la taille du lot est un compromis entre le coût par pas et la qualité de l'estimation.\n\nLe terme « stochastique » ne signifie pas que l'algorithme tire les paramètres au hasard. Il signifie que le gradient est calculé sur un échantillon aléatoire des données. Le résultat de chaque pas dépend donc du lot tiré, même si la règle de mise à jour reste déterministe.\n\nDes variantes ajoutent de l'inertie ou adaptent le pas par paramètre. La méthode du moment conserve une moyenne des gradients passés. Adam combine une moyenne des gradients et une moyenne des carrés des gradients. Ces méthodes ne changent pas le principe : elles modifient la manière de parcourir le paysage, pas la définition de la perte.\n\n### Choisir le taux d'apprentissage\n\nLe taux d'apprentissage est souvent le réglage le plus sensible. Un taux trop petit produit des progrès lents et peut laisser l'entraînement dans une zone peu utile. Un taux trop grand fait osciller les paramètres, voire diverger la perte. Il n'existe pas de valeur universelle : elle dépend de l'échelle des données, de l'architecture et de l'optimiseur.\n\nUne pratique courante consiste à essayer plusieurs valeurs sur un jeu de validation, puis à garder celle qui donne la meilleure perte de validation. Un calendrier peut réduire le taux au fil de l'entraînement. Ces choix se justifient par des essais, pas par une règle générale.\n\n### Ce que le code montre\n\nLe code ci-dessous applique la descente de gradient à la quadratique précédente, avec deux taux d'apprentissage. Il affiche le signe du gradient en trois points et les valeurs successives du paramètre. La comparaison illustre la convergence et la divergence sans faire appel à un réseau de neurones.",
+      "analogy": {
+        "title": "Descendre une pente dans le brouillard",
+        "text": "Imaginez que vous descendiez une colline dans le brouillard, sans carte. Vous tâtez le sol autour de vous, vous sentez la pente, puis vous faites un pas dans la direction qui descend. Un petit pas vous rapproche lentement du fond ; un pas trop grand peut vous faire dépasser le creux et remonter de l'autre côté.\n\n**Limite de l'analogie :** un paysage de perte a de nombreuses dimensions, pas deux. La descente de gradient ne voit que la pente locale, et le « fond » peut être un plateau ou un point de selle plutôt qu'un minimum net."
+      },
+      "example": {
+        "title": "Trois pas à la main",
+        "text": "Avec $\\mathcal{L}(w) = (w - 3)^2 + 1$, $\\eta = 0{,}1$ et $w_0 = 0$, on obtient $w_1 = 0 - 0{,}1 \\times (-6) = 0{,}6$, puis $w_2 = 1{,}08$ et $w_3 = 1{,}464$. L'écart au minimum est multiplié par $0{,}8$ à chaque pas.\n\n**Ce que cet exemple ne dit pas :** il ne garantit pas qu'un réseau réel convergera aussi proprement. La quadratique est convexe et n'a qu'un minimum."
+      },
+      "diagram": {
+        "title": "Le pas de gradient sur une courbe de perte",
+        "description": "Schéma illustratif : une courbe de perte, des pas vers le minimum, et l'effet d'un taux d'apprentissage trop grand. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Courbe de perte et pas de descente de gradient, avec un taux trop petit et un taux trop grand\">\n  <rect width=\"800\" height=\"440\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Suivre la pente, pas la carte</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"courbe-perte\">\n    <line x1=\"70\" y1=\"320\" x2=\"420\" y2=\"320\" stroke=\"#64748b\" stroke-width=\"1.5\"/>\n    <line x1=\"70\" y1=\"320\" x2=\"70\" y2=\"100\" stroke=\"#64748b\" stroke-width=\"1.5\"/>\n    <path d=\"M 80,150 C 160,120 190,260 250,270 C 310,280 340,140 410,130\" fill=\"none\" stroke=\"#38bdf8\" stroke-width=\"3\"/>\n    <circle cx=\"250\" cy=\"270\" r=\"5\" fill=\"#fbbf24\"/>\n    <text x=\"250\" y=\"300\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">minimum</text>\n    <text x=\"245\" y=\"338\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">paramètre</text>\n    <text x=\"58\" y=\"112\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">perte</text>\n  </g>\n\n  <g id=\"pas-gradient\">\n    <circle cx=\"110\" cy=\"155\" r=\"5\" fill=\"#f8fafc\"/>\n    <line x1=\"110\" y1=\"155\" x2=\"160\" y2=\"190\" stroke=\"#34d399\" stroke-width=\"2.5\"/>\n    <line x1=\"160\" y1=\"190\" x2=\"200\" y2=\"228\" stroke=\"#34d399\" stroke-width=\"2.5\"/>\n    <line x1=\"200\" y1=\"228\" x2=\"230\" y2=\"252\" stroke=\"#34d399\" stroke-width=\"2.5\"/>\n    <text x=\"128\" y=\"142\" fill=\"#6ee7b7\" font-size=\"11\">départ</text>\n    <text x=\"190\" y=\"216\" fill=\"#6ee7b7\" font-size=\"11\">pas</text>\n  </g>\n\n  <g id=\"lr-grand\">\n    <rect x=\"450\" y=\"100\" width=\"300\" height=\"120\" rx=\"10\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"1.5\"/>\n    <text x=\"600\" y=\"126\" fill=\"#fcd34d\" font-size=\"12\" text-anchor=\"middle\">taux trop grand</text>\n    <path d=\"M 480,190 L 540,130 L 600,195 L 660,125 L 720,200\" fill=\"none\" stroke=\"#fb7185\" stroke-width=\"2.5\"/>\n    <text x=\"600\" y=\"242\" fill=\"#fda4af\" font-size=\"11\" text-anchor=\"middle\">les pas se croisent et s'amplifient</text>\n  </g>\n\n  <g id=\"lr-petit\">\n    <rect x=\"450\" y=\"270\" width=\"300\" height=\"120\" rx=\"10\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"1.5\"/>\n    <text x=\"600\" y=\"296\" fill=\"#7dd3fc\" font-size=\"12\" text-anchor=\"middle\">taux trop petit</text>\n    <path d=\"M 480,360 C 540,350 600,340 720,330\" fill=\"none\" stroke=\"#38bdf8\" stroke-width=\"2.5\"/>\n    <text x=\"600\" y=\"382\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">les pas avancent lentement</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. La courbe de perte",
+            "explanation": "La perte dépend des paramètres. Le minimum est le point où elle est la plus basse, mais un réseau réel a un paysage de grande dimension.",
+            "highlight": [
+              "courbe-perte"
+            ]
+          },
+          {
+            "title": "2. Le pas de gradient",
+            "explanation": "Le gradient indique la montée. On se déplace dans la direction opposée, d'une distance fixée par le taux d'apprentissage.",
+            "highlight": [
+              "pas-gradient"
+            ]
+          },
+          {
+            "title": "3. Un taux trop grand",
+            "explanation": "Si le pas est trop grand, la suite des paramètres peut dépasser le minimum, osciller et s'éloigner au lieu de converger.",
+            "highlight": [
+              "lr-grand"
+            ]
+          },
+          {
+            "title": "4. Un taux trop petit",
+            "explanation": "Si le pas est trop petit, la perte diminue, mais très lentement. Le choix du taux est un compromis entre vitesse et stabilité.",
+            "highlight": [
+              "lr-petit"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Descente de gradient sur une quadratique, avec un taux qui converge et un taux qui diverge. Le script affiche aussi le signe du gradient en trois points.",
+        "code": "def loss(w):\n    return (w - 3.0) ** 2 + 1.0\n\ndef grad(w):\n    return 2.0 * (w - 3.0)\n\ndef descent(lr, steps=20, w=0.0):\n    history = [w]\n    for _ in range(steps):\n        w = w - lr * grad(w)\n        history.append(w)\n    return history\n\nfor w in (0.0, 3.0, 5.0):\n    print(f\"w = {w:.0f}, gradient = {grad(w):.1f}\")\n\nfor lr in (0.1, 1.1):\n    h = descent(lr)\n    print(f\"lr = {lr} : w(0) = {h[0]:.4f}, w(5) = {h[5]:.4f}, w(20) = {h[20]:.4f}\")\n\nprint(f\"perte au départ : {loss(0.0):.1f}, perte à w = 3 : {loss(3.0):.1f}\")",
+        "output": "w = 0, gradient = -6.0\nw = 3, gradient = 0.0\nw = 5, gradient = 4.0\nlr = 0.1 : w(0) = 0.0000, w(5) = 2.0170, w(20) = 2.9654\nlr = 1.1 : w(0) = 0.0000, w(5) = 10.4650, w(20) = -112.0128\nperte au départ : 10.0, perte à w = 3 : 1.0",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Que représente le signe du gradient pour un paramètre ?",
+          "options": [
+            "La direction locale dans laquelle la perte augmente lorsque le paramètre augmente",
+            "La valeur finale du paramètre après convergence",
+            "La taille du lot utilisée pour le calcul",
+            "Le nombre de couches du réseau"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le gradient est la pente locale. Un gradient positif signifie que la perte augmente quand le paramètre augmente ; on se déplace donc dans le sens opposé."
+        },
+        {
+          "question": "Pour la perte (w - 3)^2 + 1, quelles valeurs du taux d'apprentissage font converger la descente de gradient ?",
+          "options": [
+            "Les valeurs strictement comprises entre 0 et 1",
+            "Toutes les valeurs positives",
+            "Uniquement la valeur 1",
+            "Les valeurs négatives"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le facteur de contraction vaut |1 - 2η|. Il est strictement inférieur à 1 lorsque 0 < η < 1. Au-delà, la suite diverge ou oscille sans se contracter."
+        },
+        {
+          "question": "Pourquoi la descente de gradient stochastique utilise-t-elle des lots ?",
+          "options": [
+            "Pour estimer le gradient à moindre coût, au prix d'une estimation bruitée",
+            "Pour garantir l'atteinte du minimum global",
+            "Pour supprimer le taux d'apprentissage",
+            "Pour éviter de calculer la fonction de perte"
+          ],
+          "correctIndex": 0,
+          "explanation": "Un lot réduit coûte moins cher qu'un calcul sur toutes les données. Le gradient estimé est bruité, et aucune garantie d'optimum global n'est ajoutée."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Fonction de perte",
+          "definition": "Mesure de l'écart entre les prédictions d'un modèle et les cibles, que l'entraînement cherche à minimiser."
+        },
+        {
+          "term": "Gradient",
+          "definition": "Vecteur des dérivées partielles d'une fonction. Il pointe dans la direction de la plus forte augmentation locale."
+        },
+        {
+          "term": "Taux d'apprentissage",
+          "definition": "Nombre qui fixe la taille du pas appliqué dans la direction opposée au gradient."
+        },
+        {
+          "term": "Descente de gradient",
+          "definition": "Règle de mise à jour qui déplace les paramètres dans la direction opposée au gradient pour réduire la perte."
+        },
+        {
+          "term": "Descente de gradient stochastique",
+          "definition": "Variante qui estime le gradient sur un lot tiré au hasard plutôt que sur l'ensemble des données."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Taux d’apprentissage",
+          "prompt": "Que se passe-t-il si le taux d’apprentissage est trop grand ?",
+          "solution": "Les pas peuvent dépasser le minimum, faire osciller la perte ou diverger. Un taux trop petit ralentit l’apprentissage. Le bon réglage se mesure."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Goodfellow, Bengio et Courville, Deep Learning, MIT Press, 2016.",
+          "href": "https://www.deeplearningbook.org/"
+        },
+        {
+          "label": "Andrej Karpathy, micrograd, dépôt GitHub, consulté le 21 octobre 2026.",
+          "href": "https://github.com/karpathy/micrograd"
+        },
+        {
+          "label": "PyTorch, tutoriel Autograd, consulté le 21 octobre 2026.",
+          "href": "https://docs.pytorch.org/tutorials/beginner/blitz/autograd_tutorial.html"
+        }
+      ]
+    },
+    {
+      "id": "retropropagation",
+      "title": "Rétropropagation, du neurone aux LLM",
+      "keyTakeaways": [
+        "La rétropropagation est une forme de différenciation automatique en mode inverse. Elle parcourt le graphe de calcul de la sortie vers les entrées et applique la règle de chaîne.",
+        "La passe avant conserve les valeurs intermédiaires nécessaires au calcul des gradients. La passe arrière les réutilise, ce qui évite de recalculer tout le réseau pour chaque paramètre.",
+        "Le coût de la rétropropagation est du même ordre que celui de la passe avant, avec un facteur constant. Ce facteur dépend des opérations et de la façon dont les gradients sont accumulés.",
+        "Un produit de dérivées plus petites que 1 fait disparaître le gradient dans les couches profondes. Un produit de dérivées plus grandes que 1 le fait exploser. Les connexions résiduelles, les normalisations et les activations adaptées atténuent ces effets.",
+        "Les grands modèles de langage sont entraînés avec le même algorithme, à une autre échelle. La difficulté se déplace vers la mémoire, le coût de calcul et la stabilité de l'optimisation."
+      ],
+      "theory": "### Le problème du crédit\n\nUn réseau possède de nombreux paramètres. Après une prédiction, il faut savoir comment chaque paramètre a contribué à la perte, afin de le modifier dans le bon sens. Calculer cette contribution paramètre par paramètre serait prohibitif : il faudrait refaire une passe avant pour chaque paramètre. La rétropropagation résout ce problème en calculant tous les gradients en une seule passe arrière.\n\nL'idée repose sur le **graphe de calcul**. Chaque opération du réseau, une multiplication, une addition, une activation, devient un nœud qui reçoit des entrées et produit une sortie. La passe avant évalue les nœuds dans l'ordre. La passe arrière parcourt le graphe dans l'ordre inverse et applique la **règle de chaîne** : la dérivée de la perte par rapport à une entrée d'un nœud est le produit de la dérivée de la perte par rapport à sa sortie et de la dérivée locale de ce nœud.\n\nCette description est celle du tutoriel Autograd de PyTorch et du projet micrograd de Karpathy, qui implémente un moteur d'autodifférenciation sur des valeurs scalaires. Un réseau réel utilise les mêmes principes, avec des tenseurs et des opérations matricielles.\n\n### La règle de chaîne sur un réseau\n\nReprenons un réseau à une couche cachée :\n\n$$A = X W_1 + b_1$$\n$$H = \\tanh(A)$$\n$$\\text{logits} = H W_2 + b_2$$\n$$\\mathcal{L} = \\frac{1}{N} \\sum (\\text{logits} - y)^2$$\n\nLa passe avant calcule $A$, $H$, les logits et la perte. Pour la passe arrière, on part de la dérivée de la perte par rapport aux logits. Pour une perte quadratique moyenne sur $N$ éléments :\n\n$$\\frac{\\partial \\mathcal{L}}{\\partial \\text{logits}} = \\frac{2}{N}(\\text{logits} - y)$$\n\nEnsuite, la règle de chaîne donne :\n\n$$\\frac{\\partial \\mathcal{L}}{\\partial W_2} = H^T \\frac{\\partial \\mathcal{L}}{\\partial \\text{logits}}$$\n$$\\frac{\\partial \\mathcal{L}}{\\partial H} = \\frac{\\partial \\mathcal{L}}{\\partial \\text{logits}} W_2^T$$\n$$\\frac{\\partial \\mathcal{L}}{\\partial A} = \\frac{\\partial \\mathcal{L}}{\\partial H} \\odot (1 - H^2)$$\n$$\\frac{\\partial \\mathcal{L}}{\\partial W_1} = X^T \\frac{\\partial \\mathcal{L}}{\\partial A}$$\n\nLe symbole $\\odot$ désigne le produit élément par élément. Chaque ligne réutilise un gradient déjà calculé. C'est cette réutilisation qui rend la passe arrière efficace : on ne repart pas de la perte pour chaque paramètre.\n\n### Le cache de la passe avant\n\nPour appliquer ces formules, il faut les valeurs de $X$, $H$ et des logits. La passe avant les conserve dans un **cache**. Sans ce cache, la passe arrière devrait recalculer les activations, ce qui doublerait au moins le travail. Le cache a un coût mémoire : pour un grand modèle, les activations intermédiaires occupent une place importante.\n\nPlusieurs techniques réduisent ce coût. Le **gradient checkpointing** ne conserve que certaines activations et recalcule les autres pendant la passe arrière. Il échange de la mémoire contre du calcul. La **recomputation** peut aussi être appliquée à des blocs entiers. Ces choix deviennent nécessaires quand le modèle ne tient pas en mémoire autrement.\n\n### Disparition et explosion du gradient\n\nLa règle de chaîne multiplie des dérivées. Si un réseau a $L$ couches et que chaque couche multiplie le gradient par un facteur inférieur à 1, le produit décroît exponentiellement avec $L$. C'est le **gradient qui disparaît**. Inversement, si les facteurs sont supérieurs à 1, le gradient peut croître exponentiellement : c'est l'**explosion du gradient**.\n\nLa sigmoïde illustre le premier cas. Sa dérivée vaut au plus $0{,}25$ par unité. Un empilement de couches sigmoïdes multiplie le gradient par cette dérivée, au plus $0{,}25$ par unité, et par la matrice de poids de la couche ; les poids peuvent amplifier ou atténuer ce facteur. Quand ils ne compensent pas cette perte, le produit devient très petit après quelques couches. La tangente hyperbolique a une dérivée au plus égale à 1, ce qui est mieux, mais elle sature aussi loin de zéro. La ReLU a une dérivée de 1 pour les valeurs positives, ce qui atténue la disparition, sans la supprimer dans tous les cas.\n\nLes architectures modernes combinent plusieurs réponses. Les connexions résiduelles ajoutent une voie directe qui laisse passer le gradient. Les normalisations stabilisent l'échelle des activations. Les initialisations adaptées évitent de partir avec des facteurs trop grands ou trop petits. Le gradient clipping borne la norme du gradient pour limiter l'explosion. Aucune de ces techniques ne garantit un entraînement réussi, mais elles rendent les réseaux profonds plus faciles à optimiser.\n\n### Des neurones aux modèles de langage\n\nUn modèle de langage est un très grand réseau, souvent fondé sur des blocs Transformer. Il est entraîné par rétropropagation, avec les mêmes règles de chaîne, mais sur des tenseurs de grande taille et avec des optimiseurs adaptés. La différence n'est pas l'algorithme de base, elle est l'échelle : nombre de paramètres, taille des lots, mémoire nécessaire, durée de l'entraînement.\n\nCette continuité est utile à comprendre. Les notions de gradient, de perte et de pas d'apprentissage ne disparaissent pas dans les grands modèles. Elles y prennent simplement des dimensions qui obligent à répartir le calcul sur plusieurs processeurs et à surveiller la stabilité numérique. Les problèmes de gradient qui disparaît ou explose restent présents, et les choix d'architecture cherchent à les contenir.\n\n### Ce que le code montre\n\nLe code ci-dessous construit un petit réseau à une couche cachée en PyTorch, calcule la perte, puis laisse Autograd calculer les gradients. Il vérifie ensuite à la main le gradient de $W_2$ avec la formule $H^T \\partial \\mathcal{L} / \\partial \\text{logits}$. Les deux résultats doivent coïncider, aux erreurs d'arrondi près.",
+      "analogy": {
+        "title": "La remontée d'une chaîne de montage",
+        "text": "Dans une chaîne de montage, chaque poste transforme une pièce. Si la pièce finale est défectueuse, on remonte la chaîne pour savoir quel poste a contribué au défaut. Chaque poste connaît l'effet local de son réglage sur la pièce qu'il transmet, et transmet la responsabilité au poste précédent.\n\n**Limite de l'analogie :** un atelier réel peut désigner un responsable. La rétropropagation répartit la responsabilité mathématiquement, sans intention ni diagnostic. Elle calcule des dérivées, pas des causes au sens humain."
+      },
+      "example": {
+        "title": "La règle de chaîne sur un scalaire",
+        "text": "Prenons $f(x) = (x^2 + 1)^3$ et $x = 2$. La dérivée intérieure vaut $2x = 4$, la dérivée extérieure vaut $3(x^2 + 1)^2 = 3 \\times 25 = 75$, et le produit donne $300$. On retrouve le même enchaînement de facteurs locaux que dans un réseau.\n\n**Ce que cet exemple ne dit pas :** un réseau n'a pas une seule variable ni une seule couche. La règle de chaîne s'y applique à des matrices et à des milliers de paramètres, mais le principe de produit des dérivées locales reste le même."
+      },
+      "diagram": {
+        "title": "Le graphe de calcul et les deux passes",
+        "description": "Schéma illustratif : les opérations de la passe avant, le cache des activations et la remontée des gradients par la règle de chaîne. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Graphe de calcul d'un réseau à une couche cachée, avec passe avant, cache et passe arrière\">\n  <defs>\n    <marker id=\"fleche-avant\" markerWidth=\"9\" markerHeight=\"9\" refX=\"8\" refY=\"4.5\" orient=\"auto\">\n      <path d=\"M0,0 L9,4.5 L0,9 Z\" fill=\"#38bdf8\"/>\n    </marker>\n    <marker id=\"fleche-arriere\" markerWidth=\"9\" markerHeight=\"9\" refX=\"8\" refY=\"4.5\" orient=\"auto\">\n      <path d=\"M0,0 L9,4.5 L0,9 Z\" fill=\"#fb7185\"/>\n    </marker>\n  </defs>\n  <rect width=\"800\" height=\"440\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Un graphe de calcul, deux passes</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"passe-avant\">\n    <g fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\">\n      <rect x=\"40\" y=\"100\" width=\"80\" height=\"46\" rx=\"8\"/>\n      <rect x=\"180\" y=\"100\" width=\"80\" height=\"46\" rx=\"8\"/>\n      <rect x=\"320\" y=\"100\" width=\"80\" height=\"46\" rx=\"8\"/>\n      <rect x=\"460\" y=\"100\" width=\"90\" height=\"46\" rx=\"8\"/>\n      <rect x=\"610\" y=\"100\" width=\"120\" height=\"46\" rx=\"8\"/>\n    </g>\n    <text x=\"80\" y=\"128\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">X, W1, b1</text>\n    <text x=\"220\" y=\"128\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">A</text>\n    <text x=\"360\" y=\"128\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">H = tanh(A)</text>\n    <text x=\"505\" y=\"128\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">logits</text>\n    <text x=\"670\" y=\"128\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">perte L</text>\n\n    <g stroke=\"#38bdf8\" stroke-width=\"2\" marker-end=\"url(#fleche-avant)\">\n      <line x1=\"120\" y1=\"123\" x2=\"180\" y2=\"123\"/>\n      <line x1=\"260\" y1=\"123\" x2=\"320\" y2=\"123\"/>\n      <line x1=\"400\" y1=\"123\" x2=\"460\" y2=\"123\"/>\n      <line x1=\"550\" y1=\"123\" x2=\"610\" y2=\"123\"/>\n    </g>\n    <text x=\"400\" y=\"82\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">passe avant</text>\n  </g>\n\n  <g id=\"cache\">\n    <rect x=\"180\" y=\"190\" width=\"280\" height=\"70\" rx=\"10\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"1.5\" stroke-dasharray=\"5,3\"/>\n    <text x=\"320\" y=\"216\" fill=\"#fcd34d\" font-size=\"12\" text-anchor=\"middle\">cache des activations</text>\n    <text x=\"320\" y=\"238\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">A, H, logits conservés pour la passe arrière</text>\n    <g stroke=\"#fbbf24\" stroke-width=\"1.5\" stroke-dasharray=\"3,3\">\n      <line x1=\"220\" y1=\"146\" x2=\"220\" y2=\"190\"/>\n      <line x1=\"360\" y1=\"146\" x2=\"360\" y2=\"190\"/>\n      <line x1=\"505\" y1=\"146\" x2=\"460\" y2=\"190\"/>\n    </g>\n  </g>\n\n  <g id=\"passe-arriere\">\n    <g stroke=\"#fb7185\" stroke-width=\"2\" marker-end=\"url(#fleche-arriere)\">\n      <line x1=\"610\" y1=\"300\" x2=\"550\" y2=\"300\"/>\n      <line x1=\"460\" y1=\"300\" x2=\"400\" y2=\"300\"/>\n      <line x1=\"320\" y1=\"300\" x2=\"260\" y2=\"300\"/>\n      <line x1=\"180\" y1=\"300\" x2=\"120\" y2=\"300\"/>\n    </g>\n    <text x=\"400\" y=\"276\" fill=\"#fda4af\" font-size=\"11\" text-anchor=\"middle\">passe arrière</text>\n    <g fill=\"#0f172a\" stroke=\"#fb7185\" stroke-width=\"1.5\">\n      <rect x=\"550\" y=\"282\" width=\"60\" height=\"36\" rx=\"6\"/>\n      <rect x=\"400\" y=\"282\" width=\"60\" height=\"36\" rx=\"6\"/>\n      <rect x=\"260\" y=\"282\" width=\"60\" height=\"36\" rx=\"6\"/>\n      <rect x=\"120\" y=\"282\" width=\"60\" height=\"36\" rx=\"6\"/>\n    </g>\n    <text x=\"580\" y=\"305\" fill=\"#fecdd3\" font-size=\"10\" text-anchor=\"middle\">dL/dlogits</text>\n    <text x=\"430\" y=\"305\" fill=\"#fecdd3\" font-size=\"10\" text-anchor=\"middle\">dL/dH</text>\n    <text x=\"290\" y=\"305\" fill=\"#fecdd3\" font-size=\"10\" text-anchor=\"middle\">dL/dA</text>\n    <text x=\"150\" y=\"305\" fill=\"#fecdd3\" font-size=\"10\" text-anchor=\"middle\">dL/dW1</text>\n    <text x=\"400\" y=\"360\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">chaque nœud multiplie le gradient reçu par sa dérivée locale</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. La passe avant",
+            "explanation": "Les opérations sont évaluées dans l'ordre, des entrées vers la perte. Chaque nœud produit une valeur qui sert au nœud suivant.",
+            "highlight": [
+              "passe-avant"
+            ]
+          },
+          {
+            "title": "2. Le cache",
+            "explanation": "Les activations intermédiaires sont conservées. La passe arrière les réutilisera pour calculer les dérivées locales sans tout recalculer.",
+            "highlight": [
+              "cache"
+            ]
+          },
+          {
+            "title": "3. La passe arrière",
+            "explanation": "Le gradient de la perte remonte de nœud en nœud. À chaque étape, il est multiplié par la dérivée locale, ce qui applique la règle de chaîne.",
+            "highlight": [
+              "passe-arriere"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Petit réseau à une couche cachée en PyTorch. Autograd calcule les gradients, puis le script vérifie à la main le gradient de W2 avec la formule H transposée fois le gradient des logits.",
+        "code": "import torch\n\nX = torch.tensor([[1.0, 2.0], [3.0, -1.0]], dtype=torch.float64)\ny = torch.tensor([[1.0], [0.0]], dtype=torch.float64)\n\nW1 = torch.tensor([[0.5, -0.2, 0.1], [0.3, 0.4, -0.5]], dtype=torch.float64, requires_grad=True)\nb1 = torch.tensor([0.1, -0.1, 0.0], dtype=torch.float64, requires_grad=True)\nW2 = torch.tensor([[0.7], [-0.4], [0.2]], dtype=torch.float64, requires_grad=True)\nb2 = torch.tensor([0.05], dtype=torch.float64, requires_grad=True)\n\nH = torch.tanh(X @ W1 + b1)\nlogits = H @ W2 + b2\nloss = ((logits - y) ** 2).mean()\nloss.backward()\n\n# Vérification manuelle du gradient de W2 :\n# dL/dlogits = 2 (logits - y) / nombre d'éléments, puis dL/dW2 = H^T dL/dlogits.\ndlogits = 2.0 * (logits - y) / y.numel()\nW2_manual = H.T @ dlogits\nprint(\"perte :\", round(loss.item(), 6))\nprint(\"gradient autograd de W2 :\", W2.grad.flatten().tolist())\nprint(\"gradient manuel de W2   :\", W2_manual.detach().flatten().tolist())\nprint(\"écart maximal :\", (W2.grad - W2_manual).abs().max().item())",
+        "output": "perte : 0.853052\ngradient autograd de W2 : [0.3742361946568117, -1.206485209193344, 1.2320696285061605]\ngradient manuel de W2   : [0.3742361946568117, -1.206485209193344, 1.2320696285061605]\nécart maximal : 0.0",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Que fait la règle de chaîne lors de la passe arrière ?",
+          "options": [
+            "Elle multiplie le gradient reçu par la dérivée locale de chaque opération, en remontant le graphe",
+            "Elle recommence la passe avant pour chaque paramètre",
+            "Elle choisit un taux d'apprentissage automatiquement",
+            "Elle supprime les activations négatives"
+          ],
+          "correctIndex": 0,
+          "explanation": "Chaque nœud connaît sa dérivée locale. La règle de chaîne combine cette dérivée avec le gradient qui vient de l'aval, ce qui évite de recalculer tout le réseau."
+        },
+        {
+          "question": "Pourquoi la passe avant conserve-t-elle un cache d'activations ?",
+          "options": [
+            "Pour réutiliser les valeurs intermédiaires dans le calcul des gradients sans les recalculer",
+            "Pour stocker les étiquettes du jeu de test",
+            "Pour éviter d'utiliser un optimiseur",
+            "Pour empêcher le gradient de disparaître"
+          ],
+          "correctIndex": 0,
+          "explanation": "Les dérivées locales dépendent des valeurs calculées pendant la passe avant. Le cache évite de les recalculer, au prix d'une consommation de mémoire."
+        },
+        {
+          "question": "Pourquoi un gradient peut-il disparaître dans un réseau profond ?",
+          "options": [
+            "Parce que la règle de chaîne multiplie des dérivées plus petites que 1 couche après couche, ce qui rend le produit très petit",
+            "Parce que la perte devient toujours nulle après quelques couches",
+            "Parce que les poids sont initialisés à zéro",
+            "Parce que la rétropropagation ne visite que la dernière couche"
+          ],
+          "correctIndex": 0,
+          "explanation": "Un produit de facteurs inférieurs à 1 décroît avec le nombre de couches. C'est le gradient qui disparaît. Les connexions résiduelles et les activations adaptées atténuent ce phénomène."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Rétropropagation",
+          "definition": "Algorithme qui calcule les gradients de la perte par rapport à tous les paramètres en parcourant le graphe de calcul de la sortie vers les entrées."
+        },
+        {
+          "term": "Règle de chaîne",
+          "definition": "Règle de dérivation qui multiplie les dérivées locales le long d'une composition de fonctions."
+        },
+        {
+          "term": "Graphe de calcul",
+          "definition": "Représentation des opérations d'un modèle sous forme de nœuds reliés par des dépendances."
+        },
+        {
+          "term": "Gradient qui disparaît",
+          "definition": "Situation où le gradient devient très petit dans les couches profondes, ce qui ralentit ou bloque leur apprentissage."
+        },
+        {
+          "term": "Autodifférenciation",
+          "definition": "Calcul automatique des dérivées d'une fonction à partir de sa représentation sous forme de programme ou de graphe."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Règle de chaîne",
+          "prompt": "Pourquoi la rétropropagation peut-elle calculer le gradient de couches profondes ?",
+          "solution": "Elle applique la règle de chaîne couche par couche, en réutilisant les gradients aval. Chaque couche reçoit le gradient de la perte par rapport à sa sortie."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Goodfellow, Bengio et Courville, Deep Learning, MIT Press, 2016.",
+          "href": "https://www.deeplearningbook.org/"
+        },
+        {
+          "label": "PyTorch, tutoriel Autograd, consulté le 21 octobre 2026.",
+          "href": "https://docs.pytorch.org/tutorials/beginner/blitz/autograd_tutorial.html"
+        },
+        {
+          "label": "Andrej Karpathy, micrograd, dépôt GitHub, consulté le 21 octobre 2026.",
+          "href": "https://github.com/karpathy/micrograd"
+        }
+      ]
+    },
+    {
+      "id": "reseau-aux-llm",
+      "title": "Du réseau jouet aux LLM",
+      "keyTakeaways": [
+        "Un réseau jouet et un LLM partagent des briques : tenseurs, couches, non-linéarités, gradient et optimisation.",
+        "Le passage à l’échelle change les coûts, les données, l’architecture et les modes d’échec.",
+        "Un Transformer remplace la récurrence par l’attention et traite des séquences de tokens.",
+        "Les mêmes principes de mesure, de séparation des données et de vérification restent valables.",
+        "Un petit réseau reste un bon laboratoire pour comprendre, mais il ne prédit pas le comportement d’un LLM."
+      ],
+      "theory": "### Ce qui ne change pas\n\nUn réseau de neurones jouet et un grand modèle de langage partagent une chaîne : des entrées numériques, des couches paramétrées, des non-linéarités, une fonction de perte, un gradient et un optimiseur. Un tenseur reste un tableau de nombres. Une multiplication de matrices reste une multiplication de matrices. La rétropropagation reste la règle de dérivation en chaîne.\n\nLes principes de méthode ne changent pas non plus. Il faut séparer entraînement, validation et test. Il faut éviter les fuites de données. Il faut mesurer sur des exemples représentatifs et vérifier les cas difficiles. Un réseau qui réussit sur ses exemples d'entraînement ne prouve pas qu'il généralise.\n\n### Ce qui change avec l'échelle\n\nUn LLM a des milliards de paramètres, un vocabulaire de dizaines de milliers de tokens et des séquences longues. Les coûts de mémoire et de calcul augmentent. L'architecture change : les Transformers empilent des blocs d'attention et de réseaux feed-forward. L'attention permet à chaque token de lire les autres tokens de la séquence, avec un coût qui croît avec le carré de la longueur.\n\nLe pré-entraînement prédit le token suivant sur de grands corpus. Il apprend des régularités statistiques, pas une base de faits vérifiée. Le fine-tuning et les préférences adaptent le comportement. Le RAG apporte des documents au moment de la question. Les outils et les agents ajoutent des actions. Chaque étape a ses propres données et ses propres risques.\n\n### Le Transformer en une page\n\nUn Transformer tokenise le texte, projette chaque token en vecteur, ajoute une information de position, puis applique des couches d'attention et de feed-forward. L'attention compare chaque token aux autres avec des requêtes, des clés et des valeurs. Le masque causal empêche de lire les tokens futurs pendant l'entraînement autorégressif. La normalisation et les connexions résiduelles stabilisent l'empilement.\n\nUn LLM utilise un décodeur autorégressif : il génère un token à la fois, puis le réinjecte. La température, le top-p et le décodage contraint modifient l'échantillonnage. La fenêtre de contexte limite ce que le modèle peut lire. Le cache KV évite de recalculer les tokens déjà vus, au prix de mémoire.\n\n### Les modes d'échec\n\nUn réseau jouet peut surapprendre, diverger ou être mal initialisé. Un LLM peut halluciner, suivre une instruction adverse, produire un format invalide ou refuser une demande légitime. Il peut aussi être sensible à la formulation, à la langue et à la longueur du contexte. Ces échecs ne se réduisent pas à une courbe de perte.\n\nLa mesure d'un LLM est plus difficile qu'une accuracy sur un jeu étiqueté. Les réponses ouvertes demandent des juges, des grilles et des tests humains. Les benchmarks publics peuvent être contaminés. Les coûts et la latence font partie de l'évaluation. Un modèle peut être meilleur sur un banc et moins utile dans un produit.\n\n### Du laboratoire au produit\n\nLe petit réseau reste utile pour apprendre. On peut y voir un gradient, une activation, un surapprentissage et une frontière de décision. On peut modifier un hyperparamètre et observer l'effet. Ces intuitions se transposent partiellement aux LLM, mais les ordres de grandeur et les modes d'échec changent.\n\nPour un projet réel, il faut choisir un modèle, un contexte, une stratégie d'évaluation et un budget. Un petit modèle peut suffire pour une classification ; un LLM est utile pour un texte ouvert. Un système hybride peut router avec un petit modèle et générer avec un grand. La simplicité reste une vertu.\n\n### Ce que le laboratoire ne montre pas\n\nUn petit réseau ne montre ni la dynamique d’un pré-entraînement à grande échelle, ni les coûts de l’attention sur de longues séquences, ni les modes d’échec d’un modèle de langage. Il ne permet pas de conclure qu’un LLM comprend, ni qu’il est fiable. Il reste utile pour voir un gradient, une activation et une frontière de décision. Ces mécanismes se retrouvent dans les grands modèles, mais leur comportement dépend de l’échelle et des données.\n\nLa bonne question n’est donc pas de savoir si le petit réseau « pense », mais ce qu’il calcule et sur quelles données. Cette distinction évite les analogies trompeuses et garde la mesure au centre.\n\n> **Repère.** Le réseau jouet n'est pas un LLM miniature. C'est un laboratoire pour comprendre les mécanismes, pas une preuve de ce que fera un modèle à grande échelle.",
+      "diagram": {
+        "title": "Du neurone au Transformer",
+        "description": "Schéma illustratif : les briques du réseau jouet se retrouvent dans un LLM, avec d’autres coûts et d’autres échecs.",
+        "svg": "<svg viewBox=\"0 0 900 370\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Schéma illustratif : du réseau jouet au modèle de langage\">\n  <defs><marker id=\"net8-arrow\" markerWidth=\"9\" markerHeight=\"7\" refX=\"7\" refY=\"3.5\" orient=\"auto\"><path d=\"M0,0 L9,3.5 L0,7 z\" fill=\"#38bdf8\" /></marker></defs>\n  <rect width=\"900\" height=\"370\" rx=\"16\" fill=\"#0f172a\" />\n  <text x=\"450\" y=\"32\" fill=\"#7dd3fc\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"16\" text-anchor=\"middle\">Mêmes briques, autre échelle</text>\n  <g id=\"net8-neuron\"><rect x=\"30\" y=\"70\" width=\"180\" height=\"100\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" /><text x=\"120\" y=\"100\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">Neurone</text><text x=\"120\" y=\"124\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">poids, biais</text><text x=\"120\" y=\"144\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">activation</text></g>\n  <g id=\"net8-layer\"><rect x=\"240\" y=\"70\" width=\"180\" height=\"100\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#34d399\" /><text x=\"330\" y=\"100\" fill=\"#a7f3d0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">Couches</text><text x=\"330\" y=\"124\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">tenseurs</text><text x=\"330\" y=\"144\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">propagation avant</text></g>\n  <g id=\"net8-attention\"><rect x=\"450\" y=\"70\" width=\"180\" height=\"100\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#a78bfa\" /><text x=\"540\" y=\"100\" fill=\"#ede9fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">Attention</text><text x=\"540\" y=\"124\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">contexte global</text><text x=\"540\" y=\"144\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">coût quadratique</text></g>\n  <g id=\"net8-llm\"><rect x=\"660\" y=\"70\" width=\"210\" height=\"100\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#fbbf24\" /><text x=\"765\" y=\"100\" fill=\"#fde68a\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"13\" text-anchor=\"middle\">LLM</text><text x=\"765\" y=\"124\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">milliards de paramètres</text><text x=\"765\" y=\"144\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">tokens et contexte</text></g>\n  <path d=\"M212,120 L238,120\" stroke=\"#38bdf8\" stroke-width=\"2\" fill=\"none\" marker-end=\"url(#net8-arrow)\" /><path d=\"M422,120 L448,120\" stroke=\"#38bdf8\" stroke-width=\"2\" fill=\"none\" marker-end=\"url(#net8-arrow)\" /><path d=\"M632,120 L658,120\" stroke=\"#38bdf8\" stroke-width=\"2\" fill=\"none\" marker-end=\"url(#net8-arrow)\" />\n  <g id=\"net8-failures\"><rect x=\"85\" y=\"225\" width=\"730\" height=\"80\" rx=\"10\" fill=\"#2a2415\" stroke=\"#fbbf24\" /><text x=\"450\" y=\"253\" fill=\"#fde68a\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Les modes d'échec changent</text><text x=\"450\" y=\"277\" fill=\"#fef3c7\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">surapprentissage, divergence, hallucination, injection, format, refus</text><text x=\"450\" y=\"297\" fill=\"#fef3c7\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Mesurer sur des cas réels, pas seulement sur la perte.</text></g>\n</svg>",
+        "steps": [
+          {
+            "title": "Les briques communes",
+            "explanation": "Neurone, couche, tenseur et gradient se retrouvent dans les deux échelles.",
+            "highlight": [
+              "net8-neuron",
+              "net8-layer"
+            ]
+          },
+          {
+            "title": "Le changement d’architecture",
+            "explanation": "Le Transformer ajoute l’attention et le contexte global, avec un coût qui dépend de la longueur.",
+            "highlight": [
+              "net8-attention",
+              "net8-llm"
+            ]
+          },
+          {
+            "title": "Les nouveaux échecs",
+            "explanation": "Hallucination, injection, format et refus ne se lisent pas dans une simple courbe d’entraînement.",
+            "highlight": [
+              "net8-failures"
+            ]
+          }
+        ]
+      },
+      "example": {
+        "title": "Réutiliser un petit modèle",
+        "text": "**Scénario illustratif.** Une équipe doit classer des messages en trois catégories. Un petit réseau ou un modèle pré-entraîné suffit, avec un jeu de test et une mesure par classe. Elle n'a pas besoin d'un LLM génératif pour choisir une catégorie. Le LLM devient utile pour rédiger une réponse ou expliquer la décision. La même logique de séparation des données s'applique aux deux."
+      },
+      "quiz": [
+        {
+          "question": "Qu’est-ce qui distingue un Transformer d’un réseau récurrent ?",
+          "options": [
+            "Il n’a pas de paramètres",
+            "Il utilise l’attention pour relier les tokens d’une séquence",
+            "Il n'utilise pas de gradient",
+            "Il ne traite que des images"
+          ],
+          "correctIndex": 1,
+          "explanation": "L’attention relie les positions de la séquence. Le coût dépend de la longueur et de la taille du modèle."
+        },
+        {
+          "question": "Pourquoi un petit réseau ne prédit-il pas le comportement d’un LLM ?",
+          "options": [
+            "Parce qu’il n’a pas de poids",
+            "Parce que l’échelle, les données et les modes d’échec changent",
+            "Parce qu’il ne peut pas apprendre",
+            "Parce qu’il n’a pas de fonction de perte"
+          ],
+          "correctIndex": 1,
+          "explanation": "Les mécanismes se ressemblent, mais les coûts, les données et les erreurs à grande échelle sont différents."
+        },
+        {
+          "question": "Que reste-t-il utile de mesurer sur un LLM ?",
+          "options": [
+            "Uniquement le nombre de paramètres",
+            "La qualité sur des cas réels, la latence, le coût et les modes d’échec",
+            "Uniquement la perte d’entraînement",
+            "Le nombre de couches"
+          ],
+          "correctIndex": 1,
+          "explanation": "La perte d’entraînement ne suffit pas. Il faut évaluer l’usage, les erreurs et le coût."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Token",
+          "definition": "Unité de texte traitée par un modèle de langage."
+        },
+        {
+          "term": "Attention",
+          "definition": "Mécanisme qui pondère les relations entre les positions d’une séquence."
+        },
+        {
+          "term": "Contexte",
+          "definition": "Nombre de tokens qu’un modèle peut lire dans un appel."
+        },
+        {
+          "term": "Hallucination",
+          "definition": "Affirmation générée qui paraît plausible mais n’est pas fondée."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Choisir un modèle",
+          "prompt": "Une équipe veut classer 10 000 messages en trois catégories, sur CPU, avec une latence de 50 ms. Faut-il un LLM génératif ou un petit modèle spécialisé ?",
+          "solution": "Un petit modèle spécialisé ou un encodeur pré-entraîné suffit souvent pour une classification bornée. Un LLM génératif ajoute du texte, de la latence et du coût. Il peut rester utile pour expliquer une décision, pas pour la produire seule."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Goodfellow, Bengio et Courville, Deep Learning, MIT Press, 2016.",
+          "href": "https://www.deeplearningbook.org/"
+        },
+        {
+          "label": "Stanford CS231n, notes sur les réseaux de neurones, consulté le 21 octobre 2026.",
+          "href": "https://cs231n.github.io/neural-networks-1/"
+        },
+        {
+          "label": "TensorFlow Playground, outil interactif, consulté le 21 octobre 2026.",
+          "href": "https://playground.tensorflow.org/"
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "label": "TensorFlow Playground, outil interactif, consulté le 21 octobre 2026.",
+      "href": "https://playground.tensorflow.org/"
+    },
+    {
+      "label": "Goodfellow, Bengio et Courville, Deep Learning, MIT Press, 2016.",
+      "href": "https://www.deeplearningbook.org/"
+    },
+    {
+      "label": "PyTorch, tutoriel Autograd, consulté le 21 octobre 2026.",
+      "href": "https://docs.pytorch.org/tutorials/beginner/blitz/autograd_tutorial.html"
+    },
+    {
+      "label": "Stanford CS231n, notes sur les réseaux de neurones, consulté le 21 octobre 2026.",
+      "href": "https://cs231n.github.io/neural-networks-1/"
+    },
+    {
+      "label": "Andrej Karpathy, micrograd, dépôt GitHub, consulté le 21 octobre 2026.",
+      "href": "https://github.com/karpathy/micrograd"
+    }
+  ],
+  "related": [
+    {
+      "to": "/cours/bases-mathematiques-ia",
+      "title": "Cours : les bases mathématiques de l'IA",
+      "description": "Dérivées, gradient et algèbre linéaire, les outils utilisés dans les modules 3 à 7."
+    },
+    {
+      "to": "/cours/deep-learning-pratique",
+      "title": "Cours : le deep learning en pratique",
+      "description": "Le passage au projet complet, avec PyTorch, les données et la boucle d'entraînement."
+    },
+    {
+      "to": "/simulateur-ia",
+      "title": "Simulateur d'entraînement IA",
+      "description": "Manipuler un petit réseau dans le navigateur et observer l'effet du taux d'apprentissage et de la régularisation."
+    }
+  ]
+}

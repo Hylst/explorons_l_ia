@@ -1,0 +1,899 @@
+{
+  "slug": "flow-matching",
+  "title": "Flow Matching : générer des images en suivant un champ de vecteurs",
+  "subtitle": "Des trajectoires continues entre bruit et données, et ce qu'elles changent pour l'entraînement et l'échantillonnage",
+  "level": "Avancé",
+  "tags": [
+    "Flow Matching",
+    "Rectified Flow",
+    "ODE",
+    "Diffusion",
+    "Transport optimal",
+    "Génération d'images"
+  ],
+  "summary": "Le Flow Matching apprend un champ de vitesses qui transporte du bruit vers des données en intégrant une équation différentielle ordinaire. Ce cours explique les couplages, la cible conditionnelle, le reflow, les solveurs et les différences avec la diffusion, sans attribuer au modèle plus qu'il ne calcule.",
+  "introduction": "Les modèles génératifs d'images sont souvent présentés comme des réseaux qui transforment un bruit en image. Derrière cette description se cache une question précise : quel chemin suit le bruit, et quelle quantité le réseau doit-il apprendre ? Le Flow Matching répond en définissant un champ de vitesses et une équation différentielle ordinaire. On part d'une gaussienne, on avance le long du champ, et l'on arrive à une distribution proche des données.\n\nCe cours s'adresse à un lecteur qui a déjà rencontré une diffusion et qui accepte de lire quelques formules. Il ne demande pas de connaître la théorie du transport optimal ni les solveurs numériques en détail. Les modules construisent d'abord l'intuition du flot, puis le couplage, la perte conditionnelle, le reflow et l'intégration. L'avant-dernier module compare Flow Matching et diffusion, y compris lorsque les deux familles se ressemblent.\n\nÀ la fin, le lecteur saura expliquer ce que prédit le réseau, pourquoi la cible dépend du chemin et du couplage, ce que le reflow change réellement, et pourquoi le nombre de pas d'un solveur n'est pas une propriété intrinsèque du modèle.",
+  "prerequisites": [
+    "Bases des équations différentielles ordinaires",
+    "Notions de probabilités",
+    "Avoir lu un schéma de diffusion",
+    "Python scientifique débutant"
+  ],
+  "checkedOn": "2026-10-26",
+  "cover": {
+    "src": "pics/cours/flow-matching.webp",
+    "alt": "Champ de flèches guidant des particules vers une forme nette, métaphore du Flow Matching."
+  },
+  "modules": [
+    {
+      "id": "intuition",
+      "title": "L'intuition du flot",
+      "keyTakeaways": [
+        "Un flot continu est décrit par un champ de vitesses, pas par une trajectoire unique : le réseau apprend une fonction $v_\\theta(x,t)$ partagée par tous les points.",
+        "L'échantillonnage intègre une équation différentielle ordinaire du bruit $t=0$ vers les données $t=1$ ; l'entraînement, lui, régresse une vitesse sans simuler cette ODE.",
+        "Le Flow Matching peut utiliser un chemin de diffusion ou un chemin linéaire ; un chemin de diffusion est donc un cas particulier de chemin possible, pas l'opposé du Flow Matching.",
+        "Les chemins conditionnels droits ne garantissent pas des trajectoires marginales droites : le couplage et la moyenne conditionnelle déterminent la courbure."
+      ],
+      "theory": "### Un déplacement continu\n\nUn modèle génératif cherche à produire des échantillons qui ressemblent aux données sans les recopier. Le Flow Matching décrit cette production comme un déplacement continu. On part d'une distribution simple $p_0$, souvent une gaussienne, et on veut atteindre la distribution des données $p_1$. Un champ de vitesses $v(x,t)$ donne, en chaque point $x$ et à chaque instant $t$, la vitesse à suivre. Une particule obéit alors à l'équation différentielle ordinaire\n\n$$ \\frac{dx}{dt}=v(x,t). $$\n\nSi l'on tire $x(0)\\sim p_0$ et qu'on intègre jusqu'à $t=1$, on obtient $x(1)$. Le champ est appris pour que la loi de $x(1)$ ressemble à $p_1$. Cette formulation contraste avec un réseau qui produirait une image en une seule passe : ici, la génération est un calcul numérique répété, et le réseau fournit seulement la vitesse locale.\n\nLe mot « flot » désigne la famille de transformations $\\phi_t$ engendrée par le champ. Partant de $x_0$, la trajectoire vérifie\n\n$$ \\phi_t(x_0)=x_0+\\int_0^t v(\\phi_s(x_0),s)\\,ds. $$\n\nLa loi transportée est $p_t=(\\phi_t)_\\# p_0$. Dire que le flot transporte $p_0$ vers $p_1$ signifie que $p_0$ est la loi au temps zéro et $p_1$ la loi au temps un. Aucune couche cachée ne « contient » l'image : l'image est le résultat de l'intégration.\n\n### Le champ n'est pas une trajectoire\n\nUne trajectoire est la courbe d'une particule particulière. Le champ est la règle qui donne une vitesse en chaque point, indépendamment de la particule qui passe. Plusieurs trajectoires peuvent traverser la même région à des instants différents, et le champ peut dépendre du temps. Cette distinction est essentielle pour lire les schémas : les flèches du champ ne sont pas les trajectoires ; elles indiquent seulement la direction et la vitesse locales.\n\nLe réseau de neurones $v_\\theta(x,t)$ approxime ce champ. Il prend un point et un temps, pas un identifiant de trajectoire. À l'échantillonnage, on lui demande une vitesse, on avance d'un petit pas, puis on recommence. La qualité du résultat dépend notamment de deux erreurs : l'erreur d'approximation du réseau et l'erreur du solveur qui intègre l'ODE.\n\n### D'où vient la cible ?\n\nÀ l'entraînement, on dispose d'échantillons de bruit $x_0$ et d'échantillons de données $x_1$. On ne connaît pas la trajectoire qui relie un $x_0$ donné à un $x_1$ donné : le couplage n'est pas fourni par les données. Une idée simple consiste à fabriquer un chemin conditionnel entre chaque paire, par exemple\n\n$$ x_t=(1-t)x_0+t x_1, \\qquad u_t=x_1-x_0. $$\n\nLe vecteur $u_t$ est la vitesse de ce chemin. On entraîne le réseau à prédire $u_t$ à partir de $x_t$ et de $t$. Le chemin est droit pour chaque paire, mais le champ appris est une moyenne conditionnelle : au même point $x_t$, plusieurs paires peuvent passer avec des vitesses différentes. Le réseau apprend donc la vitesse moyenne, pas une trajectoire individuelle. Ce point sera détaillé dans les modules suivants.\n\n### Pourquoi le temps est indispensable\n\nLe temps joue deux rôles. Il définit la progression entre bruit et données, et il rend le champ non autonome : un même point peut devoir aller dans deux directions différentes selon l'instant. Si l'on supprime $t$, le champ devient ambigu dès que les trajectoires se croisent. Le temps est aussi l'axe d'intégration : changer de convention, par exemple partir des données et aller vers le bruit, inverse le signe de la vitesse.\n\nCette convention doit être vérifiée avant de comparer deux articles. Dans ce cours, $t=0$ correspond au bruit et $t=1$ aux données, sauf mention contraire. Les formules de la littérature utilisent parfois l'ordre inverse, ce qui ne change pas la nature du problème mais change les signes et les bornes.\n\n### Flow Matching et diffusion\n\nUne diffusion de type DDPM (Ho, Jain et Abbeel, 2020) part des données, ajoute du bruit selon une chaîne de Markov fixée, puis apprend à inverser cette chaîne. Le Flow Matching part du bruit, choisit un chemin vers les données et apprend un champ de vitesses. Les deux familles peuvent se rejoindre : l'ODE de probabilité d'une diffusion est une ODE déterministe qui transporte les mêmes marginales, et le Flow Matching peut apprendre un champ le long d'un chemin de diffusion. Lipman et al. (2022) montrent que les chemins de diffusion sont des cas particuliers de leur cadre.\n\nLa différence principale n'est donc pas « ODE contre réseau » ni « déterministe contre aléatoire ». Elle porte sur la construction de la cible, le choix du chemin et du couplage, et la manière d'échantillonner. Le Flow Matching n'est pas une négation de la diffusion ; c'est une méthode d'entraînement de flots continus qui peut reprendre certains de ses chemins, ou en choisir de plus simples.\n\n### Ce que l'on peut attendre\n\nLe Flow Matching a une formulation concise : une ODE, une perte quadratique, un réseau. Cette simplicité ne garantit pas un bon modèle. Un champ peut être appris avec une faible perte moyenne et produire des échantillons décevants, surtout si les queues de distribution ou les modes rares sont mal représentés. L'échantillonnage avec peu de pas ajoute une erreur de discrétisation, et le choix du couplage modifie la forme des trajectoires.\n\nLe fil du cours est le suivant : construire un couplage, définir une cible conditionnelle, entraîner un champ, redresser les trajectoires avec le reflow, puis intégrer avec un solveur. L'avant-dernier module compare cette approche à la diffusion et examine ce que l'on peut réellement conclure des évaluations.",
+      "diagram": {
+        "title": "Du bruit aux données par un champ de vitesses",
+        "description": "Schéma illustratif : un nuage de bruit à gauche, un champ de flèches au centre et des trajectoires qui rejoignent une forme de données à droite. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 420\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Bruit, champ de vitesses et trajectoires vers les données\">\n  <defs>\n    <marker id=\"fm-intuition-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"420\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Un transport continu du bruit vers les données</text>\n  <text x=\"410\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"bruit\">\n    <circle cx=\"120\" cy=\"220\" r=\"66\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <g fill=\"#7dd3fc\">\n      <circle cx=\"95\" cy=\"195\" r=\"4\"/><circle cx=\"120\" cy=\"185\" r=\"4\"/><circle cx=\"145\" cy=\"200\" r=\"4\"/>\n      <circle cx=\"88\" cy=\"225\" r=\"4\"/><circle cx=\"112\" cy=\"220\" r=\"4\"/><circle cx=\"138\" cy=\"230\" r=\"4\"/>\n      <circle cx=\"100\" cy=\"250\" r=\"4\"/><circle cx=\"125\" cy=\"255\" r=\"4\"/><circle cx=\"150\" cy=\"245\" r=\"4\"/>\n    </g>\n    <text x=\"120\" y=\"314\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">p0, bruit</text>\n  </g>\n\n  <g id=\"champ\" stroke=\"#fbbf24\" stroke-width=\"2\" marker-end=\"url(#fm-intuition-arrow)\">\n    <line x1=\"250\" y1=\"170\" x2=\"300\" y2=\"170\"/>\n    <line x1=\"250\" y1=\"205\" x2=\"300\" y2=\"205\"/>\n    <line x1=\"250\" y1=\"240\" x2=\"300\" y2=\"240\"/>\n    <line x1=\"250\" y1=\"275\" x2=\"300\" y2=\"275\"/>\n    <line x1=\"330\" y1=\"155\" x2=\"380\" y2=\"155\"/>\n    <line x1=\"330\" y1=\"195\" x2=\"380\" y2=\"195\"/>\n    <line x1=\"330\" y1=\"235\" x2=\"380\" y2=\"235\"/>\n    <line x1=\"330\" y1=\"275\" x2=\"380\" y2=\"275\"/>\n  </g>\n  <text x=\"315\" y=\"330\" fill=\"#fcd34d\" font-size=\"12\" text-anchor=\"middle\">v(x,t)</text>\n\n  <g id=\"trajectoires\" fill=\"none\" stroke-width=\"2.5\">\n    <path d=\"M186 200 C 300 120, 420 145, 566 190\" stroke=\"#38bdf8\"/>\n    <path d=\"M186 220 C 330 230, 430 190, 566 210\" stroke=\"#818cf8\"/>\n    <path d=\"M186 240 C 300 320, 430 285, 566 230\" stroke=\"#c084fc\"/>\n  </g>\n\n  <g id=\"donnees\">\n    <rect x=\"566\" y=\"150\" width=\"150\" height=\"130\" rx=\"28\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"2.5\"/>\n    <path d=\"M595 215 L 635 175 L 675 215 L 655 235 L 615 235 Z\" fill=\"#34d399\" opacity=\"0.35\"/>\n    <circle cx=\"641\" cy=\"205\" r=\"10\" fill=\"#a7f3d0\"/>\n    <text x=\"641\" y=\"314\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">p1, données</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Le point de départ",
+            "explanation": "On tire un échantillon dans une loi simple, ici un nuage gaussien. Cet échantillon est le point de départ d'une trajectoire, pas encore une image.",
+            "highlight": [
+              "bruit"
+            ]
+          },
+          {
+            "title": "2. Le champ de vitesses",
+            "explanation": "Le réseau fournit une vitesse en chaque point et à chaque instant. Les flèches indiquent cette règle locale ; elles ne sont pas encore les trajectoires suivies.",
+            "highlight": [
+              "champ"
+            ]
+          },
+          {
+            "title": "3. Les trajectoires",
+            "explanation": "En intégrant le champ pas à pas, chaque point de départ suit une trajectoire. La distribution des points d'arrivée doit ressembler à celle des données.",
+            "highlight": [
+              "trajectoires",
+              "donnees"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Que représente le champ de vecteurs dans un flot continu ?",
+          "options": [
+            "La vitesse à imposer à chaque point et à chaque instant",
+            "La liste des images d'entraînement",
+            "La probabilité de chaque classe",
+            "Le nombre de couches du réseau"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le champ associe un vecteur vitesse à un point et à un temps. Le réseau l'approxime, puis un solveur l'intègre le long d'une trajectoire."
+        },
+        {
+          "question": "Quelle formulation distingue le mieux le Flow Matching de DDPM ?",
+          "options": [
+            "Le Flow Matching n'utilise pas de réseau de neurones",
+            "DDPM ne part pas de bruit",
+            "Le Flow Matching choisit un chemin et régresse une vitesse ; DDPM définit une chaîne de bruitage et apprend son inverse",
+            "Le Flow Matching ne peut pas utiliser de chemins gaussiens"
+          ],
+          "correctIndex": 2,
+          "explanation": "DDPM fixe une chaîne de Markov de bruitage et apprend à la renverser. Le Flow Matching choisit un chemin entre bruit et données et régresse le champ de vitesses correspondant."
+        },
+        {
+          "question": "Pourquoi un chemin conditionnel droit ne suffit-il pas à rendre toutes les trajectoires droites ?",
+          "options": [
+            "Parce que le réseau ne peut pas représenter une droite",
+            "Parce que le champ marginal moyenne les vitesses de plusieurs paires qui passent au même point",
+            "Parce que le temps n'intervient pas dans l'équation",
+            "Parce que les données sont toujours unidimensionnelles"
+          ],
+          "correctIndex": 1,
+          "explanation": "Chaque paire suit une droite, mais le réseau apprend l'espérance conditionnelle des vitesses. Si les paires se croisent, cette moyenne peut décrire une trajectoire courbe."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Flot",
+          "definition": "Famille de transformations obtenue en intégrant un champ de vitesses à partir de différents points de départ."
+        },
+        {
+          "term": "Champ de vitesses",
+          "definition": "Fonction qui associe un vecteur à chaque point de l'espace et à chaque instant. C'est ce que le réseau apprend."
+        },
+        {
+          "term": "Équation différentielle ordinaire",
+          "definition": "Équation qui relie la variation d'une trajectoire à sa vitesse. Ici, elle définit le déplacement du bruit vers les données."
+        },
+        {
+          "term": "Chemin conditionnel",
+          "definition": "Chemin construit entre un échantillon de bruit et un échantillon de données. Le Flow Matching le rend souvent linéaire."
+        }
+      ],
+      "example": {
+        "title": "Une trajectoire entre deux distributions",
+        "text": "**Scénario illustratif.** Une image de bruit est un point dans un espace de grande dimension. Une image réelle est un autre point. Un flux apprend un champ de vitesses qui déplace le point de bruit vers une région où les images sont probables. La trajectoire n'est pas unique : plusieurs chemins peuvent relier les deux distributions. Le couplage et l'objectif d'entraînement choisissent le chemin."
+      },
+      "exercises": [
+        {
+          "title": "Champ et trajectoire",
+          "prompt": "Pourquoi un champ de vitesses ne suffit-il pas à garantir une bonne image ?",
+          "solution": "Le champ doit être appris et intégré. Une erreur d’apprentissage, un mauvais couplage ou un solveur trop grossier peut déplacer la trajectoire. La qualité se mesure sur les images produites."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Lipman et al., Flow Matching for Generative Modeling, 2022.",
+          "href": "https://arxiv.org/abs/2210.02747"
+        }
+      ]
+    },
+    {
+      "id": "probabilites",
+      "title": "Probabilités, transport et couplage",
+      "keyTakeaways": [
+        "Un couplage est une loi jointe entre bruit et données ; ses marginales sont fixées, mais l'appariement des points ne l'est pas.",
+        "Le couplage indépendant est simple mais peut croiser les trajectoires ; le couplage de transport optimal minimise le déplacement moyen et, en une dimension, s'obtient en triant les valeurs.",
+        "Le champ marginal est l'espérance de la vitesse conditionnelle sachant le point courant ; il dépend du couplage et du chemin, pas seulement des deux distributions aux extrémités.",
+        "L'équation de continuité relie le champ au transport des densités ; plusieurs champs peuvent transporter la même loi, le choix de l'espérance conditionnelle est une convention."
+      ],
+      "theory": "### Les marginales ne suffisent pas\n\nOn connaît la loi de départ $p_0$ et la loi d'arrivée $p_1$. Un modèle qui les transporte doit décider comment apparier un point de départ et un point d'arrivée. Cet appariement est un couplage, c'est-à-dire une loi jointe $\\pi(x_0,x_1)$ dont les marginales sont $p_0$ et $p_1$ :\n\n$$ \\int \\pi(x_0,x_1)\\,dx_1=p_0(x_0), \\qquad \\int \\pi(x_0,x_1)\\,dx_0=p_1(x_1). $$\n\nLe couplage indépendant est $\\pi=p_0\\otimes p_1$ : on tire $x_0$ et $x_1$ séparément. Il est facile à obtenir, mais il ignore les ressemblances entre les deux distributions. Le couplage de transport optimal minimise un coût de déplacement, le plus souvent\n\n$$ \\mathbb{E}_{(x_0,x_1)\\sim\\pi}\\|x_1-x_0\\|^2. $$\n\nEn une dimension, avec un coût quadratique, le couplage monotone est optimal : on apparie les valeurs dans l'ordre. Si les deux distributions sont gaussiennes, le transport optimal est une transformation affine. En grande dimension, le problème exact est coûteux ; on utilise des approximations, par exemple un couplage optimal calculé sur chaque lot.\n\nLe couplage ne modifie pas les extrémités. Il modifie le chemin entre elles. Deux couplages peuvent donc avoir les mêmes marginales et produire des trajectoires très différentes, avec plus ou moins de croisements.\n\n### Interpoler entre deux points\n\nPour un couple $(x_0,x_1)$, on définit le chemin linéaire\n\n$$ x_t=(1-t)x_0+t x_1, \\qquad 0\\le t\\le 1. $$\n\nÀ chaque instant, la loi de $x_t$ est une mixture des chemins de tous les couples. Cette loi $p_t$ vérifie $p_0$ au départ et $p_1$ à l'arrivée, mais elle dépend du couplage pour $0<t<1$. Le chemin conditionnel est droit ; le chemin marginal, lui, peut être courbe, parce que le modèle doit moyenner des vitesses différentes au même point.\n\nLa vitesse conditionnelle est $u_t=x_1-x_0$. Si l'on pouvait choisir le couple pour chaque point, on suivrait ce vecteur. Le réseau, lui, ne voit que $x_t$. La meilleure prédiction au sens des moindres carrés est l'espérance conditionnelle\n\n$$ v_t(x)=\\mathbb{E}[x_1-x_0\\mid x_t=x]. $$\n\nC'est le champ marginal associé au couplage et au chemin choisis. Il dépend de $t$, même lorsque $x_1-x_0$ ne dépend pas de $t$, parce que la loi conditionnelle de $(x_0,x_1)$ sachant $x_t$ change avec le temps.\n\n### Le champ qui transporte réellement\n\nUn champ $v_t$ transporte la densité $p_t$ s'il satisfait l'équation de continuité\n\n$$ \\partial_t p_t+\\nabla\\cdot(p_t v_t)=0. $$\n\nCette équation traduit la conservation de la masse : la densité ne disparaît pas, elle se déplace. Si $p_t$ est la loi interpolée et si le champ est régulier, l'équation de continuité permet de vérifier que le flot transporte bien $p_0$ vers $p_1$. Le champ n'est pas unique : plusieurs champs peuvent produire le même transport, et le choix de l'espérance conditionnelle est une convention commode, pas une nécessité mathématique.\n\nLipman et al. (2022) montrent que l'objectif de Flow Matching, qui porte sur le champ marginal, et l'objectif conditionnel, qui porte sur les couples, ont des pertes qui diffèrent d'une constante indépendante de $\\theta$, donc les mêmes gradients, sous des hypothèses de régularité. C'est ce qui rend l'entraînement calculable : on n'a pas besoin de connaître $p_t$ ni $v_t$ pour optimiser.\n\n### Couplages en pratique\n\nLe couplage indépendant est le plus simple. Il peut produire des croisements : un point de départ situé à gauche peut être apparié à un point d'arrivée à droite, tandis qu'un point voisin part dans l'autre sens. Ces croisements rendent le champ marginal plus courbe et peuvent compliquer l'intégration avec peu de pas.\n\nLe couplage de transport optimal réduit la longueur moyenne des déplacements et, en une dimension, supprime les croisements. Il ne garantit pas à lui seul un bon modèle : le réseau doit apprendre le champ, et le solveur doit être assez précis. De plus, le transport optimal exact est difficile à calculer en grande dimension ; les variantes par lots restent des approximations.\n\nAlbergo et Vanden-Eijnden (2022) généralisent ce point de vue avec les interpolants stochastiques. On choisit des fonctions du temps qui mélangent $x_0$, $x_1$ et éventuellement un bruit auxiliaire. Le champ de vitesse est encore régressé par une perte quadratique, et l'on peut retrouver un modèle de diffusion ou travailler directement avec une ODE. Le couplage et les coefficients restent des choix de conception, avec des conséquences sur les trajectoires et l'échantillonnage.\n\nUn couplage peut aussi être déterministe : chaque point de départ est associé à un seul point d'arrivée. C'est le cas après un premier entraînement, lorsque l'on fait tourner l'ODE. Le reflow utilise ce type de couplage pour construire de nouvelles paires.\n\n### Un exemple en une dimension\n\nPrenons huit points de départ et huit points d'arrivée. Le couplage indépendant tire les paires au hasard ; le couplage trié apparie les plus petites valeurs entre elles, puis les suivantes. Sur un exemple fixé, le coût quadratique moyen du couplage trié est plus faible. Ce n'est pas une preuve générale, mais cela montre l'effet de l'appariement sur la longueur des déplacements.\n\nLe code ci-dessous construit les deux couplages et calcule ce coût. Il ne dessine pas les trajectoires et ne prouve pas l'optimalité en grande dimension ; il vérifie seulement l'arithmétique de l'exemple.",
+      "code": {
+        "language": "python",
+        "explanation": "Couplage indépendant et couplage trié en une dimension. Le coût affiché est la moyenne des carrés des déplacements sur cet échantillon.",
+        "code": "import numpy as np\n\nrng = np.random.default_rng(0)\nx0 = np.array([-1.4, -1.0, -0.6, -0.2, 0.2, 0.6, 1.0, 1.4])\nx1 = np.array([-2.0, -1.2, -0.7, -0.3, 0.1, 0.4, 0.9, 2.2])\n\nindependant = x1[rng.permutation(len(x1))]\napparie = np.sort(x1)\n\ncout = lambda a, b: np.mean((a - b) ** 2)\nprint(\"couplage indépendant :\", np.round(cout(x0, independant), 3))\nprint(\"couplage trié        :\", np.round(cout(x0, apparie), 3))",
+        "output": "couplage indépendant : 1.91\ncouplage trié        : 0.14",
+        "outputVerified": true
+      },
+      "diagram": {
+        "title": "Deux couplages, deux familles de trajectoires",
+        "description": "Schéma illustratif : à gauche un couplage indépendant qui croise les appariements, à droite un couplage trié qui les rend monotones. Les marginales sont les mêmes. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 420\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Couplage indépendant avec croisements et couplage trié sans croisement\">\n  <rect width=\"820\" height=\"420\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Mêmes marginales, appariements différents</text>\n  <text x=\"410\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"marginales\">\n    <text x=\"120\" y=\"92\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">départ</text>\n    <text x=\"700\" y=\"92\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">arrivée</text>\n    <g fill=\"#38bdf8\">\n      <circle cx=\"120\" cy=\"130\" r=\"6\"/><circle cx=\"120\" cy=\"180\" r=\"6\"/><circle cx=\"120\" cy=\"230\" r=\"6\"/><circle cx=\"120\" cy=\"280\" r=\"6\"/>\n    </g>\n    <g fill=\"#34d399\">\n      <circle cx=\"700\" cy=\"130\" r=\"6\"/><circle cx=\"700\" cy=\"180\" r=\"6\"/><circle cx=\"700\" cy=\"230\" r=\"6\"/><circle cx=\"700\" cy=\"280\" r=\"6\"/>\n    </g>\n  </g>\n\n  <g id=\"independant\" fill=\"none\" stroke-width=\"2\">\n    <path d=\"M128 130 C 300 100, 520 300, 692 230\" stroke=\"#f472b6\"/>\n    <path d=\"M128 180 C 300 300, 520 100, 692 280\" stroke=\"#f472b6\"/>\n    <path d=\"M128 230 C 300 180, 520 180, 692 130\" stroke=\"#fb7185\"/>\n    <path d=\"M128 280 C 300 120, 520 260, 692 180\" stroke=\"#fb7185\"/>\n    <text x=\"410\" y=\"330\" fill=\"#f9a8d4\" font-size=\"12\" text-anchor=\"middle\">couplage indépendant</text>\n  </g>\n\n  <g id=\"optimal\" fill=\"none\" stroke-width=\"2\">\n    <path d=\"M128 130 C 350 130, 480 130, 692 130\" stroke=\"#34d399\"/>\n    <path d=\"M128 180 C 350 180, 480 180, 692 180\" stroke=\"#34d399\"/>\n    <path d=\"M128 230 C 350 230, 480 230, 692 230\" stroke=\"#34d399\"/>\n    <path d=\"M128 280 C 350 280, 480 280, 692 280\" stroke=\"#34d399\"/>\n    <text x=\"410\" y=\"360\" fill=\"#a7f3d0\" font-size=\"12\" text-anchor=\"middle\">couplage trié</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Les mêmes marginales",
+            "explanation": "Les points de départ et les points d'arrivée sont identiques dans les deux cas. Seul l'appariement change.",
+            "highlight": [
+              "marginales"
+            ]
+          },
+          {
+            "title": "2. Le couplage indépendant",
+            "explanation": "Les paires sont tirées séparément. Les segments se croisent, ce qui peut courber le champ marginal et allonger les déplacements.",
+            "highlight": [
+              "independant"
+            ]
+          },
+          {
+            "title": "3. Le couplage trié",
+            "explanation": "En une dimension, apparier les valeurs dans l'ordre donne un couplage monotone. Les segments ne se croisent plus et le coût quadratique diminue sur cet exemple.",
+            "highlight": [
+              "optimal"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Que fixe un couplage entre bruit et données ?",
+          "options": [
+            "Uniquement la moyenne de la distribution des données",
+            "Le nombre de pas du solveur",
+            "L'architecture du réseau de neurones",
+            "La loi jointe des couples, dont les marginales sont les distributions de départ et d'arrivée"
+          ],
+          "correctIndex": 3,
+          "explanation": "Le couplage décrit comment un point de départ est associé à un point d'arrivée. Les marginales restent les mêmes, mais l'appariement change."
+        },
+        {
+          "question": "En une dimension et pour un coût quadratique, quel couplage est monotone ?",
+          "options": [
+            "Le couplage qui inverse toujours les valeurs",
+            "Le couplage qui ajoute un bruit gaussien aux données",
+            "Le couplage qui trie les valeurs et les apparie dans l'ordre",
+            "Le couplage qui supprime les valeurs extrêmes"
+          ],
+          "correctIndex": 2,
+          "explanation": "Le réarrangement monotone est optimal pour un coût convexe en une dimension. Il apparie la plus petite valeur de départ avec la plus petite valeur d'arrivée, et ainsi de suite."
+        },
+        {
+          "question": "Pourquoi le champ marginal n'est-il pas simplement la vitesse d'une paire d'entraînement ?",
+          "options": [
+            "Parce que le réseau ne voit jamais les données",
+            "Parce qu'au même point plusieurs paires peuvent passer avec des vitesses différentes, et le champ prend leur espérance conditionnelle",
+            "Parce que la vitesse est toujours nulle",
+            "Parce que le couplage indépendant est interdit"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le réseau apprend une fonction du point et du temps. La cible optimale est la moyenne des vitesses des paires qui passent par ce point, pas la vitesse d'une paire particulière."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Couplage",
+          "definition": "Loi jointe entre un point de départ et un point d'arrivée, dont les marginales sont les deux distributions à relier."
+        },
+        {
+          "term": "Marginale",
+          "definition": "Loi d'une seule variable obtenue en intégrant une loi jointe sur les autres variables."
+        },
+        {
+          "term": "Transport optimal",
+          "definition": "Couplage qui minimise un coût de déplacement moyen entre deux distributions."
+        },
+        {
+          "term": "Équation de continuité",
+          "definition": "Équation qui exprime la conservation de la densité lorsqu'elle est transportée par un champ de vitesses."
+        }
+      ],
+      "example": {
+        "title": "Un couplage, plusieurs chemins",
+        "text": "**Scénario illustratif.** Deux points, un bruit et une image, peuvent être reliés par une ligne droite ou par une courbe. Le couplage décide quel bruit est associé à quelle image. Un couplage optimal en transport peut donner des trajectoires plus droites, donc moins de pas d'intégration. Ce n'est pas une garantie de qualité : le réseau doit encore apprendre le champ."
+      },
+      "exercises": [
+        {
+          "title": "Couplage",
+          "prompt": "Comment le couplage peut-il réduire le nombre de pas nécessaires ?",
+          "solution": "Un couplage qui rapproche les trajectoires de lignes droites demande moins d’évaluations pour intégrer le champ. Il ne garantit pas la qualité : le réseau doit apprendre ce champ."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Lipman et al., Flow Matching for Generative Modeling, 2022.",
+          "href": "https://arxiv.org/abs/2210.02747"
+        },
+        {
+          "label": "Albergo et Vanden-Eijnden, Building Normalizing Flows with Stochastic Interpolants, 2022.",
+          "href": "https://arxiv.org/abs/2209.15571"
+        }
+      ]
+    },
+    {
+      "id": "flow-matching",
+      "title": "Flow Matching conditionnel et cible de vélocité",
+      "keyTakeaways": [
+        "La perte conditionnelle régresse la vitesse du chemin choisi, par exemple $x_1-x_0$ pour l'interpolation linéaire entre un bruit $x_0$ et une donnée $x_1$ ; elle ne demande pas de simuler l'ODE.",
+        "Dans le cas non conditionné, le réseau ne voit que le point interpolé et le temps ; avec une condition $c$, il voit aussi $c$. La cible optimale est l'espérance conditionnelle de la vitesse, ce qui explique pourquoi plusieurs paires peuvent contribuer au même point.",
+        "Le chemin n'est pas neutre : changer l'interpolation change la cible, même si les distributions aux extrémités restent les mêmes.",
+        "Un modèle linéaire peut réduire la perte sur un exemple simple, mais il ne représente pas les champs non linéaires nécessaires aux distributions complexes."
+      ],
+      "theory": "### Une perte calculable sans simuler l'ODE\n\nLe module précédent a montré qu'un couplage et un chemin définissent un champ marginal. Pour entraîner un réseau, il faut une cible que l'on peut calculer à partir d'un échantillon. Le Flow Matching conditionnel (CFM) fournit cette cible. On tire un bruit $x_0\\sim\\mathcal{N}(0,I)$, une donnée $x_1\\sim q$, un temps $t\\sim\\mathcal{U}[0,1]$, puis on construit le point interpolé\n\n$$ x_t=(1-t)x_0+t x_1. $$\n\nLa vitesse de ce chemin conditionnel est constante :\n\n$$ u_t=\\frac{\\mathrm{d}x_t}{\\mathrm{d}t}=x_1-x_0. $$\n\nOn entraîne le réseau $v_\\theta(x,t)$ à prédire $u_t$ à partir de $x_t$ et de $t$ avec la perte\n\n$$ \\mathcal{L}_{\\mathrm{CFM}}(\\theta)=\\mathbb{E}_{t,x_0,x_1}\\left[\\left\\|v_\\theta(x_t,t)-(x_1-x_0)\\right\\|^2\\right]. $$\n\nCette perte est calculable sans intégrer l'ODE. On échantillonne des points, on forme $x_t$, on calcule la cible, puis on rétropropage. C'est le sens de l'expression « simulation-free » employée par Lipman et al. (2022) : l'entraînement ne simule pas le flot. L'échantillonnage, lui, devra intégrer le champ appris.\n\n### Pourquoi cette cible fonctionne\n\nPour un temps $t$ et un point $x$ fixés, la perte est minimisée par l'espérance conditionnelle\n\n$$ v_t^\\star(x)=\\mathbb{E}[x_1-x_0\\mid x_t=x]. $$\n\nC'est exactement le champ marginal du module précédent. Le réseau ne peut pas distinguer deux paires qui passent par le même point au même instant : il en prédit la moyenne pondérée. Si l'on dispose de suffisamment de données et d'une famille de fonctions assez riche, cette moyenne approxime le champ qui transporte $p_0$ vers $p_1$.\n\nLipman et al. (2022) montrent que l'objectif de Flow Matching, défini sur le champ marginal, et l'objectif conditionnel ont des pertes qui diffèrent d'une constante indépendante de $\\theta$, donc les mêmes gradients, sous des hypothèses de régularité. On peut donc optimiser la version conditionnelle sans connaître $p_t$. Ce résultat est le cœur théorique de la méthode. Il ne dit pas que le réseau trouvera exactement le champ optimal : il dit que le gradient de la perte conditionnelle est un estimateur sans biais du gradient de l'objectif marginal.\n\n### Le chemin est un choix\n\nLe chemin linéaire n'est pas le seul possible. Lipman et al. considèrent une famille de chemins gaussiens conditionnels\n\n$$ p_t(x\\mid x_1)=\\mathcal{N}\\bigl(\\mu_t(x_1),\\sigma_t(x_1)^2 I\\bigr), $$\n\npour lesquels la vitesse conditionnelle s'écrit\n\n$$ u_t(x\\mid x_1)=\\frac{\\dot\\sigma_t}{\\sigma_t}\\bigl(x-\\mu_t(x_1)\\bigr)+\\dot\\mu_t(x_1). $$\n\nEn prenant une moyenne linéaire en $t$ et un écart-type qui décroît linéairement, on retrouve un chemin proche de l'interpolation droite. Avec un écart-type qui décroît selon une loi de bruitage, on retrouve un chemin de diffusion. Le réseau doit alors prédire une autre vitesse, et l'optimisation ne se comporte pas de la même façon.\n\nIl faut donc distinguer deux énoncés. Les distributions aux extrémités peuvent être les mêmes, et le flot peut transporter la même loi. Mais la cible de régression dépend du chemin. Dire que le Flow Matching est « indépendant du chemin » serait faux au sens de la cible ; ce qui est flexible, c'est le choix du chemin, pas son absence d'effet.\n\n### Ce que voit le réseau\n\nÀ l'entraînement, le réseau reçoit $x_t$ et $t$. Il ne reçoit ni $x_0$ ni $x_1$. Cette limitation est volontaire : à l'échantillonnage, on ne connaît que le bruit courant et le temps. La cible $x_1-x_0$ n'est utilisée que pour calculer la perte. Le modèle apprend donc une fonction locale, partagée par toutes les paires.\n\nCette formulation s'étend au conditionnement. Pour générer une image à partir d'un texte, on ajoute une condition $c$ et l'on apprend $v_\\theta(x,t,c)$. Le chemin et la perte restent les mêmes ; seule l'entrée change. Les architectures de type U-Net ou Transformateur injectent $c$ par des mécanismes d'attention ou de modulation. Le cadre mathématique ne dépend pas de ce choix d'architecture.\n\n### Un modèle linéaire pour voir la mécanique\n\nPour rendre la perte concrète, on peut remplacer le réseau par un modèle linéaire. Sur un lot de points en deux dimensions, on construit $x_t$ et la cible $x_1-x_0$, puis on résout un problème de moindres carrés. Le modèle linéaire n'est pas un bon générateur pour des données complexes : il ne peut pas représenter un champ non linéaire. Il suffit cependant à vérifier que la perte compare bien une prédiction à la vitesse conditionnelle.\n\nLe code ci-dessous ajuste un modèle affine sur les variables $(x_t,t)$ et affiche la perte moyenne. La comparaison avec le champ nul donne le moment d'ordre deux de la cible, et non sa variance ; elle ne mesure pas la qualité d'un générateur. Un vrai modèle remplacerait cette régression par un réseau non linéaire et optimiserait la même perte par descente de gradient.\n\n### Limites et précautions\n\nUne perte faible ne garantit pas des échantillons convaincants. Elle peut être dominée par les régions faciles, alors que les queues ou les modes rares restent mal appris. Le choix du couplage et du chemin influence la difficulté du problème. Enfin, la cible $x_1-x_0$ contient le bruit $x_0$ et peut être difficile à prédire précisément ; la paramétrisation du réseau et la pondération des erreurs comptent.\n\nLe Flow Matching conditionnel n'est donc pas une recette qui supprime les choix de conception. Il déplace ces choix vers le chemin, le couplage, l'architecture et le solveur. C'est déjà beaucoup : la perte reste simple, et l'entraînement n'a pas besoin de dérouler l'ODE.",
+      "code": {
+        "language": "python",
+        "explanation": "Perte conditionnelle sur un lot 2D, avec un modèle affine ajusté par moindres carrés. La seconde valeur correspond au champ nul et donne le moment d'ordre deux de la cible, et non sa variance.",
+        "code": "import numpy as np\n\nrng = np.random.default_rng(0)\nn = 4096\nx1 = rng.normal(loc=[1.5, -0.5], scale=[0.5, 1.0], size=(n, 2))\nx0 = rng.normal(size=(n, 2))\nt = rng.random((n, 1))\nxt = (1 - t) * x0 + t * x1\nu = x1 - x0\n\nA = np.column_stack([xt, t[:, 0], np.ones(n)])\nW, *_ = np.linalg.lstsq(A, u, rcond=None)\npred = A @ W\nprint(\"perte du modèle linéaire :\", round(float(np.mean((pred - u) ** 2)), 3))\nprint(\"perte du champ nul       :\", round(float(np.mean(u ** 2)), 3))",
+        "output": "perte du modèle linéaire : 1.4\nperte du champ nul       : 2.783",
+        "outputVerified": true
+      },
+      "diagram": {
+        "title": "Un point interpolé, une cible de vitesse, un réseau",
+        "description": "Schéma illustratif : une paire bruit-données définit un point interpolé et un vecteur cible ; le réseau de vitesses prédit ce vecteur à partir du point et du temps. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 430\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Chemin conditionnel, point interpolé, cible de vitesse et réseau de vélocité\">\n  <defs>\n    <marker id=\"fm-flow-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n    <marker id=\"fm-flow-arrow-jaune\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#fbbf24\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"430\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">La cible est la vitesse du chemin conditionnel</text>\n  <text x=\"410\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"paire\">\n    <circle cx=\"130\" cy=\"230\" r=\"10\" fill=\"#38bdf8\"/>\n    <circle cx=\"680\" cy=\"230\" r=\"10\" fill=\"#34d399\"/>\n    <text x=\"130\" y=\"270\" fill=\"#bae6fd\" font-size=\"12\" text-anchor=\"middle\">x0, bruit</text>\n    <text x=\"680\" y=\"270\" fill=\"#a7f3d0\" font-size=\"12\" text-anchor=\"middle\">x1, donnée</text>\n    <line x1=\"142\" y1=\"230\" x2=\"662\" y2=\"230\" stroke=\"#475569\" stroke-width=\"2\" stroke-dasharray=\"6 6\"/>\n  </g>\n\n  <g id=\"point-interpole\">\n    <circle cx=\"405\" cy=\"230\" r=\"13\" fill=\"#fbbf24\" stroke=\"#fef3c7\" stroke-width=\"2\"/>\n    <text x=\"405\" y=\"208\" fill=\"#fde68a\" font-size=\"12\" text-anchor=\"middle\">x_t</text>\n  </g>\n\n  <g id=\"cible\" stroke=\"#fbbf24\" stroke-width=\"3\" marker-end=\"url(#fm-flow-arrow-jaune)\">\n    <line x1=\"405\" y1=\"230\" x2=\"520\" y2=\"145\"/>\n  </g>\n  <text x=\"530\" y=\"135\" fill=\"#fde68a\" font-size=\"12\">u = x1 - x0</text>\n\n  <g id=\"reseau\">\n    <rect x=\"250\" y=\"320\" width=\"320\" height=\"70\" rx=\"12\" fill=\"#0f172a\" stroke=\"#818cf8\" stroke-width=\"2\"/>\n    <text x=\"410\" y=\"348\" fill=\"#e0e7ff\" font-size=\"13\" text-anchor=\"middle\">réseau de vélocité v(x, t)</text>\n    <text x=\"410\" y=\"370\" fill=\"#a5b4fc\" font-size=\"12\" text-anchor=\"middle\">entrée (point, temps)</text>\n    <line x1=\"405\" y1=\"300\" x2=\"405\" y2=\"320\" stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#fm-flow-arrow)\"/>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Une paire",
+            "explanation": "On tire un bruit et une donnée. Leur appariement définit un chemin conditionnel, ici une interpolation linéaire.",
+            "highlight": [
+              "paire"
+            ]
+          },
+          {
+            "title": "2. Un point interpolé",
+            "explanation": "À un temps donné, le point x_t se trouve entre le bruit et la donnée. C'est la seule information spatiale reçue par le réseau.",
+            "highlight": [
+              "point-interpole"
+            ]
+          },
+          {
+            "title": "3. Une cible de vitesse",
+            "explanation": "La vitesse du chemin est x1 - x0. Elle est connue à l'entraînement, mais pas à l'échantillonnage.",
+            "highlight": [
+              "cible"
+            ]
+          },
+          {
+            "title": "4. Un réseau partagé",
+            "explanation": "Le réseau apprend à prédire cette vitesse pour tous les points et tous les temps. À la génération, il fournira la vitesse locale à intégrer.",
+            "highlight": [
+              "reseau"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Quelle est la cible de vitesse pour le chemin linéaire x_t = (1 - t) x0 + t x1 ?",
+          "options": [
+            "x0 - x1",
+            "x1 - x0",
+            "x_t - x1",
+            "t x0 + (1 - t) x1"
+          ],
+          "correctIndex": 1,
+          "explanation": "La dérivée de (1 - t) x0 + t x1 par rapport à t vaut x1 - x0. C'est la vitesse conditionnelle utilisée dans la perte."
+        },
+        {
+          "question": "Pourquoi la perte conditionnelle peut-elle être optimisée sans simuler l'ODE ?",
+          "options": [
+            "Parce que le réseau n'a pas de paramètres",
+            "Parce que l'ODE a une solution analytique connue",
+            "Parce que la cible x1 - x0 est connue pour chaque paire échantillonnée",
+            "Parce que le temps est fixé à une seule valeur"
+          ],
+          "correctIndex": 2,
+          "explanation": "On peut former x_t et calculer x1 - x0 directement à partir des échantillons. La simulation n'intervient qu'au moment de générer."
+        },
+        {
+          "question": "Que se passe-t-il si l'on change le chemin conditionnel en gardant les mêmes marginales ?",
+          "options": [
+            "La cible de vitesse devient toujours nulle",
+            "La cible de vitesse peut changer, même si les extrémités sont identiques",
+            "Le couplage devient inutile",
+            "Le réseau n'a plus besoin du temps"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le chemin détermine la vitesse conditionnelle. Les distributions aux extrémités peuvent être les mêmes, mais la régression et l'optimisation changent."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Flow Matching conditionnel",
+          "definition": "Objectif qui régresse une vitesse conditionnelle le long de chemins construits entre des paires bruit-données."
+        },
+        {
+          "term": "Simulation-free",
+          "definition": "Se dit d'un entraînement qui n'a pas besoin d'intégrer l'équation différentielle pour calculer le gradient."
+        },
+        {
+          "term": "Champ marginal",
+          "definition": "Champ de vitesses obtenu en moyennant les vitesses conditionnelles de toutes les paires qui passent par un point et un temps donnés."
+        },
+        {
+          "term": "Interpolation linéaire",
+          "definition": "Chemin x_t = (1 - t) x0 + t x1, dont la vitesse est constante et vaut x1 - x0."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Conditionnement",
+          "prompt": "Comment la condition modifie-t-elle le champ de vitesses ?",
+          "solution": "Elle oriente la vitesse vers les échantillons compatibles avec la légende ou la classe. Le réseau partage le même champ de base mais reçoit la condition en entrée."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Lipman et al., Flow Matching for Generative Modeling, 2022.",
+          "href": "https://arxiv.org/abs/2210.02747"
+        }
+      ]
+    },
+    {
+      "id": "rectified-flow",
+      "title": "Rectified Flow et reflow",
+      "keyTakeaways": [
+        "Le Rectified Flow utilise une interpolation droite et une perte de régression de vitesse ; il met l'accent sur le couplage entre bruit et données.",
+        "Le reflow génère de nouvelles paires avec le premier modèle, puis réentraîne un second modèle sur ces paires ; il ne s'agit pas d'un simple réglage du solveur.",
+        "Le reflow peut redresser les trajectoires et réduire le coût de transport, mais il exige des échantillonnages et un nouvel entraînement ; le gain n'est pas gratuit.",
+        "Des trajectoires plus droites facilitent l'intégration avec peu de pas, sans garantir qu'un seul pas suffise pour toutes les données."
+      ],
+      "theory": "### La même interpolation, un autre regard\n\nLe Rectified Flow (Liu, Gong et Liu, 2022) repose sur une idée simple, également utilisée par le Flow Matching conditionnel : relier un bruit $x_0$ à une donnée $x_1$ par une interpolation, puis apprendre un champ de vitesses. Pour le chemin linéaire\n\n$$ x_t=(1-t)x_0+t x_1, $$\n\nla cible est encore $x_1-x_0$, et la perte est la même régression quadratique. La différence tient à la manière dont les paires sont construites et à l'insistance sur la géométrie des trajectoires.\n\nDans sa forme la plus simple, le premier modèle est entraîné avec un couplage indépendant : on tire $x_0$ et $x_1$ séparément. Les chemins conditionnels sont droits, mais le champ marginal peut être courbe. Le modèle définit ensuite un couplage déterministe : chaque bruit $x_0$ est envoyé par l'ODE vers un point $x_1$ unique. Ce couplage n'est plus indépendant ; il dépend du modèle.\n\n### Pourquoi les trajectoires se courbent\n\nPour chaque paire, la vitesse $x_1-x_0$ est constante. Le réseau, lui, apprend la moyenne des vitesses de toutes les paires qui passent par un point donné. Si les paires se croisent, cette moyenne change de direction le long du trajet. La trajectoire suivie par une particule peut donc tourner, revenir ou traverser des régions où le champ varie rapidement.\n\nCette courbure n'est pas une erreur d'implémentation : elle vient du couplage. Un couplage différent, par exemple un couplage de transport optimal, peut réduire les croisements et produire un champ plus simple. Mais le couplage optimal exact est difficile à calculer en grande dimension, et le couplage indépendant reste le point de départ le plus courant.\n\n### Le reflow\n\nLe reflow est une procédure en plusieurs étapes. On entraîne d'abord un modèle $v_1$ sur des paires indépendantes. On tire ensuite de nouveaux bruits $x_0$, on intègre $v_1$ pour obtenir des points $x_1^1$, et l'on forme les paires $(x_0,x_1^1)$. Ces paires suivent le couplage déterministe induit par $v_1$. On entraîne alors un second modèle $v_2$ à suivre la ligne droite entre ces nouvelles extrémités. On peut répéter l'opération.\n\nLiu, Gong et Liu (2022) montrent que cette rectification transforme un couplage arbitraire en un couplage déterministe dont le coût de transport convexe n'augmente pas. En répétant, les trajectoires deviennent progressivement plus droites. Le résultat est une propriété de la procédure, pas une garantie que chaque trajectoire soit parfaitement rectiligne.\n\nLe reflow ne se contente donc pas de changer le solveur. Il change les paires d'entraînement, puis réentraîne le réseau. Le coût est réel : il faut échantillonner avec le premier modèle et entraîner un second modèle, éventuellement plusieurs fois. Le bénéfice attendu est une intégration plus précise avec des pas plus grossiers, ce qui peut réduire le nombre d'évaluations du réseau à la génération. Ce bénéfice dépend des données et de la qualité des modèles successifs.\n\n### Reflow et distillation\n\nLe reflow est parfois rapproché de la distillation, car les deux cherchent à réduire le coût d'échantillonnage. Ce ne sont pas les mêmes opérations. La distillation entraîne généralement un modèle étudiant à imiter les sorties d'un modèle enseignant, parfois sur des pas intermédiaires. Le reflow modifie le couplage et réentraîne un modèle sur les extrémités produites par le précédent. Les deux approches peuvent être combinées, mais elles ne répondent pas à la même question.\n\nIl faut aussi distinguer la qualité du couplage de la qualité du réseau. Un couplage plus simple ne compense pas un réseau sous-entraîné. Un réseau très expressif ne rend pas forcément les trajectoires droites. Le reflow agit sur la géométrie ; l'architecture et les données déterminent ce que le réseau peut représenter.\n\n### Passage à l'échelle\n\nEsser et al. (2024) appliquent une formulation de rectified flow à la synthèse d'images haute résolution avec des Transformateurs. Ils étudient notamment la distribution des niveaux de bruit utilisés pendant l'entraînement et proposent une architecture qui traite séparément les tokens d'image et de texte. Ce travail illustre cette application ; il ne dit pas que le reflow suffit à lui seul à obtenir un bon modèle.\n\nLe choix du chemin et du couplage devient alors un choix d'ingénierie autant que de mathématiques. Le coût d'entraînement, la qualité perçue, la diversité et la facilité d'échantillonnage ne se résument pas à une seule courbe. Les auteurs comparent plusieurs variantes et utilisent des évaluations humaines et automatiques ; aucune de ces mesures ne capture à elle seule la qualité d'un générateur.\n\n### Un exemple jouet en deux dimensions\n\nLe code ci-dessous entraîne un petit réseau sur un arc de cercle bruité, puis applique un reflow. Il ne prétend pas produire des images ni établir une performance. Il montre la mécanique : un premier modèle définit un couplage, ses sorties servent de nouvelles paires, et un second modèle est entraîné sur ces paires.\n\nLes hyperparamètres sont choisis pour rester lisibles. Un entraînement plus long, un réseau plus grand ou un autre jeu de données changeraient les trajectoires. La sortie affichée indique seulement que les deux entraînements se sont terminés.",
+      "code": {
+        "language": "python",
+        "explanation": "Entraînement d'un petit champ de vitesses 2D, génération de nouvelles paires par intégration, puis reflow. Démonstration pédagogique, sans mesure de qualité.",
+        "code": "import torch\nfrom torch import nn\n\ntorch.manual_seed(0)\n\n\ndef donnees(n):\n    angle = torch.rand(n) * torch.pi\n    arc = torch.stack([torch.cos(angle), torch.sin(angle)], dim=1)\n    return arc + 0.04 * torch.randn(n, 2)\n\n\nclass Vitesse(nn.Module):\n    def __init__(self):\n        super().__init__()\n        self.reseau = nn.Sequential(\n            nn.Linear(3, 64), nn.Tanh(),\n            nn.Linear(64, 64), nn.Tanh(),\n            nn.Linear(64, 2),\n        )\n\n    def forward(self, x, t):\n        return self.reseau(torch.cat([x, t], dim=1))\n\n\ndef entrainer(x0, x1, pas=400):\n    modele = Vitesse()\n    optimiseur = torch.optim.Adam(modele.parameters(), lr=2e-3)\n    for _ in range(pas):\n        i = torch.randint(0, len(x0), (256,))\n        a, b = x0[i], x1[i]\n        t = torch.rand(len(i), 1)\n        xt = (1 - t) * a + t * b\n        perte = ((modele(xt, t) - (b - a)) ** 2).mean()\n        optimiseur.zero_grad()\n        perte.backward()\n        optimiseur.step()\n    return modele\n\n\n@torch.no_grad()\ndef echantillonner(modele, x0, pas=16):\n    x = x0.clone()\n    for i in range(pas):\n        t = torch.full((len(x), 1), i / pas)\n        x = x + modele(x, t) / pas\n    return x\n\n\nx1 = donnees(2048)\nx0 = torch.randn(2048, 2)\nmodele1 = entrainer(x0, x1)\n\n# Reflow : les nouvelles paires sont les extrémités du flot appris.\nx0_reflow = torch.randn(2048, 2)\nx1_reflow = echantillonner(modele1, x0_reflow)\nmodele2 = entrainer(x0_reflow, x1_reflow)\nprint(\"premier modèle et modèle reflow entraînés\")",
+        "output": "premier modèle et modèle reflow entraînés",
+        "outputVerified": true
+      },
+      "diagram": {
+        "title": "Courber puis redresser les trajectoires",
+        "description": "Schéma illustratif : à gauche, un couplage indépendant produit des trajectoires courbes ; à droite, le reflow réentraîne le modèle sur de nouvelles paires et redresse les trajectoires. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 420\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Trajectoires courbes avant reflow et trajectoires redressées après reflow\">\n  <defs>\n    <marker id=\"fm-rectified-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"420\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Le reflow change les paires, puis réentraîne</text>\n  <text x=\"410\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"couplage-initial\">\n    <text x=\"200\" y=\"92\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">couplage initial</text>\n    <g fill=\"#38bdf8\">\n      <circle cx=\"80\" cy=\"150\" r=\"6\"/><circle cx=\"80\" cy=\"210\" r=\"6\"/><circle cx=\"80\" cy=\"270\" r=\"6\"/>\n    </g>\n    <g fill=\"#34d399\">\n      <circle cx=\"320\" cy=\"150\" r=\"6\"/><circle cx=\"320\" cy=\"210\" r=\"6\"/><circle cx=\"320\" cy=\"270\" r=\"6\"/>\n    </g>\n  </g>\n\n  <g id=\"trajectoires-courbes\" fill=\"none\" stroke-width=\"2.5\">\n    <path d=\"M88 150 C 160 100, 230 300, 312 210\" stroke=\"#f472b6\"/>\n    <path d=\"M88 210 C 160 300, 240 100, 312 270\" stroke=\"#fb7185\"/>\n    <path d=\"M88 270 C 160 170, 230 180, 312 150\" stroke=\"#f9a8d4\"/>\n    <text x=\"200\" y=\"330\" fill=\"#f9a8d4\" font-size=\"12\" text-anchor=\"middle\">trajectoires courbes</text>\n  </g>\n\n  <g id=\"reflow\">\n    <rect x=\"408\" y=\"120\" width=\"96\" height=\"120\" rx=\"12\" fill=\"#0f172a\" stroke=\"#818cf8\" stroke-width=\"2\"/>\n    <text x=\"456\" y=\"170\" fill=\"#e0e7ff\" font-size=\"12\" text-anchor=\"middle\">reflow</text>\n    <text x=\"456\" y=\"190\" fill=\"#a5b4fc\" font-size=\"11\" text-anchor=\"middle\">nouvelles paires</text>\n    <text x=\"456\" y=\"210\" fill=\"#a5b4fc\" font-size=\"11\" text-anchor=\"middle\">puis réentraînement</text>\n    <line x1=\"340\" y1=\"210\" x2=\"400\" y2=\"180\" stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#fm-rectified-arrow)\"/>\n  </g>\n\n  <g id=\"trajectoires-redressees\" fill=\"none\" stroke-width=\"2.5\">\n    <path d=\"M528 150 C 600 145, 680 145, 748 150\" stroke=\"#34d399\"/>\n    <path d=\"M528 210 C 600 210, 680 210, 748 210\" stroke=\"#34d399\"/>\n    <path d=\"M528 270 C 600 275, 680 275, 748 270\" stroke=\"#34d399\"/>\n    <text x=\"638\" y=\"330\" fill=\"#a7f3d0\" font-size=\"12\" text-anchor=\"middle\">trajectoires redressées</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Le couplage initial",
+            "explanation": "Les paires de départ sont indépendantes. Rien n'oblige un bruit donné à se trouver près de la donnée vers laquelle il sera envoyé.",
+            "highlight": [
+              "couplage-initial"
+            ]
+          },
+          {
+            "title": "2. Les trajectoires courbes",
+            "explanation": "Le champ marginal moyenne des vitesses qui se croisent. Les trajectoires suivies par les particules peuvent donc se courber.",
+            "highlight": [
+              "trajectoires-courbes"
+            ]
+          },
+          {
+            "title": "3. Le reflow",
+            "explanation": "On échantillonne de nouvelles paires avec le premier modèle, puis on réentraîne un second modèle sur ces paires. Le couplage change.",
+            "highlight": [
+              "reflow"
+            ]
+          },
+          {
+            "title": "4. Les trajectoires redressées",
+            "explanation": "Le nouveau couplage réduit les croisements et rapproche les trajectoires de lignes droites. L'effet est progressif et dépend des données.",
+            "highlight": [
+              "trajectoires-redressees"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Que change principalement le reflow ?",
+          "options": [
+            "La fonction d'activation du réseau",
+            "La taille des images",
+            "Le couplage utilisé pour réentraîner le modèle",
+            "Le nombre de classes du jeu de données"
+          ],
+          "correctIndex": 2,
+          "explanation": "Le reflow génère de nouvelles paires avec le modèle courant, puis réentraîne un modèle sur ces paires. Il agit sur le couplage et la géométrie des trajectoires."
+        },
+        {
+          "question": "Pourquoi des trajectoires plus droites peuvent-elles aider à l'échantillonnage ?",
+          "options": [
+            "Parce qu'elles suppriment le besoin de réseau",
+            "Parce qu'elles rendent la perte nulle",
+            "Parce qu'elles empêchent tout calcul de gradient",
+            "Parce qu'un solveur comme Euler approxime mieux un déplacement presque rectiligne avec peu de pas"
+          ],
+          "correctIndex": 3,
+          "explanation": "Un déplacement droit est plus facile à intégrer grossièrement. Cela ne garantit pas qu'un seul pas suffise, mais cela réduit l'erreur de discrétisation pour un budget donné."
+        },
+        {
+          "question": "Quel est le coût principal du reflow ?",
+          "options": [
+            "Il faut supprimer le couplage indépendant de toutes les données",
+            "Il faut changer la dimension des images",
+            "Il faut échantillonner de nouvelles paires et réentraîner un modèle",
+            "Il faut éviter les solveurs ODE"
+          ],
+          "correctIndex": 2,
+          "explanation": "Le reflow ajoute une phase de génération et un entraînement. Le gain à l'inférence ne signifie pas que la procédure est gratuite."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Rectified Flow",
+          "definition": "Méthode qui apprend une ODE de transport en régressant une vitesse sur des chemins droits, puis peut redresser les trajectoires par reflow."
+        },
+        {
+          "term": "Reflow",
+          "definition": "Procédure qui génère de nouvelles paires avec un modèle, puis réentraîne un modèle sur ces paires pour obtenir un couplage plus simple."
+        },
+        {
+          "term": "Couplage déterministe",
+          "definition": "Couplage dans lequel chaque point de départ est associé à un seul point d'arrivée, par exemple via une ODE."
+        },
+        {
+          "term": "Coût de transport",
+          "definition": "Mesure du déplacement moyen entre deux distributions. Le reflow vise notamment à ne pas l'augmenter."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Reflow",
+          "prompt": "Que cherche à faire le reflow ?",
+          "solution": "Il réassocie des échantillons et réentraîne le champ pour rapprocher les trajectoires de lignes droites, ce qui peut réduire le nombre de pas. Ce n’est pas une garantie de qualité."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Liu, Gong et Liu, Flow Straight and Fast: Learning to Generate and Transfer Data with Rectified Flow, 2022.",
+          "href": "https://arxiv.org/abs/2209.03003"
+        },
+        {
+          "label": "Esser et al., Scaling Rectified Flow Transformers for High-Resolution Image Synthesis, 2024.",
+          "href": "https://arxiv.org/abs/2403.03206"
+        }
+      ]
+    },
+    {
+      "id": "echantillonnage",
+      "title": "Intégration ODE et quelques pas",
+      "keyTakeaways": [
+        "Euler explicite avance de $h$ dans la direction du champ ; son erreur globale est d'ordre un pour un champ régulier, et un pas trop grand peut déstabiliser l'intégration.",
+        "Heun évalue le champ deux fois par pas et gagne un ordre de précision ; le coût se mesure en évaluations du réseau, pas seulement en nombre de pas.",
+        "La rectitude des trajectoires facilite l'intégration grossière, mais un modèle à trajectoires droites n'est pas obligé de fonctionner correctement avec un seul pas.",
+        "L'erreur finale combine l'erreur du réseau et l'erreur de discrétisation ; réduire l'une ne compense pas nécessairement l'autre."
+      ],
+      "theory": "### Intégrer un champ appris\n\nUne fois le champ $v_\\theta(x,t)$ entraîné, générer un échantillon revient à résoudre l'équation\n\n$$ \\frac{dx}{dt}=v_\\theta(x,t), \\qquad x(0)=x_0\\sim p_0, $$\n\njusqu'à $t=1$. Le solveur le plus simple est la méthode d'Euler explicite. On découpe l'intervalle en $N$ pas de taille $h=1/N$, puis on répète\n\n$$ x_{n+1}=x_n+h\\,v_\\theta(x_n,t_n), \\qquad t_n=nh. $$\n\nChaque pas utilise une seule évaluation du réseau. Le déplacement est une ligne droite dans la direction du champ au point de départ du pas. Si le champ tourne rapidement, cette approximation s'écarte de la trajectoire exacte.\n\n### Erreur et stabilité\n\nPour un champ régulier, l'erreur locale d'Euler est d'ordre $h^2$ et son erreur globale d'ordre $h$ : diviser le pas par dix divise approximativement l'erreur par dix, au prix de dix fois plus d'évaluations. Cette estimation suppose que le champ est lipschitzien et que l'intégration reste stable. Un pas trop grand peut produire des oscillations ou une divergence, surtout si le champ varie fortement.\n\nLa stabilité ne dépend pas seulement du nombre de pas : elle dépend de la raideur du champ et de la direction dans laquelle on intègre. Un solveur explicite peut être instable alors que la trajectoire exacte reste bornée. En pratique, on choisit le pas en fonction du problème, ou l'on utilise un solveur adaptatif qui estime l'erreur locale et ajuste $h$.\n\n### Heun et les méthodes d'ordre supérieur\n\nLa méthode de Heun, aussi appelée Euler amélioré dans certains textes, utilise un prédicteur puis un correcteur. On calcule d'abord\n\n$$ \\tilde{x}_{n+1}=x_n+h\\,v_\\theta(x_n,t_n), $$\n\npuis on corrige avec la moyenne des vitesses aux deux extrémités :\n\n$$ x_{n+1}=x_n+\\frac{h}{2}\\left[v_\\theta(x_n,t_n)+v_\\theta(\\tilde{x}_{n+1},t_n+h)\\right]. $$\n\nL'erreur globale est d'ordre $h^2$ pour un champ régulier, mais chaque pas coûte deux évaluations du réseau. Comparer deux solveurs au seul nombre de pas est donc trompeur : il faut compter les évaluations, souvent appelées NFE pour *number of function evaluations*. Un pas de Heun peut être plus précis qu'un pas d'Euler, mais il coûte deux fois plus cher.\n\nLes méthodes de Runge-Kutta d'ordre plus élevé ajoutent encore des évaluations. Elles peuvent être utiles lorsque le champ est lisse et que l'on veut une grande précision, mais elles ne corrigent pas un champ mal appris. Un solveur précis appliqué à un mauvais champ reste un mauvais générateur.\n\n### Pourquoi les trajectoires droites aident\n\nSi le champ est constant le long d'une trajectoire, Euler est exact, quel que soit le pas. C'est la situation idéale visée par le reflow : des trajectoires presque rectilignes, donc faciles à approximer par des segments. Le Flow Matching à couplage indépendant produit souvent des trajectoires plus courbes, ce qui demande des pas plus fins ou un solveur d'ordre supérieur.\n\nIl ne faut pas transformer cette observation en garantie. Une trajectoire peut être presque droite et le champ varier rapidement le long du chemin ; un pas grossier peut alors s'écarter de la courbe exacte. De plus, le réseau n'est qu'une approximation : même une trajectoire théoriquement droite peut être mal suivie si la vitesse prédite est imprécise. Le reflow réduit une source d'erreur, pas toutes les sources.\n\n### Choisir un budget d'échantillonnage\n\nLe nombre de pas n'est pas une propriété intrinsèque du modèle. Un même champ peut être intégré avec un pas grossier, un pas fin, Euler, Heun ou un solveur adaptatif. Le choix dépend du budget de calcul, de la qualité attendue et de la possibilité de paralléliser les évaluations. Dans un service interactif, quelques évaluations peuvent suffire pour une esquisse ; dans une chaîne de production, on peut préférer un solveur plus coûteux.\n\nLa distribution des temps utilisée à l'entraînement compte aussi. Esser et al. (2024) étudient une distribution de bruits biaisée vers les échelles perceptivement pertinentes. À l'échantillonnage, on peut répartir les pas de façon non uniforme pour passer plus de temps dans les régions où le champ change vite. Ce choix est un réglage de solveur, pas une modification du modèle.\n\n### Un exemple analytique\n\nLe code ci-dessous intègre une ODE scalaire dont la solution exacte est connue. Il compare trois nombres de pas et affiche l'erreur finale. L'exemple ne fait intervenir aucun réseau : il isole l'erreur de discrétisation. Le résultat montre la convergence de l'erreur quand le pas diminue, et rappelle que le nombre d'évaluations augmente en même temps.\n\nUn vrai générateur ajoute l'erreur du réseau et celle de l'estimation du champ dans des régions peu visitées. Les deux erreurs ne se corrigent pas l'une l'autre. Une erreur de troncature faible ne garantit pas une bonne image, et une image nette ne prouve pas que l'échantillonneur a bien intégré le champ.",
+      "code": {
+        "language": "python",
+        "explanation": "Euler explicite sur une ODE scalaire dont la solution exacte est connue. L'erreur finale diminue quand le nombre de pas augmente.",
+        "code": "import numpy as np\n\n# dx/dt = -2x + 4t, x(0) = 1. Solution exacte : x(t) = 2t - 1 + 2*exp(-2t).\ndef champ(x, t):\n    return -2 * x + 4 * t\n\ndef exact(t):\n    return 2 * t - 1 + 2 * np.exp(-2 * t)\n\nfor n in (2, 10, 100):\n    h = 1 / n\n    x = 1.0\n    for i in range(n):\n        x = x + h * champ(x, i * h)\n    print(f\"{n:3d} pas : erreur finale = {abs(x - exact(1.0)):.4f}\")",
+        "output": "  2 pas : erreur finale = 0.2707\n 10 pas : erreur finale = 0.0559\n100 pas : erreur finale = 0.0054",
+        "outputVerified": true
+      },
+      "diagram": {
+        "title": "Trois façons d'approcher une trajectoire",
+        "description": "Schéma illustratif : à gauche, Euler avec un pas grossier ; au centre, Euler avec un pas plus fin ; à droite, Heun avec un prédicteur et un correcteur. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 420\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Comparaison d'Euler grossier, d'Euler fin et de Heun sur une trajectoire courbe\">\n  <defs>\n    <marker id=\"fm-sampling-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#64748b\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"420\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Le pas et l'ordre du solveur changent l'approximation</text>\n  <text x=\"410\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"courbe\">\n    <path d=\"M60 300 C 130 120, 230 120, 300 260\" fill=\"none\" stroke=\"#334155\" stroke-width=\"6\" stroke-linecap=\"round\"/>\n  </g>\n\n  <g id=\"euler-grossier\">\n    <path d=\"M60 300 L 130 190 L 210 145 L 300 260\" fill=\"none\" stroke=\"#f472b6\" stroke-width=\"2.5\"/>\n    <circle cx=\"130\" cy=\"190\" r=\"4\" fill=\"#f472b6\"/><circle cx=\"210\" cy=\"145\" r=\"4\" fill=\"#f472b6\"/>\n    <text x=\"170\" y=\"350\" fill=\"#f9a8d4\" font-size=\"12\" text-anchor=\"middle\">Euler, pas grossier</text>\n  </g>\n\n  <g id=\"euler-fin\">\n    <path d=\"M340 300 C 410 120, 510 120, 580 260\" fill=\"none\" stroke=\"#334155\" stroke-width=\"6\" stroke-linecap=\"round\"/>\n    <path d=\"M340 300 L 370 240 L 400 195 L 435 165 L 475 150 L 515 160 L 550 195 L 580 260\" fill=\"none\" stroke=\"#38bdf8\" stroke-width=\"2.5\"/>\n    <text x=\"460\" y=\"350\" fill=\"#bae6fd\" font-size=\"12\" text-anchor=\"middle\">Euler, pas fin</text>\n  </g>\n\n  <g id=\"heun\">\n    <path d=\"M620 300 C 690 120, 790 120, 800 260\" fill=\"none\" stroke=\"#334155\" stroke-width=\"6\" stroke-linecap=\"round\"/>\n    <path d=\"M620 300 L 670 220 L 730 170 L 790 240\" fill=\"none\" stroke=\"#34d399\" stroke-width=\"2.5\"/>\n    <path d=\"M670 220 L 700 190\" fill=\"none\" stroke=\"#fbbf24\" stroke-width=\"2\" stroke-dasharray=\"4 4\"/>\n    <text x=\"735\" y=\"350\" fill=\"#a7f3d0\" font-size=\"12\" text-anchor=\"middle\">Heun</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. La trajectoire de référence",
+            "explanation": "La courbe grise représente la solution exacte de l'ODE. Le solveur ne la connaît pas ; il ne dispose que du champ.",
+            "highlight": [
+              "courbe"
+            ]
+          },
+          {
+            "title": "2. Un pas grossier",
+            "explanation": "Euler avance en ligne droite sur chaque intervalle. Avec peu de pas, la ligne brisée s'écarte de la courbe.",
+            "highlight": [
+              "euler-grossier"
+            ]
+          },
+          {
+            "title": "3. Un pas plus fin",
+            "explanation": "En réduisant le pas, la ligne brisée suit la courbe de plus près. Le nombre d'évaluations du réseau augmente.",
+            "highlight": [
+              "euler-fin"
+            ]
+          },
+          {
+            "title": "4. Un correcteur",
+            "explanation": "Heun utilise une prédiction puis une correction avec deux évaluations par pas. L'ordre de précision augmente, mais chaque pas coûte plus cher.",
+            "highlight": [
+              "heun"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Quel est l'ordre de l'erreur globale d'Euler explicite pour un champ régulier ?",
+          "options": [
+            "Un, c'est-à-dire proportionnelle au pas",
+            "Deux, c'est-à-dire proportionnelle au carré du pas",
+            "Zéro, l'erreur ne dépend pas du pas",
+            "Infini, l'erreur ne peut pas être bornée"
+          ],
+          "correctIndex": 0,
+          "explanation": "L'erreur locale est d'ordre h au carré et l'erreur globale d'ordre h. Diviser le pas par deux divise approximativement l'erreur globale par deux."
+        },
+        {
+          "question": "Combien d'évaluations du réseau un pas de Heun utilise-t-il ?",
+          "options": [
+            "Une",
+            "Deux",
+            "Trois",
+            "Aucune"
+          ],
+          "correctIndex": 1,
+          "explanation": "Heun évalue le champ au point de départ et au point prédit. Ces deux évaluations sont combinées pour former le pas corrigé."
+        },
+        {
+          "question": "Pourquoi comparer deux solveurs uniquement par leur nombre de pas est-il trompeur ?",
+          "options": [
+            "Parce que le nombre de pas ne change jamais l'erreur",
+            "Parce que tous les solveurs sont exacts",
+            "Parce que certains solveurs font plusieurs évaluations par pas et que la taille des pas compte aussi",
+            "Parce que le réseau ne calcule pas de vitesse"
+          ],
+          "correctIndex": 2,
+          "explanation": "Le coût réel dépend du nombre d'évaluations du réseau et de la taille des pas. Un pas de Heun coûte deux évaluations, et un pas plus fin réduit l'erreur de troncature."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Euler explicite",
+          "definition": "Solveur qui avance le long du champ avec un pas h, en utilisant une seule évaluation du champ par pas."
+        },
+        {
+          "term": "Heun",
+          "definition": "Solveur d'ordre deux qui combine une prédiction et une correction, avec deux évaluations du champ par pas."
+        },
+        {
+          "term": "NFE",
+          "definition": "Nombre total d'évaluations du réseau nécessaires pour intégrer une trajectoire. C'est une mesure de coût plus utile que le seul nombre de pas."
+        },
+        {
+          "term": "Erreur de troncature",
+          "definition": "Erreur introduite en remplaçant la trajectoire exacte par une suite finie de pas. Elle diminue quand le pas diminue, sous réserve de stabilité."
+        }
+      ],
+      "example": {
+        "title": "Euler en quatre pas",
+        "text": "**Exemple de calcul.** Un solveur d'Euler part de $x_0$ et applique $x_{t+1} = x_t + h\\,v(x_t, t)$ avec un pas $h$. Avec quatre pas, il évalue le champ quatre fois. Un solveur d'ordre plus élevé peut réduire l'erreur à nombre de pas égal, mais coûte plus cher par évaluation. Le bon compromis dépend du modèle, de la tolérance et du budget de latence."
+      },
+      "exercises": [
+        {
+          "title": "Euler",
+          "prompt": "Avec quatre pas et un pas de temps $h$, combien de fois évalue-t-on le champ ?",
+          "solution": "Quatre fois, une par pas. Un solveur d’ordre supérieur peut évaluer plusieurs fois par pas et coûter plus cher."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Lipman et al., Flow Matching for Generative Modeling, 2022.",
+          "href": "https://arxiv.org/abs/2210.02747"
+        },
+        {
+          "label": "Liu, Gong et Liu, Flow Straight and Fast: Learning to Generate and Transfer Data with Rectified Flow, 2022.",
+          "href": "https://arxiv.org/abs/2209.03003"
+        },
+        {
+          "label": "Li et He, Back to Basics: Let Denoising Generative Models Denoise, 2025.",
+          "href": "https://arxiv.org/abs/2511.13720"
+        }
+      ]
+    },
+    {
+      "id": "flow-vs-diffusion",
+      "title": "Flow Matching contre diffusion",
+      "keyTakeaways": [
+        "DDPM définit une chaîne de bruitage markovienne et apprend à l'inverser ; le Flow Matching choisit un chemin et régresse un champ de vitesses.",
+        "Les chemins de diffusion sont des cas particuliers du cadre du Flow Matching ; les deux familles ne s'opposent donc pas terme à terme.",
+        "Le choix de la quantité prédite, bruit, donnée propre ou vitesse, change la difficulté de régression et la façon dont les erreurs sont pondérées.",
+        "Aucune famille ne gagne sur tous les critères ; le choix dépend de la modalité, du budget d'échantillonnage, de l'évaluation et des contraintes de déploiement."
+      ],
+      "theory": "### Ce que fait DDPM\n\nUn modèle de diffusion de type DDPM (Ho, Jain et Abbeel, 2020) part d'une donnée $x_0$ et ajoute du bruit en plusieurs étapes. La chaîne forward est markovienne :\n\n$$ q(x_t\\mid x_{t-1})=\\mathcal{N}\\left(\\sqrt{1-\\beta_t}\\,x_{t-1},\\beta_t I\\right). $$\n\nOn peut l'écrire directement pour un niveau de bruit donné :\n\n$$ x_t=\\sqrt{\\bar\\alpha_t}\\,x_0+\\sqrt{1-\\bar\\alpha_t}\\,\\epsilon, \\qquad \\epsilon\\sim\\mathcal{N}(0,I). $$\n\nLe modèle apprend à inverser cette chaîne. La distribution reverse est une gaussienne dont la moyenne est paramétrée par un réseau :\n\n$$ p_\\theta(x_{t-1}\\mid x_t)=\\mathcal{N}\\left(\\mu_\\theta(x_t,t),\\Sigma_\\theta(x_t,t)\\right). $$\n\nL'entraînement maximise une borne inférieure de la log-vraisemblance, ce qui conduit souvent à prédire le bruit $\\epsilon$ ajouté. L'échantillonnage parcourt la chaîne inverse, éventuellement avec du bruit à chaque étape. Une version déterministe, l'ODE de probabilité, transporte les mêmes marginales et relie la diffusion aux flots continus.\n\n### Ce que fait le Flow Matching\n\nLe Flow Matching part d'un bruit et définit un chemin vers les données. Il régresse la vitesse de ce chemin, puis intègre une ODE. Il n'a pas besoin de définir une chaîne de Markov ni une borne variationnelle. La perte est une simple régression quadratique, et l'échantillonnage est une intégration numérique.\n\nLes deux familles partagent plusieurs ingrédients : un réseau qui dépend du temps, des données d'entraînement, une distribution de bruit, et une procédure d'échantillonnage itérative. Elles peuvent même utiliser des architectures identiques. La différence se situe dans la construction de la cible et dans le chemin suivi entre les distributions.\n\n### Un cadre, pas une opposition\n\nLipman et al. (2022) montrent que leur cadre inclut les chemins de diffusion comme cas particuliers. Autrement dit, on peut entraîner un flot continu le long d'un chemin de bruitage de type diffusion, avec une cible de vitesse. Le Flow Matching n'est donc pas une négation de la diffusion ; c'est une méthode d'entraînement de flots continus qui peut reprendre des chemins existants ou en choisir d'autres.\n\nEsser et al. (2024) entraînent une architecture de Transformateurs avec une formulation de rectified flow pour la synthèse d'images haute résolution. Cela brouille la frontière entre les étiquettes : « diffusion » désigne parfois une famille d'architectures et de procédés, pas une unique équation.\n\nLe tableau suivant résume les différences sans les transformer en hiérarchie.\n\n| Critère | DDPM | Flow Matching |\n| --- | --- | --- |\n| Cible principale | bruit, score ou moyenne inverse | vitesse du chemin |\n| Chemin | chaîne de Markov fixée par un calendrier | interpolant choisi |\n| Couplage | induit par le bruitage | choisi, indépendant, optimal ou reflow |\n| Entraînement | borne variationnelle, sans simuler la chaîne | régression conditionnelle, sans simuler l'ODE |\n| Échantillonnage | chaîne stochastique ou ODE de probabilité | ODE, ou interpolant stochastique |\n\nCe tableau cache des variantes. Une diffusion peut utiliser un solveur déterministe, et un modèle de flow peut ajouter du bruit pendant l'échantillonnage. Les étiquettes ne suffisent pas à décrire le comportement d'un système.\n\n### La question de la quantité prédite\n\nLi et He (2025) critiquent une habitude des modèles de débruitage : beaucoup prédisent le bruit ou une quantité bruitée, alors que les données naturelles vivent sur une variété de faible dimension. Ils défendent une prédiction directe de la donnée propre et montrent que des Transformateurs simples, appliqués à de grands patches de pixels, peuvent fonctionner sans tokenizer ni pré-entraînement.\n\nCette critique porte sur la paramétrisation, pas sur la seule famille d'échantillonneurs. Un champ de vitesse peut être prédit directement, ou déduit d'une prédiction de la donnée propre. Les deux formulations ne pondèrent pas les erreurs de la même façon, surtout près des extrémités du chemin. Le choix de la cible est donc un levier distinct du choix entre diffusion et Flow Matching.\n\n### Comment choisir\n\nPour une image, un modèle de diffusion entraîné sur un grand jeu de données peut être un choix solide. Un rectified flow peut faciliter l'échantillonnage en peu de pas et simplifier la formulation. Pour une modalité où les trajectoires sont naturellement continues, comme le mouvement ou l'audio, un flot continu peut être pertinent. Pour une application où la diversité importe, il faut examiner la couverture des modes, pas seulement la netteté d'un échantillon.\n\nAucun de ces arguments ne constitue une preuve universelle. Le résultat dépend des données, de l'architecture, du budget d'entraînement, du solveur et de la métrique. Une comparaison honnête fixe ces paramètres ou les fait varier explicitement, et rapporte les incertitudes. Un chiffre isolé ne suffit pas à classer deux familles.\n\n### Évaluer les échantillons\n\nLes métriques automatiques comme FID comparent des distributions de caractéristiques. Elles peuvent favoriser la netteté ou la ressemblance globale sans vérifier la composition, le texte ou la cohérence d'une scène. Les évaluations humaines apportent un autre regard, mais elles dépendent des consignes et des participants. Les mesures de précision et de rappel tentent de distinguer la qualité et la couverture, sans résumer toute la génération.\n\nIl faut aussi évaluer le coût : nombre d'évaluations du réseau, mémoire, latence, stabilité du solveur. Ces aspects ne se lisent pas dans une image. Un modèle plus rapide peut être moins fidèle, et un modèle plus fidèle peut être trop coûteux pour l'usage visé.\n\n### Ce qui reste ouvert\n\nLes modèles multimodaux combinent souvent plusieurs idées : un encodeur, un espace latent, un champ de vitesses, un solveur et parfois un mécanisme de guidance. La frontière entre diffusion, flow matching et rectified flow devient parfois une affaire de terminologie et d'implémentation. Ce qui reste commun, c'est la question du transport : comment passer d'une distribution simple à une distribution complexe, avec quel couplage, quelle cible et quel budget.\n\nLa réponse ne se trouve pas dans le nom de la méthode. Elle se trouve dans les expériences contrôlées, les sources et la mesure de ce que l'on prétend améliorer.",
+      "diagram": {
+        "title": "Débruitage et champ de vitesses, deux procédures",
+        "description": "Schéma illustratif : à gauche, une chaîne de débruitage progressive ; à droite, une ODE guidée par un champ de vitesses ; en bas, le budget se mesure en évaluations du réseau. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 820 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Chaîne de débruitage et ODE de Flow Matching avec un budget d'évaluations\">\n  <defs>\n    <marker id=\"fm-compare-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\n      <path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#94a3b8\"/>\n    </marker>\n  </defs>\n  <rect width=\"820\" height=\"440\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"410\" y=\"34\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Deux façons de relier bruit et données</text>\n  <text x=\"410\" y=\"56\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"ddpm\">\n    <text x=\"200\" y=\"96\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">débruitage de type DDPM</text>\n    <g fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\">\n      <rect x=\"55\" y=\"125\" width=\"58\" height=\"58\" rx=\"10\"/>\n      <rect x=\"135\" y=\"125\" width=\"58\" height=\"58\" rx=\"10\"/>\n      <rect x=\"215\" y=\"125\" width=\"58\" height=\"58\" rx=\"10\"/>\n      <rect x=\"295\" y=\"125\" width=\"58\" height=\"58\" rx=\"10\"/>\n    </g>\n    <text x=\"84\" y=\"160\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">bruit</text>\n    <text x=\"164\" y=\"160\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">xT</text>\n    <text x=\"244\" y=\"160\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">xt</text>\n    <text x=\"324\" y=\"160\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">x0</text>\n    <g stroke=\"#64748b\" stroke-width=\"2\" marker-end=\"url(#fm-compare-arrow)\">\n      <line x1=\"114\" y1=\"154\" x2=\"129\" y2=\"154\"/>\n      <line x1=\"194\" y1=\"154\" x2=\"209\" y2=\"154\"/>\n      <line x1=\"274\" y1=\"154\" x2=\"289\" y2=\"154\"/>\n    </g>\n    <text x=\"200\" y=\"220\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">étapes successives, souvent avec du bruit</text>\n  </g>\n\n  <g id=\"fm\">\n    <text x=\"620\" y=\"96\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">flot de type Flow Matching</text>\n    <circle cx=\"515\" cy=\"160\" r=\"22\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <circle cx=\"725\" cy=\"160\" r=\"22\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <path d=\"M540 160 C 590 110, 650 110, 700 160\" fill=\"none\" stroke=\"#fbbf24\" stroke-width=\"2.5\" marker-end=\"url(#fm-compare-arrow)\"/>\n    <text x=\"620\" y=\"125\" fill=\"#fde68a\" font-size=\"11\" text-anchor=\"middle\">champ v(x,t)</text>\n    <text x=\"515\" y=\"205\" fill=\"#bae6fd\" font-size=\"11\" text-anchor=\"middle\">bruit</text>\n    <text x=\"725\" y=\"205\" fill=\"#a7f3d0\" font-size=\"11\" text-anchor=\"middle\">donnée</text>\n    <text x=\"620\" y=\"240\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">intégration continue de l'ODE</text>\n  </g>\n\n  <g id=\"budget\">\n    <text x=\"410\" y=\"300\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">budget d'échantillonnage</text>\n    <text x=\"410\" y=\"322\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">mesuré en évaluations du réseau, pas en nombre d'images</text>\n    <rect x=\"150\" y=\"345\" width=\"200\" height=\"18\" rx=\"9\" fill=\"#1e293b\"/>\n    <rect x=\"150\" y=\"345\" width=\"140\" height=\"18\" rx=\"9\" fill=\"#38bdf8\"/>\n    <text x=\"360\" y=\"359\" fill=\"#bae6fd\" font-size=\"11\">chaîne stochastique</text>\n    <rect x=\"470\" y=\"345\" width=\"200\" height=\"18\" rx=\"9\" fill=\"#1e293b\"/>\n    <rect x=\"470\" y=\"345\" width=\"70\" height=\"18\" rx=\"9\" fill=\"#34d399\"/>\n    <text x=\"680\" y=\"359\" fill=\"#a7f3d0\" font-size=\"11\">ODE</text>\n    <text x=\"410\" y=\"405\" fill=\"#94a3b8\" font-size=\"10\" text-anchor=\"middle\">Les longueurs illustrent un budget, pas une mesure réelle.</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Le débruitage",
+            "explanation": "DDPM part d'un bruit et applique une chaîne inverse. Chaque étape retire une partie du bruit, souvent avec une composante aléatoire.",
+            "highlight": [
+              "ddpm"
+            ]
+          },
+          {
+            "title": "2. Le champ de vitesses",
+            "explanation": "Le Flow Matching définit une ODE. Un solveur suit le champ depuis le bruit jusqu'à la donnée, sans forcément ajouter de bruit.",
+            "highlight": [
+              "fm"
+            ]
+          },
+          {
+            "title": "3. Le budget",
+            "explanation": "Le coût se mesure en évaluations du réseau. Une chaîne et une ODE peuvent utiliser des budgets différents ; la longueur du dessin n'est pas une mesure.",
+            "highlight": [
+              "budget"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Quelle affirmation décrit correctement le rapport entre Flow Matching et diffusion ?",
+          "options": [
+            "Le Flow Matching interdit toute forme de bruit gaussien",
+            "Le Flow Matching peut utiliser des chemins de diffusion, qui sont un cas particulier de son cadre",
+            "La diffusion ne peut pas être écrite comme une ODE",
+            "Les deux méthodes ne partagent jamais d'architecture"
+          ],
+          "correctIndex": 1,
+          "explanation": "Lipman et al. montrent que les chemins de diffusion sont des cas particuliers. Le Flow Matching est un cadre d'entraînement de flots continus, pas une négation de la diffusion."
+        },
+        {
+          "question": "Que critiquent principalement Li et He (2025) dans les modèles de débruitage usuels ?",
+          "options": [
+            "Le fait d'utiliser des Transformateurs",
+            "Le fait de travailler sur des images",
+            "Le fait d'utiliser une perte quadratique",
+            "Le fait de prédire du bruit ou une quantité bruitée plutôt que la donnée propre"
+          ],
+          "correctIndex": 3,
+          "explanation": "Les auteurs défendent la prédiction directe de la donnée propre, en s'appuyant sur l'hypothèse que les données naturelles vivent sur une variété de faible dimension."
+        },
+        {
+          "question": "Pourquoi une seule métrique automatique ne suffit-elle pas à comparer deux générateurs ?",
+          "options": [
+            "Parce que toutes les métriques donnent exactement le même classement",
+            "Parce que les images générées n'ont pas de pixels",
+            "Parce qu'elle peut ignorer la composition, la couverture des modes ou le coût d'échantillonnage",
+            "Parce que la diffusion ne peut pas être évaluée"
+          ],
+          "correctIndex": 2,
+          "explanation": "Une métrique comme FID résume certains écarts de distribution, mais pas la fidélité au texte, la diversité ou le budget de calcul. Une comparaison sérieuse combine plusieurs mesures."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "DDPM",
+          "definition": "Modèle de diffusion qui définit une chaîne de bruitage markovienne et apprend une chaîne inverse pour générer des échantillons."
+        },
+        {
+          "term": "Score",
+          "definition": "Gradient du logarithme de la densité. Il indique la direction dans laquelle augmenter la probabilité et relie diffusion et ODE de probabilité."
+        },
+        {
+          "term": "ODE de probabilité",
+          "definition": "ODE déterministe dont les marginales sont les mêmes que celles d'un processus de diffusion stochastique."
+        },
+        {
+          "term": "Distillation",
+          "definition": "Entraînement d'un modèle rapide à imiter un modèle plus coûteux, souvent pour réduire le nombre d'étapes d'échantillonnage."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Choisir entre flux et diffusion",
+          "prompt": "Dans quel cas un flux à peu de pas peut-il être préférable à une diffusion classique ?",
+          "solution": "Quand la latence est critique et que la qualité à budget de pas est suffisante. Il faut comparer sur le même jeu et le même nombre d’évaluations, pas sur des réglages différents."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Esser et al., Scaling Rectified Flow Transformers for High-Resolution Image Synthesis, 2024.",
+          "href": "https://arxiv.org/abs/2403.03206"
+        },
+        {
+          "label": "Ho, Jain et Abbeel, Denoising Diffusion Probabilistic Models, 2020.",
+          "href": "https://arxiv.org/abs/2006.11239"
+        }
+      ]
+    },
+    {
+      "id": "choisir-solveur",
+      "title": "Choisir un solveur et évaluer un flux",
+      "keyTakeaways": [
+        "Le nombre de pas et le solveur changent la qualité et la latence d’un flux.",
+        "Un champ de vitesses appris n’est pas une garantie de trajectoire droite : le couplage et l’entraînement comptent.",
+        "Un solveur d’ordre élevé coûte plus cher par pas, mais peut réduire le nombre de pas nécessaire.",
+        "L’évaluation doit fixer la résolution, le nombre de pas, le conditionnement et le jeu de test.",
+        "La production ajoute la quantification, le matériel et la surveillance de la dérive."
+      ],
+      "theory": "### Le flux comme problème d'intégration\n\nUn flux apprend un champ de vitesses $v(x,t)$ qui déplace un échantillon de bruit vers une région de données. Pour générer, il faut intégrer une équation différentielle ordinaire entre deux temps. Le solveur choisi, le nombre de pas et la précision numérique déterminent le résultat. Le réseau ne produit pas directement l'image : il produit une direction à chaque pas.\n\nUn solveur d'Euler est simple : il avance dans la direction donnée par le champ, avec un pas fixe. Un solveur d'ordre plus élevé, comme Runge-Kutta, combine plusieurs évaluations pour réduire l'erreur. Le coût par pas augmente, mais le nombre de pas peut diminuer. Il n'existe pas de meilleur solveur dans l'absolu : le compromis dépend du champ, de la tolérance et du budget.\n\n### Pas, erreur et qualité\n\nRéduire le nombre de pas accélère la génération et peut introduire une erreur d'intégration. L'erreur ne se voit pas toujours comme un bruit : elle peut déplacer les détails, modifier les couleurs ou faire apparaître des artefacts. Il faut la mesurer sur des images et des conditions réelles, pas seulement sur une courbe de perte.\n\nLes trajectoires rectifiées cherchent à rendre le champ plus proche d'une ligne droite, ce qui permet moins de pas. Le reflow réassocie les échantillons et réentraîne le champ. Ce n'est pas une garantie : un couplage ou un entraînement insuffisant peut produire des trajectoires courbes. La qualité à quatre pas doit se mesurer, pas se supposer.\n\n### Conditionnement et guidage\n\nUn flux conditionné reçoit une légende, une classe ou une image. Le conditionnement peut être injecté par concaténation ou par attention croisée. Le guidage renforce l'adhérence à la condition, au prix d'une diversité plus faible. Un guidage trop fort peut produire des images rigides ou des artefacts.\n\nIl faut tester les conditions rares et les combinaisons inhabituelles. Une légende courte, une langue différente ou une contrainte de composition peuvent changer le résultat. Le modèle peut suivre la condition principale et ignorer un détail secondaire.\n\n### Entraînement et données\n\nLe Flow Matching conditionnel associe un bruit à une donnée et apprend la vitesse le long d'un chemin. Le couplage détermine le chemin. Un couplage optimal en transport peut donner des trajectoires plus directes, mais il coûte à calculer. Des couplages plus simples peuvent suffire.\n\nLa qualité des données compte. Des images mal légendées, des doublons ou des résolutions mélangées dégradent l'apprentissage. Le pré-traitement doit être le même à l'entraînement et à l'inférence. Les modèles de diffusion et de flux partagent souvent un encodeur latent : une erreur de quantification ou de normalisation se retrouve dans les images.\n\n### Production\n\nÀ l'inférence, la quantification, la taille du lot et le matériel changent la latence. Un modèle à quatre pas peut être plus rapide qu'un modèle à cinquante pas, mais pas nécessairement plus léger. Le cache, la compilation et les noyaux spécialisés comptent. Il faut mesurer sur la cible.\n\nLa surveillance suit la distribution des prompts, le taux de rejet, les artefacts, la latence et le coût. Une mise à jour du modèle ou du solveur peut changer le style. Il faut versionner le modèle, le solveur, le nombre de pas et les prompts de test.\n\n### Les questions à poser avant de choisir\n\nAvant de choisir un solveur, demandez quel budget de latence est réellement disponible, quelle qualité est attendue, quelles conditions sont critiques et quel matériel exécute le modèle. Un solveur d’ordre élevé peut améliorer l’intégration sans résoudre un problème de couplage ou de données. Un modèle à quatre pas peut être suffisant sur des images simples et échouer sur des détails fins. La comparaison doit inclure les cas rares et les prompts ambigus, pas seulement une moyenne sur des exemples faciles.\n\nUn même modèle peut donc sembler excellent avec un solveur coûteux et décevant avec un solveur bon marché. La comparaison honnête fixe le budget de calcul et le nombre d’évaluations du réseau. Elle publie aussi la tolérance et la précision numérique. Sans ces informations, un tableau de qualité par nombre de pas ne veut pas dire grand-chose.\n\n> **Repère.** Un flux n'est pas seulement un réseau : c'est un réseau, un couplage, un solveur et un budget. La qualité se mesure sur l'ensemble.",
+      "diagram": {
+        "title": "Réseau, couplage et solveur",
+        "description": "Schéma illustratif : le résultat d’un flux dépend du champ appris, du couplage et du solveur d’intégration.",
+        "svg": "<svg viewBox=\"0 0 900 360\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Schéma illustratif : les composants d'un flux génératif\">\n  <defs><marker id=\"flow7-arrow\" markerWidth=\"9\" markerHeight=\"7\" refX=\"7\" refY=\"3.5\" orient=\"auto\"><path d=\"M0,0 L9,3.5 L0,7 z\" fill=\"#38bdf8\" /></marker></defs>\n  <rect width=\"900\" height=\"360\" rx=\"16\" fill=\"#0f172a\" />\n  <text x=\"450\" y=\"32\" fill=\"#7dd3fc\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"16\" text-anchor=\"middle\">Du bruit à l'image : trois décisions</text>\n  <g id=\"flow7-coupling\"><rect x=\"30\" y=\"70\" width=\"230\" height=\"110\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" /><text x=\"145\" y=\"100\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Couplage</text><text x=\"145\" y=\"126\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">quel bruit pour quelle image</text><text x=\"145\" y=\"148\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">transport, trajectoire</text></g>\n  <g id=\"flow7-field\"><rect x=\"335\" y=\"70\" width=\"230\" height=\"110\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#a78bfa\" /><text x=\"450\" y=\"100\" fill=\"#ede9fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Champ</text><text x=\"450\" y=\"126\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">vélocité apprise</text><text x=\"450\" y=\"148\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">conditionnement</text></g>\n  <g id=\"flow7-solver\"><rect x=\"640\" y=\"70\" width=\"230\" height=\"110\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#34d399\" /><text x=\"755\" y=\"100\" fill=\"#a7f3d0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Solveur</text><text x=\"755\" y=\"126\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">Euler, Runge-Kutta</text><text x=\"755\" y=\"148\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">pas et erreur</text></g>\n  <path d=\"M262,125 L333,125\" stroke=\"#38bdf8\" stroke-width=\"2\" fill=\"none\" marker-end=\"url(#flow7-arrow)\" />\n  <path d=\"M567,125 L638,125\" stroke=\"#38bdf8\" stroke-width=\"2\" fill=\"none\" marker-end=\"url(#flow7-arrow)\" />\n  <g id=\"flow7-measure\"><rect x=\"90\" y=\"230\" width=\"720\" height=\"80\" rx=\"10\" fill=\"#0d1f2d\" stroke=\"#38bdf8\" /><text x=\"450\" y=\"258\" fill=\"#bae6fd\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Même modèle, plusieurs résultats</text><text x=\"450\" y=\"282\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Le nombre de pas, le solveur et la précision changent la qualité et la latence.</text><text x=\"450\" y=\"302\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">Mesurer la qualité à budget fixé, sur les conditions réelles.</text></g>\n</svg>",
+        "steps": [
+          {
+            "title": "Le couplage",
+            "explanation": "Le couplage décide quelles paires bruit-image sont reliées et influence la forme des trajectoires.",
+            "highlight": [
+              "flow7-coupling"
+            ]
+          },
+          {
+            "title": "Le champ et le solveur",
+            "explanation": "Le réseau apprend une vitesse ; le solveur l’intègre. Un meilleur solveur coûte plus cher par pas.",
+            "highlight": [
+              "flow7-field",
+              "flow7-solver"
+            ]
+          },
+          {
+            "title": "La mesure",
+            "explanation": "La qualité se mesure à budget de pas fixé, sur les images et les conditions réelles.",
+            "highlight": [
+              "flow7-measure"
+            ]
+          }
+        ]
+      },
+      "example": {
+        "title": "Choisir un solveur pour quatre pas",
+        "text": "**Scénario illustratif.** Une équipe veut générer des images en quatre évaluations du réseau. Elle compare Euler et un solveur d'ordre deux, à modèle et à nombre de pas égaux, sur 500 prompts. Elle mesure la qualité, les artefacts, la latence et le respect des conditions. Un solveur plus précis peut améliorer certains cas et en dégrader d'autres. Le choix se fait sur le résultat mesuré, pas sur l'ordre théorique du solveur."
+      },
+      "quiz": [
+        {
+          "question": "Que fait un solveur dans un modèle de flux ?",
+          "options": [
+            "Il entraîne le réseau",
+            "Il intègre le champ de vitesses pour produire un échantillon",
+            "Il stocke les images",
+            "Il compte les paramètres"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le réseau fournit une vitesse ; le solveur avance dans le temps pour produire l’échantillon."
+        },
+        {
+          "question": "Pourquoi comparer deux solveurs à nombre de pas égal ?",
+          "options": [
+            "Pour isoler l’effet du solveur de celui du budget",
+            "Pour garantir le même résultat",
+            "Pour supprimer le réseau",
+            "Pour éviter les données"
+          ],
+          "correctIndex": 0,
+          "explanation": "À budget égal, la différence observée vient du solveur. Sinon, le nombre de pas peut expliquer le résultat."
+        },
+        {
+          "question": "Que peut faire un guidage trop fort ?",
+          "options": [
+            "Augmenter la diversité sans coût",
+            "Réduire la diversité et produire des artefacts",
+            "Supprimer le conditionnement",
+            "Garantir la vérité"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le guidage renforce la condition, mais peut rigidifier les images et réduire la variété."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Solveur ODE",
+          "definition": "Méthode numérique qui avance le long d’un champ de vitesses, par exemple Euler ou Runge-Kutta."
+        },
+        {
+          "term": "Couplage",
+          "definition": "Association entre un bruit et une donnée qui définit la trajectoire d’entraînement."
+        },
+        {
+          "term": "Reflow",
+          "definition": "Réentraînement d’un flux sur des trajectoires réassociées pour les rendre plus directes."
+        },
+        {
+          "term": "Guidage",
+          "definition": "Renforcement du conditionnement pendant l’échantillonnage, au prix d’une diversité plus faible."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Comparer deux solveurs",
+          "prompt": "Un modèle à quatre pas produit des images floues avec Euler. Faut-il passer à un solveur d’ordre deux ou augmenter le nombre de pas ? Justifiez le protocole.",
+          "solution": "Il faut comparer les deux options sur le même modèle, les mêmes prompts et un budget de latence comparable. Un solveur d’ordre deux peut améliorer l’intégration, mais coûte plus cher par pas. Augmenter le nombre de pas peut aussi corriger le flou. La décision se prend sur la qualité et la latence mesurées."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Liu, Gong et Liu, Flow Straight and Fast: Learning to Generate and Transfer Data with Rectified Flow, 2022.",
+          "href": "https://arxiv.org/abs/2209.03003"
+        },
+        {
+          "label": "Esser et al., Scaling Rectified Flow Transformers for High-Resolution Image Synthesis, 2024.",
+          "href": "https://arxiv.org/abs/2403.03206"
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "label": "Lipman et al., Flow Matching for Generative Modeling, 2022.",
+      "href": "https://arxiv.org/abs/2210.02747"
+    },
+    {
+      "label": "Liu, Gong et Liu, Flow Straight and Fast: Learning to Generate and Transfer Data with Rectified Flow, 2022.",
+      "href": "https://arxiv.org/abs/2209.03003"
+    },
+    {
+      "label": "Esser et al., Scaling Rectified Flow Transformers for High-Resolution Image Synthesis, 2024.",
+      "href": "https://arxiv.org/abs/2403.03206"
+    },
+    {
+      "label": "Albergo et Vanden-Eijnden, Building Normalizing Flows with Stochastic Interpolants, 2022.",
+      "href": "https://arxiv.org/abs/2209.15571"
+    },
+    {
+      "label": "Li et He, Back to Basics: Let Denoising Generative Models Denoise, 2025.",
+      "href": "https://arxiv.org/abs/2511.13720"
+    },
+    {
+      "label": "Ho, Jain et Abbeel, Denoising Diffusion Probabilistic Models, 2020.",
+      "href": "https://arxiv.org/abs/2006.11239"
+    }
+  ],
+  "related": [
+    {
+      "to": "/cours-approfondis",
+      "title": "Cours approfondis",
+      "description": "Le catalogue des cours longs, pour replacer le Flow Matching parmi les autres sujets techniques du site."
+    },
+    {
+      "to": "/types-ia",
+      "title": "Les types d'IA",
+      "description": "Un panorama des grandes familles d'IA et de leurs usages."
+    },
+    {
+      "to": "/glossaire",
+      "title": "Glossaire de l'IA",
+      "description": "Les définitions de base sur les modèles génératifs, les probabilités et l'entraînement."
+    }
+  ]
+}

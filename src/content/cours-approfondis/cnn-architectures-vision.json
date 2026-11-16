@@ -1,0 +1,1138 @@
+{
+  "slug": "cnn-architectures-vision",
+  "title": "CNN et architectures vision : de LeNet-5 à ConvNeXt",
+  "subtitle": "Convolution, profondeur et efficacité : lire les choix qui structurent la vision par ordinateur",
+  "level": "Intermédiaire",
+  "tags": [
+    "CNN",
+    "Vision par ordinateur",
+    "Convolution",
+    "ResNet",
+    "Vision Transformer",
+    "ConvNeXt"
+  ],
+  "summary": "Un parcours en huit modules, de la convolution locale aux Transformers de vision et au choix d'un modèle. Les calculs de formes, de champ récepteur et de coût sont posés puis vérifiés avec du code PyTorch exécuté ; les architectures sont replacées dans leur contexte et dans leurs limites.",
+  "introduction": "La vision par ordinateur a longtemps reposé sur des descripteurs conçus à la main, puis sur des classifieurs appliqués à ces descriptions. LeNet-5 a montré, dès 1998, qu'un réseau pouvait apprendre les filtres utiles à partir de l'image elle-même. AlexNet a confirmé cette approche à grande échelle en 2012, puis la profondeur, les blocs résiduels, les convolutions séparables et l'attention ont fait évoluer les architectures. Ce cours explique d'abord le calcul d'une convolution et son coût réel, avant de parcourir les étapes qui mènent de LeNet-5 à ConvNeXt. Il ne promet pas de classer toutes les architectures : il donne les outils pour lire un article, vérifier une forme et mesurer un compromis. À la fin, le lecteur saura expliquer pourquoi un noyau $3 \\times 3$ peut remplacer un noyau $5 \\times 5$, ce que stocke réellement la mémoire d'entraînement et pourquoi un Vision Transformer demande plus de données qu'un réseau convolutif.",
+  "prerequisites": [
+    "Connaître les bases d'un réseau de neurones",
+    "Savoir ce qu'est une matrice",
+    "Avoir déjà vu une image comme tableau de pixels",
+    "Python et PyTorch débutant"
+  ],
+  "checkedOn": "2026-10-26",
+  "cover": {
+    "src": "pics/cours/cnn-architectures-vision.webp",
+    "alt": "Image fragmentée en carrés et cartes de caractéristiques superposées, métaphore d'un réseau convolutif."
+  },
+  "modules": [
+    {
+      "id": "convolution",
+      "title": "Convolution, noyau, stride et padding",
+      "keyTakeaways": [
+        "Une convolution applique le même petit noyau à toutes les positions spatiales ; la sortie possède autant de cartes que de filtres.",
+        "La taille de sortie se calcule à partir de la taille d'entrée, du noyau, du padding et du pas, en arrondissant vers le bas.",
+        "Le partage des poids réduit fortement le nombre de paramètres par rapport à une couche dense et rend la réponse équivariante aux translations.",
+        "Le padding conserve ou réduit la taille selon le mode ; le pas échantillonne plus ou moins densément la carte.",
+        "Une convolution $1 \\times 1$ mélange les canaux sans élargir le champ récepteur spatial."
+      ],
+      "theory": "### Une fenêtre qui glisse\n\nUne image numérique n'entre pas dans un réseau comme une photographie : c'est un tenseur de forme $H \\times W \\times C$, où $H$ et $W$ sont la hauteur et la largeur en pixels, et $C$ le nombre de canaux. Une image en niveaux de gris a un canal ; une image en couleurs en a généralement trois. Une convolution 2D applique un petit filtre, appelé noyau, à chaque position spatiale de ce tenseur. Pour un noyau de taille $K \\times K$ et $C$ canaux, le calcul local est un produit scalaire entre les $K \\times K \\times C$ valeurs de la fenêtre et les $K \\times K \\times C$ poids du noyau. Un biais est ajouté, puis le résultat est écrit dans une carte d'activation.\n\nUn filtre produit une carte. Une couche de convolution possède généralement plusieurs filtres : chacun balaie la même entrée et produit sa propre carte. La sortie a donc une profondeur égale au nombre de filtres. Cette organisation est décrite dans les notes CS231n, qui insistent sur deux idées : la connectivité locale et le partage des poids.\n\n### La forme de la sortie\n\nTrois nombres déterminent la taille de la sortie : la taille du noyau $K$, le pas de déplacement $S$ (stride) et la bordure ajoutée $P$ (padding). Pour une dimension, la formule est :\n\n$$H_{\\mathrm{out}} = \\left\\lfloor \\frac{H + 2P - K}{S} \\right\\rfloor + 1$$\n\nLa même formule s'applique à la largeur. La partie entière inférieure compte les positions où la fenêtre tient entièrement dans l'entrée. Une configuration dont le numérateur est négatif est invalide.\n\nPrenons une entrée de $32 \\times 32$ pixels. Avec un noyau $3 \\times 3$, un pas de 1 et une bordure de 1, la sortie mesure $32 \\times 32$ : la bordure compense la perte d'un pixel de chaque côté. Avec un noyau $5 \\times 5$, aucun padding et un pas de 2, la sortie mesure $14 \\times 14$, car $(32 - 5) / 2 + 1 = 14{,}5$, et la partie entière donne 14. Le pas de 2 divise approximativement la résolution par deux ; c'est une façon courante de réduire la taille spatiale sans couche de pooling.\n\n### Partage des poids et équivariance\n\nLe même noyau est réutilisé à toutes les positions. Cette décision a deux conséquences. D'abord, le nombre de paramètres ne dépend pas de la taille de l'image. Une couche qui transforme 3 canaux en 16 canaux avec des noyaux $3 \\times 3$ possède $16 \\times (3 \\times 3 \\times 3 + 1) = 448$ paramètres, quelle que soit la résolution. Une couche dense qui relierait les $32 \\times 32 \\times 3 = 3\\,072$ entrées à 16 sorties aurait $3\\,072 \\times 16 + 16 = 49\\,168$ paramètres. Ensuite, la réponse est équivariante aux translations : si l'image se décale d'un pixel, la carte se décale d'un pixel, car le même filtre est appliqué au nouvel emplacement.\n\nIl faut distinguer équivariance et invariance. Une convolution ne rend pas la sortie insensible à la position : elle déplace la réponse. Une invariance locale apparaît plutôt avec le pooling ou l'agrégation globale. Cette distinction compte pour la détection, où l'on veut savoir où se trouve un objet, et pour la classification, où seule la présence compte.\n\n### Padding, pas et convolution $1 \\times 1$\n\nLe padding ajoute des valeurs autour de l'entrée. Le mode « same » conserve la taille spatiale lorsque le pas vaut 1, avec une bordure de $(K - 1) / 2$ pour un noyau impair. Le mode « valid » n'ajoute rien et réduit la sortie. Les valeurs ajoutées sont souvent des zéros, mais d'autres remplissages existent ; le choix influence les bords de l'image.\n\nLe pas contrôle la densité d'échantillonnage. Un pas de 1 produit une carte dense ; un pas supérieur à 1 saute des positions et réduit la résolution. Un pas trop grand peut manquer des motifs fins, tandis qu'un pas de 1 partout coûte plus de calcul.\n\nUne convolution $1 \\times 1$ mérite une mention particulière. Son noyau ne couvre qu'un pixel : elle ne mélange pas les voisins spatiaux, mais combine les canaux à chaque position. Elle sert à réduire ou augmenter la profondeur, à projeter des caractéristiques et à construire des goulots d'étranglement. Elle est peu coûteuse en calcul spatial, mais reste une opération de mélange de canaux.\n\n### Convolution ou corrélation croisée\n\nLes bibliothèques d'apprentissage profond calculent en réalité une corrélation croisée : elles ne retournent pas le noyau avant de faire le produit scalaire. La différence est une symétrie près. Comme les poids sont appris, le réseau peut absorber ce retournement dans ses paramètres. Elle compte seulement si l'on compare un noyau fixé à une définition mathématique précise, ou si l'on réutilise des poids issus d'une autre convention.\n\n### Canaux, lots et coût\n\nPour un lot de $N$ images, l'entrée a la forme $(N, C, H, W)$ et la sortie $(N, F, H_{\\mathrm{out}}, W_{\\mathrm{out}})$. Chaque canal de sortie somme les contributions de tous les canaux d'entrée. Le lot n'ajoute pas de paramètres : il répète le même calcul sur plusieurs images.\n\nLe nombre de multiplications-additions d'une couche vaut $H_{\\mathrm{out}} \\times W_{\\mathrm{out}} \\times F \\times C \\times K \\times K$. Ce coût croît avec la surface de sortie, le nombre de canaux et le carré de la taille du noyau. Une implémentation classique transforme les fenêtres en colonnes (im2col) pour ramener le calcul à une multiplication de matrices ; cette transformation simplifie le code mais duplique des valeurs en mémoire.\n\n### Ce que la convolution ne fait pas\n\nUne seule couche ne voit qu'un patch local. Elle ne sait pas qu'un objet est un chat, ni où se trouve la tête dans l'image. Les couches successives combinent les réponses pour construire des motifs plus larges, et le champ récepteur augmente. Ce point est traité dans le module suivant. La convolution apprend aussi des filtres qui ne sont pas nécessairement interprétables : certains ressemblent à des détecteurs de bords, d'autres restent opaques. L'interprétation des cartes doit rester prudente.\n\n> **Repère.** Une convolution est un produit scalaire local, partagé sur toutes les positions. Sa force vient de cette contrainte, pas d'une prétendue compréhension de l'image.",
+      "diagram": {
+        "title": "Un noyau 3 x 3 parcourt une entrée 5 x 5",
+        "description": "Schéma illustratif : une fenêtre de 3 x 3 se déplace sur une entrée de 5 x 5 et produit une carte de 3 x 3. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 420\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Entrée 5 par 5, noyau 3 par 3, fenêtre glissante et sortie 3 par 3\">\n  <rect width=\"800\" height=\"420\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Une fenêtre locale parcourt l'image</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"entree-5x5\">\n    <text x=\"155\" y=\"92\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">entrée 5 x 5</text>\n    <g fill=\"#0ea5e9\" stroke=\"#0f172a\" stroke-width=\"1\">\n      <rect x=\"70\" y=\"110\" width=\"34\" height=\"34\" opacity=\"0.18\"/><rect x=\"104\" y=\"110\" width=\"34\" height=\"34\" opacity=\"0.26\"/><rect x=\"138\" y=\"110\" width=\"34\" height=\"34\" opacity=\"0.34\"/><rect x=\"172\" y=\"110\" width=\"34\" height=\"34\" opacity=\"0.42\"/><rect x=\"206\" y=\"110\" width=\"34\" height=\"34\" opacity=\"0.50\"/>\n      <rect x=\"70\" y=\"144\" width=\"34\" height=\"34\" opacity=\"0.26\"/><rect x=\"104\" y=\"144\" width=\"34\" height=\"34\" opacity=\"0.34\"/><rect x=\"138\" y=\"144\" width=\"34\" height=\"34\" opacity=\"0.42\"/><rect x=\"172\" y=\"144\" width=\"34\" height=\"34\" opacity=\"0.50\"/><rect x=\"206\" y=\"144\" width=\"34\" height=\"34\" opacity=\"0.58\"/>\n      <rect x=\"70\" y=\"178\" width=\"34\" height=\"34\" opacity=\"0.34\"/><rect x=\"104\" y=\"178\" width=\"34\" height=\"34\" opacity=\"0.42\"/><rect x=\"138\" y=\"178\" width=\"34\" height=\"34\" opacity=\"0.50\"/><rect x=\"172\" y=\"178\" width=\"34\" height=\"34\" opacity=\"0.58\"/><rect x=\"206\" y=\"178\" width=\"34\" height=\"34\" opacity=\"0.66\"/>\n      <rect x=\"70\" y=\"212\" width=\"34\" height=\"34\" opacity=\"0.42\"/><rect x=\"104\" y=\"212\" width=\"34\" height=\"34\" opacity=\"0.50\"/><rect x=\"138\" y=\"212\" width=\"34\" height=\"34\" opacity=\"0.58\"/><rect x=\"172\" y=\"212\" width=\"34\" height=\"34\" opacity=\"0.66\"/><rect x=\"206\" y=\"212\" width=\"34\" height=\"34\" opacity=\"0.74\"/>\n      <rect x=\"70\" y=\"246\" width=\"34\" height=\"34\" opacity=\"0.50\"/><rect x=\"104\" y=\"246\" width=\"34\" height=\"34\" opacity=\"0.58\"/><rect x=\"138\" y=\"246\" width=\"34\" height=\"34\" opacity=\"0.66\"/><rect x=\"172\" y=\"246\" width=\"34\" height=\"34\" opacity=\"0.74\"/><rect x=\"206\" y=\"246\" width=\"34\" height=\"34\" opacity=\"0.82\"/>\n    </g>\n  </g>\n\n  <rect id=\"fenetre\" x=\"70\" y=\"110\" width=\"102\" height=\"102\" fill=\"none\" stroke=\"#fbbf24\" stroke-width=\"3\"/>\n  <rect id=\"position-2\" x=\"138\" y=\"178\" width=\"102\" height=\"102\" fill=\"none\" stroke=\"#fbbf24\" stroke-width=\"1.5\" stroke-dasharray=\"6 4\"/>\n\n  <g id=\"noyau-3x3\">\n    <text x=\"365\" y=\"128\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">noyau 3 x 3</text>\n    <g fill=\"#fbbf24\" stroke=\"#0f172a\" stroke-width=\"1\">\n      <rect x=\"320\" y=\"145\" width=\"30\" height=\"30\" opacity=\"0.85\"/><rect x=\"350\" y=\"145\" width=\"30\" height=\"30\" opacity=\"0.65\"/><rect x=\"380\" y=\"145\" width=\"30\" height=\"30\" opacity=\"0.45\"/>\n      <rect x=\"320\" y=\"175\" width=\"30\" height=\"30\" opacity=\"0.65\"/><rect x=\"350\" y=\"175\" width=\"30\" height=\"30\" opacity=\"0.45\"/><rect x=\"380\" y=\"175\" width=\"30\" height=\"30\" opacity=\"0.25\"/>\n      <rect x=\"320\" y=\"205\" width=\"30\" height=\"30\" opacity=\"0.45\"/><rect x=\"350\" y=\"205\" width=\"30\" height=\"30\" opacity=\"0.25\"/><rect x=\"380\" y=\"205\" width=\"30\" height=\"30\" opacity=\"0.15\"/>\n    </g>\n    <text x=\"365\" y=\"266\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">poids partagés</text>\n  </g>\n\n  <g id=\"sortie-3x3\">\n    <text x=\"626\" y=\"128\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">sortie 3 x 3</text>\n    <g fill=\"#34d399\" stroke=\"#0f172a\" stroke-width=\"1\">\n      <rect x=\"560\" y=\"145\" width=\"44\" height=\"44\" opacity=\"0.35\"/><rect x=\"604\" y=\"145\" width=\"44\" height=\"44\" opacity=\"0.50\"/><rect x=\"648\" y=\"145\" width=\"44\" height=\"44\" opacity=\"0.65\"/>\n      <rect x=\"560\" y=\"189\" width=\"44\" height=\"44\" opacity=\"0.50\"/><rect x=\"604\" y=\"189\" width=\"44\" height=\"44\" opacity=\"0.65\"/><rect x=\"648\" y=\"189\" width=\"44\" height=\"44\" opacity=\"0.80\"/>\n      <rect x=\"560\" y=\"233\" width=\"44\" height=\"44\" opacity=\"0.65\"/><rect x=\"604\" y=\"233\" width=\"44\" height=\"44\" opacity=\"0.80\"/><rect x=\"648\" y=\"233\" width=\"44\" height=\"44\" opacity=\"0.95\"/>\n    </g>\n  </g>\n\n  <g stroke=\"#64748b\" stroke-width=\"2\">\n    <line x1=\"252\" y1=\"195\" x2=\"312\" y2=\"195\"/>\n    <line x1=\"412\" y1=\"195\" x2=\"552\" y2=\"195\"/>\n  </g>\n  <g fill=\"#64748b\">\n    <path d=\"M252 195 L262 190 L262 200 Z\"/>\n    <path d=\"M412 195 L422 190 L422 200 Z\"/>\n  </g>\n\n  <text x=\"400\" y=\"340\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Chaque position produit une valeur ; le noyau ne change pas.</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. L'entrée et le noyau",
+            "explanation": "L'entrée est une grille de pixels. Le noyau est un petit tableau de poids, ici de 3 x 3, qui définit le motif recherché.",
+            "highlight": [
+              "entree-5x5",
+              "noyau-3x3"
+            ]
+          },
+          {
+            "title": "2. Une position à la fois",
+            "explanation": "La fenêtre se place sur les trois premières lignes et colonnes. Le produit scalaire entre la fenêtre et le noyau donne une valeur.",
+            "highlight": [
+              "fenetre"
+            ]
+          },
+          {
+            "title": "3. Le glissement",
+            "explanation": "La fenêtre avance d'un pixel à chaque pas. La position en pointillés montre une position ultérieure, après deux pas ; le même noyau est réutilisé.",
+            "highlight": [
+              "position-2"
+            ]
+          },
+          {
+            "title": "4. La carte de sortie",
+            "explanation": "Avec un pas de 1 et aucun padding, une entrée 5 x 5 et un noyau 3 x 3 donnent une sortie 3 x 3. Chaque case est une réponse locale.",
+            "highlight": [
+              "sortie-3x3"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Création d'une convolution PyTorch, passage d'un tenseur de forme (1, 3, 32, 32), puis affichage de la forme de sortie et du nombre de paramètres. Le calcul de forme suit la formule du module.",
+        "code": "import torch\nfrom torch import nn\n\nconv = nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, stride=2, padding=1)\nx = torch.zeros(1, 3, 32, 32)\ny = conv(x)\n\nprint(\"forme d'entrée :\", tuple(x.shape))\nprint(\"forme de sortie :\", tuple(y.shape))\nprint(\"paramètres :\", sum(p.numel() for p in conv.parameters()))",
+        "output": "forme d'entrée : (1, 3, 32, 32)\nforme de sortie : (1, 16, 16, 16)\nparamètres : 448",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Une entrée de 32 x 32 pixels passe dans une convolution de noyau 5 x 5, avec un pas de 2 et aucun padding. Quelle est la taille spatiale de la sortie ?",
+          "options": [
+            "13 x 13",
+            "14 x 14",
+            "15 x 15",
+            "16 x 16"
+          ],
+          "correctIndex": 1,
+          "explanation": "La formule donne la partie entière de (32 - 5) / 2, plus 1, soit 13 + 1 = 14. La sortie mesure 14 x 14."
+        },
+        {
+          "question": "Que signifie le partage des poids dans une convolution ?",
+          "options": [
+            "Chaque position spatiale possède ses propres poids, indépendants des autres",
+            "Les poids sont tirés au hasard à chaque passe avant",
+            "Le même noyau est appliqué à toutes les positions, ce qui réduit le nombre de paramètres",
+            "Les canaux d'entrée partagent tous le même biais"
+          ],
+          "correctIndex": 2,
+          "explanation": "Un filtre unique balaie toute l'image. Le nombre de paramètres ne dépend donc pas de la résolution, et la réponse se déplace avec l'entrée."
+        },
+        {
+          "question": "À quoi sert une convolution 1 x 1 ?",
+          "options": [
+            "À augmenter le champ récepteur spatial sans ajouter de paramètres",
+            "À appliquer un flou sur les pixels voisins",
+            "À remplacer entièrement le pooling global",
+            "À mélanger les canaux à chaque position et à changer la profondeur"
+          ],
+          "correctIndex": 3,
+          "explanation": "Un noyau 1 x 1 ne regarde qu'un pixel. Il combine les canaux et sert surtout de projection ou de goulot d'étranglement, sans élargir le champ récepteur."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Convolution",
+          "definition": "Opération qui applique un petit noyau de poids à chaque position d'une entrée, avec partage des poids, et produit une carte d'activation."
+        },
+        {
+          "term": "Noyau",
+          "definition": "Petit tableau de poids, par exemple 3 x 3, qui définit le motif local détecté par un filtre."
+        },
+        {
+          "term": "Stride",
+          "definition": "Pas de déplacement de la fenêtre de convolution. Un pas supérieur à 1 réduit la résolution de la sortie."
+        },
+        {
+          "term": "Padding",
+          "definition": "Bordure de valeurs ajoutée autour de l'entrée avant la convolution, souvent pour conserver la taille spatiale."
+        },
+        {
+          "term": "Carte d'activation",
+          "definition": "Grille de réponses produite par un filtre. Une couche possède une carte par filtre."
+        }
+      ],
+      "example": {
+        "title": "Une couche 3 × 3 sur une image 224 × 224",
+        "text": "**Exemple de calcul.** Une couche reçoit un lot de 8 images de taille 224 × 224 × 3 et applique 64 filtres 3 × 3, avec un pas de 1 et un padding de 1. La sortie mesure 224 × 224 × 64. Chaque filtre possède 3 × 3 × 3 = 27 poids et un biais, soit 28 paramètres. La couche en compte 64 × 28 = 1 792. Le nombre de multiplications-additions par image vaut 224 × 224 × 64 × 27, soit environ 86,7 millions, et 693 millions pour le lot.\n\nCes nombres décrivent le calcul, pas la durée. La mémoire, le matériel et l'implémentation des noyaux décident de la latence. Une couche dense équivalente, qui relierait les 150 528 valeurs d'entrée aux 3 211 264 valeurs de sortie, aurait des centaines de milliards de poids. Le partage des poids est ce qui rend la convolution utilisable à cette échelle."
+      },
+      "exercises": [
+        {
+          "title": "Calculer une sortie sur deux couches",
+          "prompt": "Une entrée de 64 × 64 pixels traverse une première convolution à 16 filtres, de noyau 5 × 5, de pas 2 et sans padding, puis une convolution de noyau 3 × 3, de pas 1 et de padding 1. Calculez la taille spatiale après chaque couche, puis expliquez pourquoi le nombre de paramètres de la première couche ne dépend pas de la résolution de l'image.",
+          "solution": "Première couche : (64 - 5) / 2 + 1 = 30,5, la partie entière donne 30, donc une sortie de 30 × 30. Seconde couche : (30 + 2 - 3) / 1 + 1 = 30, donc 30 × 30. Le nombre de paramètres vaut F × (C × K × K + 1), ici 16 × (3 × 25 + 1) = 1 216 pour 16 cartes. Il ne contient ni H ni W : le même noyau est réutilisé à toutes les positions, c'est le partage des poids. Le coût en calcul, lui, dépend de la surface de sortie."
+        }
+      ],
+      "sources": [
+        {
+          "label": "LeCun et al., Gradient-Based Learning Applied to Document Recognition, 1998.",
+          "href": "https://ieeexplore.ieee.org/document/726791"
+        },
+        {
+          "label": "Stanford CS231n, notes sur les réseaux convolutifs, consulté le 21 octobre 2026.",
+          "href": "https://cs231n.github.io/convolutional-networks/"
+        }
+      ]
+    },
+    {
+      "id": "champs-recepteurs",
+      "title": "Dilatation, groupes, pooling et champ récepteur",
+      "keyTakeaways": [
+        "Le champ récepteur est la région de l'entrée qui influence une unité. Il grandit avec la profondeur, le pas et la taille des noyaux.",
+        "Empiler des convolutions 3 x 3 élargit le champ récepteur tout en gardant des noyaux petits et en ajoutant des non-linéarités.",
+        "Le pooling réduit la résolution, n'a aucun paramètre et fait croître le champ récepteur des couches suivantes ; il apporte une invariance locale mais perd de la précision spatiale.",
+        "La dilatation augmente le champ récepteur sans ajouter de paramètres, au prix d'un échantillonnage plus espacé.",
+        "Les convolutions groupées et depthwise réduisent les paramètres et les calculs, mais limitent le mélange d'information entre groupes."
+      ],
+      "theory": "### Définir le champ récepteur\n\nLe champ récepteur d'une unité est l'ensemble des pixels de l'entrée qui peuvent modifier sa valeur. Une convolution 3 x 3 a un champ de 3 x 3. Si l'on empile une seconde convolution 3 x 3, une unité de la seconde couche dépend de 5 x 5 pixels de l'entrée : chaque valeur de la première carte résume déjà 3 x 3 pixels, et la seconde fenêtre couvre 3 x 3 valeurs de cette carte. Trois convolutions 3 x 3 donnent un champ de 7 x 7.\n\nCe calcul se généralise avec deux suites. Soit $r_l$ le champ récepteur après la couche $l$, $k_l$ la taille de son noyau, $s_l$ son pas et $j_l$ le saut entre deux unités voisines dans l'entrée d'origine. On part de $r_0 = 1$ et $j_0 = 1$, puis :\n\n$$r_l = r_{l-1} + (k_l - 1)\\,j_{l-1} \\qquad j_l = j_{l-1}\\,s_l$$\n\nLe saut compte l'espacement, dans l'image d'origine, entre deux positions voisines de la carte courante. Un pooling de pas 2 double ce saut, ce qui accélère la croissance du champ dans les couches suivantes.\n\n| Empilement | Champ récepteur | Saut |\n| --- | --- | --- |\n| Trois convolutions 3 x 3 | 7 | 1 |\n| Deux convolutions 3 x 3 puis pooling 2 x 2 | 6 | 2 |\n| Convolution, convolution, pooling, convolution | 10 | 2 |\n\nCes valeurs supposent un padding qui conserve la taille et des pas de 1 avant le pooling. Elles montrent qu'un petit noyau répété peut couvrir une région plus large qu'un grand noyau isolé.\n\n### Pourquoi préférer plusieurs petits noyaux\n\nDeux convolutions 3 x 3 ont le même champ récepteur qu'une convolution 5 x 5. Le nombre de paramètres diffère : pour $C$ canaux d'entrée et de sortie, deux noyaux 3 x 3 coûtent $2 \\times 9C^2 = 18C^2$ poids, contre $25C^2$ pour un noyau 5 x 5. Trois convolutions 3 x 3 coûtent $27C^2$, contre $49C^2$ pour un noyau 7 x 7. À champ égal, la version empilée utilise moins de paramètres.\n\nElle ajoute aussi des non-linéarités entre les couches. Une seule convolution 5 x 5 applique une transformation linéaire suivie d'une activation ; deux convolutions 3 x 3 insèrent une activation intermédiaire. Cette composition peut représenter des fonctions plus riches. C'est l'argument que mettent en avant les architectures VGG, étudiées plus loin.\n\n### Le pooling\n\nLe pooling max ou moyen réduit une fenêtre à une valeur. Un pooling 2 x 2 de pas 2 divise la hauteur et la largeur par deux. Il n'a aucun paramètre et ne s'entraîne pas. Le max pooling conserve la réponse la plus forte de la fenêtre ; le pooling moyen conserve une moyenne. Le pooling global moyen réduit chaque carte à un seul nombre, ce qui permet de remplacer une grande couche dense par une agrégation compacte.\n\nLe pooling apporte une tolérance aux petits déplacements : une réponse qui se décale de un ou deux pixels dans la fenêtre peut produire la même valeur maximale. Il perd en revanche de la précision spatiale. Pour la classification, cette perte est souvent acceptable ; pour la segmentation ou la détection, elle peut gêner. C'est l'une des raisons pour lesquelles certains réseaux modernes remplacent le pooling par une convolution avec un pas supérieur à 1, qui apprend la réduction au lieu de l'imposer.\n\n### La dilatation\n\nUne convolution dilatée espace les points du noyau sans augmenter le nombre de poids. Un noyau 3 x 3 de taux $d=2$ échantillonne les pixels à deux unités d'intervalle et couvre une région de 5 x 5. La taille effective se calcule par :\n\n$$k_{\\mathrm{eff}} = k + (k - 1)(d - 1)$$\n\nUn noyau 3 x 3 avec $d=3$ couvre 7 x 7. La dilatation est utile pour élargir le contexte sans réduire la résolution, par exemple pour segmenter une image. Son inconvénient est un échantillonnage en grille : certains pixels ne sont jamais lus par le noyau. Combiner plusieurs taux, ou alterner convolutions dilatées et convolutions denses, limite cet effet.\n\n### Les groupes\n\nUne convolution groupée divise les canaux d'entrée en $g$ groupes et applique des filtres séparés à chaque groupe. Les paramètres et les calculs sont divisés par $g$ par rapport à une convolution dense. Le cas extrême $g = C$ est la convolution depthwise : chaque canal est filtré indépendamment, sans mélange entre canaux. Une convolution $1 \\times 1$ est ensuite nécessaire pour recombiner les canaux.\n\nLes groupes économisent des calculs, mais ils réduisent les interactions entre canaux. Un groupe ne voit jamais les canaux des autres groupes au sein de la même couche. Ce compromis est au cœur des architectures efficaces étudiées dans le module 6.\n\n### Champ théorique et champ effectif\n\nLe champ récepteur calculé par la formule est une borne théorique. Tous les pixels de cette région ne contribuent pas avec le même poids : les bords de la fenêtre sont vus par moins de chemins que le centre, et les non-linéarités peuvent annuler certaines contributions. Le champ effectif, celui qui influence réellement la sortie, est souvent plus petit. Cette nuance invite à ne pas conclure qu'une unité « voit » toute la scène parce que le calcul donne un grand nombre.\n\n> **Repère.** Le champ récepteur se calcule, mais il ne se lit pas directement dans les activations. La profondeur, le pas et le pooling le font grandir ; la dilatation l'élargit sans poids supplémentaires.",
+      "diagram": {
+        "title": "Trois convolutions, un champ qui grandit",
+        "description": "Schéma illustratif : trois cartes successives montrent un champ récepteur de 3 x 3, puis 5 x 5, puis 7 x 7. Le pooling et la dilatation sont représentés comme deux variantes. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 460\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Croissance du champ récepteur après trois convolutions, avec pooling et dilatation\">\n  <rect width=\"800\" height=\"460\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Le champ récepteur grandit avec la profondeur</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"conv1\">\n    <text x=\"125\" y=\"92\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">après convolution 1</text>\n    <g fill=\"#0ea5e9\" stroke=\"#0f172a\" stroke-width=\"1\">\n      <rect x=\"48\" y=\"110\" width=\"22\" height=\"22\" opacity=\"0.15\"/><rect x=\"70\" y=\"110\" width=\"22\" height=\"22\" opacity=\"0.22\"/><rect x=\"92\" y=\"110\" width=\"22\" height=\"22\" opacity=\"0.30\"/><rect x=\"114\" y=\"110\" width=\"22\" height=\"22\" opacity=\"0.38\"/><rect x=\"136\" y=\"110\" width=\"22\" height=\"22\" opacity=\"0.46\"/><rect x=\"158\" y=\"110\" width=\"22\" height=\"22\" opacity=\"0.54\"/><rect x=\"180\" y=\"110\" width=\"22\" height=\"22\" opacity=\"0.62\"/>\n      <rect x=\"48\" y=\"132\" width=\"22\" height=\"22\" opacity=\"0.22\"/><rect x=\"70\" y=\"132\" width=\"22\" height=\"22\" opacity=\"0.30\"/><rect x=\"92\" y=\"132\" width=\"22\" height=\"22\" opacity=\"0.38\"/><rect x=\"114\" y=\"132\" width=\"22\" height=\"22\" opacity=\"0.46\"/><rect x=\"136\" y=\"132\" width=\"22\" height=\"22\" opacity=\"0.54\"/><rect x=\"158\" y=\"132\" width=\"22\" height=\"22\" opacity=\"0.62\"/><rect x=\"180\" y=\"132\" width=\"22\" height=\"22\" opacity=\"0.70\"/>\n      <rect x=\"48\" y=\"154\" width=\"22\" height=\"22\" opacity=\"0.30\"/><rect x=\"70\" y=\"154\" width=\"22\" height=\"22\" opacity=\"0.38\"/><rect x=\"92\" y=\"154\" width=\"22\" height=\"22\" opacity=\"0.46\"/><rect x=\"114\" y=\"154\" width=\"22\" height=\"22\" opacity=\"0.54\"/><rect x=\"136\" y=\"154\" width=\"22\" height=\"22\" opacity=\"0.62\"/><rect x=\"158\" y=\"154\" width=\"22\" height=\"22\" opacity=\"0.70\"/><rect x=\"180\" y=\"154\" width=\"22\" height=\"22\" opacity=\"0.78\"/>\n      <rect x=\"48\" y=\"176\" width=\"22\" height=\"22\" opacity=\"0.38\"/><rect x=\"70\" y=\"176\" width=\"22\" height=\"22\" opacity=\"0.46\"/><rect x=\"92\" y=\"176\" width=\"22\" height=\"22\" opacity=\"0.54\"/><rect x=\"114\" y=\"176\" width=\"22\" height=\"22\" opacity=\"0.62\"/><rect x=\"136\" y=\"176\" width=\"22\" height=\"22\" opacity=\"0.70\"/><rect x=\"158\" y=\"176\" width=\"22\" height=\"22\" opacity=\"0.78\"/><rect x=\"180\" y=\"176\" width=\"22\" height=\"22\" opacity=\"0.86\"/>\n    </g>\n    <rect x=\"92\" y=\"132\" width=\"66\" height=\"66\" fill=\"none\" stroke=\"#fbbf24\" stroke-width=\"2.5\"/>\n    <text x=\"125\" y=\"222\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">champ 3</text>\n  </g>\n\n  <g id=\"conv2\">\n    <text x=\"365\" y=\"92\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">après convolution 2</text>\n    <g fill=\"#0ea5e9\" stroke=\"#0f172a\" stroke-width=\"1\">\n      <rect x=\"288\" y=\"110\" width=\"22\" height=\"22\" opacity=\"0.15\"/><rect x=\"310\" y=\"110\" width=\"22\" height=\"22\" opacity=\"0.22\"/><rect x=\"332\" y=\"110\" width=\"22\" height=\"22\" opacity=\"0.30\"/><rect x=\"354\" y=\"110\" width=\"22\" height=\"22\" opacity=\"0.38\"/><rect x=\"376\" y=\"110\" width=\"22\" height=\"22\" opacity=\"0.46\"/><rect x=\"398\" y=\"110\" width=\"22\" height=\"22\" opacity=\"0.54\"/><rect x=\"420\" y=\"110\" width=\"22\" height=\"22\" opacity=\"0.62\"/>\n      <rect x=\"288\" y=\"132\" width=\"22\" height=\"22\" opacity=\"0.22\"/><rect x=\"310\" y=\"132\" width=\"22\" height=\"22\" opacity=\"0.30\"/><rect x=\"332\" y=\"132\" width=\"22\" height=\"22\" opacity=\"0.38\"/><rect x=\"354\" y=\"132\" width=\"22\" height=\"22\" opacity=\"0.46\"/><rect x=\"376\" y=\"132\" width=\"22\" height=\"22\" opacity=\"0.54\"/><rect x=\"398\" y=\"132\" width=\"22\" height=\"22\" opacity=\"0.62\"/><rect x=\"420\" y=\"132\" width=\"22\" height=\"22\" opacity=\"0.70\"/>\n      <rect x=\"288\" y=\"154\" width=\"22\" height=\"22\" opacity=\"0.30\"/><rect x=\"310\" y=\"154\" width=\"22\" height=\"22\" opacity=\"0.38\"/><rect x=\"332\" y=\"154\" width=\"22\" height=\"22\" opacity=\"0.46\"/><rect x=\"354\" y=\"154\" width=\"22\" height=\"22\" opacity=\"0.54\"/><rect x=\"376\" y=\"154\" width=\"22\" height=\"22\" opacity=\"0.62\"/><rect x=\"398\" y=\"154\" width=\"22\" height=\"22\" opacity=\"0.70\"/><rect x=\"420\" y=\"154\" width=\"22\" height=\"22\" opacity=\"0.78\"/>\n      <rect x=\"288\" y=\"176\" width=\"22\" height=\"22\" opacity=\"0.38\"/><rect x=\"310\" y=\"176\" width=\"22\" height=\"22\" opacity=\"0.46\"/><rect x=\"332\" y=\"176\" width=\"22\" height=\"22\" opacity=\"0.54\"/><rect x=\"354\" y=\"176\" width=\"22\" height=\"22\" opacity=\"0.62\"/><rect x=\"376\" y=\"176\" width=\"22\" height=\"22\" opacity=\"0.70\"/><rect x=\"398\" y=\"176\" width=\"22\" height=\"22\" opacity=\"0.78\"/><rect x=\"420\" y=\"176\" width=\"22\" height=\"22\" opacity=\"0.86\"/>\n    </g>\n    <rect x=\"310\" y=\"110\" width=\"110\" height=\"110\" fill=\"none\" stroke=\"#fbbf24\" stroke-width=\"2.5\"/>\n    <text x=\"365\" y=\"244\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">champ 5</text>\n  </g>\n\n  <g id=\"conv3\">\n    <text x=\"605\" y=\"92\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">après convolution 3</text>\n    <g fill=\"#0ea5e9\" stroke=\"#0f172a\" stroke-width=\"1\">\n      <rect x=\"528\" y=\"110\" width=\"22\" height=\"22\" opacity=\"0.15\"/><rect x=\"550\" y=\"110\" width=\"22\" height=\"22\" opacity=\"0.22\"/><rect x=\"572\" y=\"110\" width=\"22\" height=\"22\" opacity=\"0.30\"/><rect x=\"594\" y=\"110\" width=\"22\" height=\"22\" opacity=\"0.38\"/><rect x=\"616\" y=\"110\" width=\"22\" height=\"22\" opacity=\"0.46\"/><rect x=\"638\" y=\"110\" width=\"22\" height=\"22\" opacity=\"0.54\"/><rect x=\"660\" y=\"110\" width=\"22\" height=\"22\" opacity=\"0.62\"/>\n      <rect x=\"528\" y=\"132\" width=\"22\" height=\"22\" opacity=\"0.22\"/><rect x=\"550\" y=\"132\" width=\"22\" height=\"22\" opacity=\"0.30\"/><rect x=\"572\" y=\"132\" width=\"22\" height=\"22\" opacity=\"0.38\"/><rect x=\"594\" y=\"132\" width=\"22\" height=\"22\" opacity=\"0.46\"/><rect x=\"616\" y=\"132\" width=\"22\" height=\"22\" opacity=\"0.54\"/><rect x=\"638\" y=\"132\" width=\"22\" height=\"22\" opacity=\"0.62\"/><rect x=\"660\" y=\"132\" width=\"22\" height=\"22\" opacity=\"0.70\"/>\n      <rect x=\"528\" y=\"154\" width=\"22\" height=\"22\" opacity=\"0.30\"/><rect x=\"550\" y=\"154\" width=\"22\" height=\"22\" opacity=\"0.38\"/><rect x=\"572\" y=\"154\" width=\"22\" height=\"22\" opacity=\"0.46\"/><rect x=\"594\" y=\"154\" width=\"22\" height=\"22\" opacity=\"0.54\"/><rect x=\"616\" y=\"154\" width=\"22\" height=\"22\" opacity=\"0.62\"/><rect x=\"638\" y=\"154\" width=\"22\" height=\"22\" opacity=\"0.70\"/><rect x=\"660\" y=\"154\" width=\"22\" height=\"22\" opacity=\"0.78\"/>\n      <rect x=\"528\" y=\"176\" width=\"22\" height=\"22\" opacity=\"0.38\"/><rect x=\"550\" y=\"176\" width=\"22\" height=\"22\" opacity=\"0.46\"/><rect x=\"572\" y=\"176\" width=\"22\" height=\"22\" opacity=\"0.54\"/><rect x=\"594\" y=\"176\" width=\"22\" height=\"22\" opacity=\"0.62\"/><rect x=\"616\" y=\"176\" width=\"22\" height=\"22\" opacity=\"0.70\"/><rect x=\"638\" y=\"176\" width=\"22\" height=\"22\" opacity=\"0.78\"/><rect x=\"660\" y=\"176\" width=\"22\" height=\"22\" opacity=\"0.86\"/>\n    </g>\n    <rect x=\"528\" y=\"110\" width=\"154\" height=\"110\" fill=\"none\" stroke=\"#fbbf24\" stroke-width=\"2.5\"/>\n    <text x=\"605\" y=\"244\" fill=\"#fcd34d\" font-size=\"11\" text-anchor=\"middle\">champ 7</text>\n  </g>\n\n  <g id=\"pooling\">\n    <rect x=\"80\" y=\"300\" width=\"280\" height=\"92\" rx=\"12\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"220\" y=\"330\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">pooling 2 x 2, pas 2</text>\n    <text x=\"220\" y=\"354\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">réduit la résolution, aucun paramètre</text>\n    <text x=\"220\" y=\"376\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">le saut double, le champ grandit</text>\n  </g>\n\n  <g id=\"dilation\">\n    <rect x=\"440\" y=\"300\" width=\"280\" height=\"92\" rx=\"12\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"580\" y=\"330\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">convolution dilatée</text>\n    <text x=\"580\" y=\"354\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">même nombre de poids</text>\n    <text x=\"580\" y=\"376\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">échantillonnage plus espacé</text>\n  </g>\n\n  <g stroke=\"#64748b\" stroke-width=\"2\">\n    <line x1=\"215\" y1=\"200\" x2=\"278\" y2=\"200\"/>\n    <line x1=\"455\" y1=\"200\" x2=\"518\" y2=\"200\"/>\n  </g>\n  <g fill=\"#64748b\">\n    <path d=\"M215 200 L225 195 L225 205 Z\"/>\n    <path d=\"M455 200 L465 195 L465 205 Z\"/>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Une première convolution",
+            "explanation": "Un noyau 3 x 3 donne à chaque unité un champ de 3 x 3 pixels dans l'image d'origine.",
+            "highlight": [
+              "conv1"
+            ]
+          },
+          {
+            "title": "2. Une deuxième convolution",
+            "explanation": "La seconde couche combine des unités dont chacune voit déjà 3 x 3 pixels. Le champ passe à 5 x 5.",
+            "highlight": [
+              "conv2"
+            ]
+          },
+          {
+            "title": "3. Une troisième convolution",
+            "explanation": "Le champ atteint 7 x 7. Trois petits noyaux couvrent la même région qu'un noyau 7 x 7, avec moins de paramètres et plus de non-linéarités.",
+            "highlight": [
+              "conv3"
+            ]
+          },
+          {
+            "title": "4. Deux façons d'élargir encore",
+            "explanation": "Le pooling réduit la résolution et double le saut. La dilatation espace les points du noyau sans ajouter de poids. Les deux élargissent le champ, avec des compromis différents.",
+            "highlight": [
+              "pooling",
+              "dilation"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Un calculateur de champ récepteur pour des piles de couches décrites par leur taille de noyau et leur pas. Le script traite aussi une convolution dilatée en saisissant sa taille effective. Il suppose un padding qui conserve la taille.",
+        "code": "def champ_recepteur(couches):\n    r, saut = 1, 1\n    for noyau, stride in couches:\n        r += (noyau - 1) * saut\n        saut *= stride\n    return r, saut\n\npiles = {\n    \"trois convolutions 3 x 3\": [(3, 1), (3, 1), (3, 1)],\n    \"deux convolutions puis pooling 2 x 2\": [(3, 1), (3, 1), (2, 2)],\n    \"conv, conv, pooling, conv\": [(3, 1), (3, 1), (2, 2), (3, 1)],\n    \"conv dilatée 3 x 3 (d=2) puis conv 3 x 3\": [(5, 1), (3, 1)],\n}\n\nfor nom, couches in piles.items():\n    r, saut = champ_recepteur(couches)\n    print(f\"{nom} : champ {r}, saut {saut}\")",
+        "output": "trois convolutions 3 x 3 : champ 7, saut 1\ndeux convolutions puis pooling 2 x 2 : champ 6, saut 2\nconv, conv, pooling, conv : champ 10, saut 2\nconv dilatée 3 x 3 (d=2) puis conv 3 x 3 : champ 7, saut 1",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Quel est l'effet d'un pooling 2 x 2 de pas 2 sur une carte d'activation ?",
+          "options": [
+            "Il divise la hauteur et la largeur par deux, sans ajouter de paramètres, et fait croître le champ récepteur des couches suivantes",
+            "Il double le nombre de canaux",
+            "Il ajoute deux poids par canal",
+            "Il conserve la résolution et supprime le biais"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le pooling agrège chaque fenêtre de 2 x 2. La résolution diminue, aucun poids n'est appris et le saut entre unités augmente."
+        },
+        {
+          "question": "Quel est le principal intérêt d'une convolution dilatée ?",
+          "options": [
+            "Elle réduit le nombre de canaux d'entrée",
+            "Elle remplace la fonction d'activation",
+            "Elle élargit le champ récepteur sans ajouter de paramètres, au prix d'un échantillonnage plus espacé",
+            "Elle garantit une invariance exacte aux rotations"
+          ],
+          "correctIndex": 2,
+          "explanation": "La dilatation espace les points du noyau. Le champ effectif augmente, mais certains pixels ne sont pas lus par le noyau."
+        },
+        {
+          "question": "Que fait une convolution groupée qui répartit les canaux en plusieurs groupes ?",
+          "options": [
+            "Elle applique le même groupe de filtres à tous les canaux",
+            "Elle divise les canaux en groupes traités séparément, ce qui réduit les paramètres et les calculs",
+            "Elle augmente le nombre de canaux de sortie sans calcul supplémentaire",
+            "Elle supprime la nécessité d'une convolution 1 x 1"
+          ],
+          "correctIndex": 1,
+          "explanation": "Chaque groupe possède ses propres filtres. Les paramètres et les FLOPs diminuent, mais l'information ne circule pas entre groupes dans cette couche."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Champ récepteur",
+          "definition": "Région de l'entrée dont les pixels peuvent influencer la valeur d'une unité donnée."
+        },
+        {
+          "term": "Pooling",
+          "definition": "Agrégation d'une fenêtre spatiale en une valeur, souvent le maximum ou la moyenne. Il réduit la résolution et n'a pas de paramètres."
+        },
+        {
+          "term": "Dilatation",
+          "definition": "Espacement des points d'un noyau. Elle élargit le champ récepteur sans augmenter le nombre de poids."
+        },
+        {
+          "term": "Convolution groupée",
+          "definition": "Convolution qui traite séparément des groupes de canaux, réduisant les paramètres et les calculs au prix d'un mélange limité entre groupes."
+        },
+        {
+          "term": "Champ récepteur effectif",
+          "definition": "Partie du champ théorique qui influence réellement la sortie, souvent plus petite que le calcul ne le suggère."
+        }
+      ],
+      "example": {
+        "title": "Trois noyaux 3 × 3 contre un noyau 7 × 7",
+        "text": "**Exemple de calcul.** Pour 64 canaux d'entrée et de sortie, une convolution 7 × 7 possède 49 × 64 × 64 = 200 704 poids, sans les biais. Trois convolutions 3 × 3 en possèdent 3 × 9 × 64 × 64 = 110 592. Les deux montages ont un champ récepteur de 7 × 7, mais la version empilée utilise environ 45 % de poids en moins et insère deux activations supplémentaires. Une convolution dilatée 3 × 3 de taux 2 a un noyau effectif 5 × 5 pour seulement 9 × 64 × 64 poids. Ces comparaisons supposent les mêmes canaux, le même padding et un pas de 1. Elles illustrent le compromis : on peut élargir le champ sans ajouter de poids, ou réduire les paramètres en empilant des noyaux, au prix de plus de couches et d'activations."
+      },
+      "exercises": [
+        {
+          "title": "Champ récepteur avec un pooling",
+          "prompt": "On empile deux convolutions 3 × 3 de pas 1, un pooling 2 × 2 de pas 2, puis une convolution 3 × 3 de pas 1. En partant de r = 1 et j = 1, appliquez r ← r + (k - 1) j et j ← j × s à chaque étape. Donnez le champ récepteur et le saut final, puis comparez avec trois convolutions 3 × 3 et expliquez le rôle du pooling.",
+          "solution": "Première convolution : r = 1 + 2 × 1 = 3, j = 1. Deuxième : r = 3 + 2 = 5. Pooling : r = 5 + (2 - 1) × 1 = 6, j = 2. Dernière convolution : r = 6 + 2 × 2 = 10, j = 2. Le montage couvre donc 10 pixels, contre 7 pour trois convolutions 3 × 3. Le pooling n'ajoute aucun paramètre : il réduit la résolution et double le saut, ce qui fait compter chaque nouvelle convolution sur une plus grande distance dans l'image d'origine. Il fait perdre de la précision spatiale."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Stanford CS231n, notes sur les réseaux convolutifs, consulté le 21 octobre 2026.",
+          "href": "https://cs231n.github.io/convolutional-networks/"
+        },
+        {
+          "label": "Li et al., A Survey of Convolutional Neural Networks: Analysis, Applications, and Prospects, 2020.",
+          "href": "https://arxiv.org/abs/2004.02806"
+        }
+      ]
+    },
+    {
+      "id": "cout-memoire",
+      "title": "Mémoire, latence et FLOPs",
+      "keyTakeaways": [
+        "Les paramètres d'une convolution se calculent à partir du nombre de canaux, de la taille du noyau et du nombre de filtres ; les activations dépendent de la taille spatiale et du lot.",
+        "À l'entraînement, la mémoire contient les poids, leurs gradients, l'état de l'optimiseur et les activations conservées pour la rétropropagation.",
+        "Le lot multiplie la mémoire des activations, pas celle des poids.",
+        "Les FLOPs ne déterminent pas directement la latence : la bande passante mémoire, l'intensité arithmétique et l'occupation du matériel comptent aussi.",
+        "Une mesure sur le matériel cible vaut mieux qu'une estimation théorique pour décider d'un déploiement."
+      ],
+      "theory": "### Trois quantités à distinguer\n\nUn modèle se décrit par des paramètres, des activations et des opérations. Les paramètres sont les poids appris. Les activations sont les tenseurs intermédiaires produits par les couches. Les opérations, souvent comptées en multiplications-additions (MAC) ou en FLOPs, mesurent le travail arithmétique. Ces trois quantités ne varient pas ensemble : un modèle peut avoir peu de paramètres et beaucoup d'activations, ou beaucoup de calculs et peu de poids.\n\nPour une convolution qui passe de $C$ canaux d'entrée à $F$ canaux de sortie avec un noyau $K \\times K$, le nombre de paramètres vaut $F \\times (C \\times K \\times K + 1)$. Le terme $C \\times K \\times K$ compte les poids d'un filtre, et le 1 son biais. Le nombre de MACs vaut $H_{\\mathrm{out}} \\times W_{\\mathrm{out}} \\times F \\times C \\times K \\times K$. Si l'on compte une multiplication et une addition comme deux FLOPs, il faut doubler ce nombre. Les deux conventions existent ; il faut préciser laquelle on utilise.\n\n### La mémoire d'entraînement\n\nÀ l'entraînement, les poids ne suffisent pas. Il faut conserver leurs gradients, qui ont la même taille, et l'état de l'optimiseur. Une descente de gradient stochastique avec momentum garde un vecteur par paramètre ; Adam en garde deux, souvent appelés moments. À cela s'ajoutent les activations de la passe avant, nécessaires pour calculer les gradients lors de la rétropropagation. Ces activations peuvent dominer la mémoire bien avant les poids.\n\nPrenons une couche qui transforme 3 canaux en 64 canaux avec un noyau 3 x 3, sur une entrée de 224 x 224, avec un lot de 8. Les paramètres valent $64 \\times (3 \\times 9 + 1) = 1\\,792$. Les MACs par image valent $224 \\times 224 \\times 64 \\times 3 \\times 9 = 86\\,704\\,128$, soit environ 87 millions. Une activation en float32 occupe 4 octets par valeur. Pour le lot, la sortie de cette seule couche représente $8 \\times 64 \\times 224 \\times 224 \\times 4$ octets, soit environ 98 Mio. Le calcul est arithmétique : il ne mesure pas la vitesse.\n\nUn réseau complet conserve les activations de nombreuses couches. Le total dépend de l'architecture, de la résolution d'entrée et du lot. Réduire le lot est le levier le plus direct pour diminuer cette mémoire, mais il change la dynamique d'entraînement et l'utilisation du matériel. Le checkpointing, qui recalcule certaines activations au lieu de les stocker, échange du calcul contre de la mémoire.\n\n### La mémoire d'inférence\n\nÀ l'inférence, les gradients et l'état de l'optimiseur disparaissent. Les activations peuvent être libérées dès qu'elles ne servent plus, couche après couche. La mémoire est alors dominée par les poids et par le pic d'activations de la couche courante. Un lot de 1 réduit ce pic, mais peut sous-utiliser un processeur graphique conçu pour traiter de grands tenseurs. Il faut distinguer la mémoire nécessaire pour charger le modèle de celle nécessaire pour traiter une entrée.\n\nRéduire la précision des poids et des activations diminue l'empreinte mémoire. Cette réduction a des effets variables selon le matériel et la couche ; elle ne se traduit pas automatiquement par un gain de latence. Un modèle plus petit en octets peut être plus lent s'il utilise des opérations mal prises en charge.\n\n### Les FLOPs ne sont pas la latence\n\nLe temps d'exécution dépend du nombre d'opérations, mais aussi de la bande passante mémoire, de l'intensité arithmétique, de la taille des lots, de l'occupation des unités de calcul et de l'implémentation des noyaux. Une couche très parallèle peut être limitée par la mémoire plutôt que par le calcul. Une convolution depthwise effectue peu d'opérations par octet lu ; elle peut être moins efficace sur certains accélérateurs qu'une convolution standard, malgré un nombre de FLOPs plus faible.\n\nLe batch joue sur les deux tableaux. Un lot plus grand augmente le parallélisme et peut améliorer l'occupation, mais il multiplie les activations et la mémoire. Au-delà d'une certaine taille, le gain de vitesse devient faible ou nul, et la mémoire disponible impose une limite. La bonne taille de lot dépend du modèle, du matériel et de la résolution.\n\n### Estimer avant de mesurer\n\nLes formules de paramètres et de MACs servent à comparer des architectures et à repérer les couches coûteuses. Elles ne remplacent pas une mesure. Un tableau de FLOPs ne dit rien de la latence sur un téléphone, un navigateur ou un serveur donné. Pour un déploiement, il faut mesurer le débit et le temps de réponse sur la cible, avec la taille de lot et la précision prévues.\n\n> **Repère.** Les poids se comptent, les activations se calculent, la latence se mesure. Confondre ces trois plans mène à de mauvaises décisions d'architecture.",
+      "diagram": {
+        "title": "Poids, gradients, état et activations",
+        "description": "Schéma illustratif : les poids restent de taille fixe, les gradients et l'état de l'optimiseur s'y ajoutent, et les activations augmentent avec le lot. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 400\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Mémoire d'entraînement : poids, gradients, état de l'optimiseur et activations selon le lot\">\n  <rect width=\"800\" height=\"400\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Ce qui occupe la mémoire à l'entraînement</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"poids\">\n    <text x=\"105\" y=\"96\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">poids</text>\n    <rect x=\"65\" y=\"112\" width=\"80\" height=\"150\" rx=\"8\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <rect x=\"65\" y=\"112\" width=\"80\" height=\"150\" rx=\"8\" fill=\"#0ea5e9\" opacity=\"0.25\"/>\n    <text x=\"105\" y=\"192\" fill=\"#7dd3fc\" font-size=\"12\" text-anchor=\"middle\">taille fixe</text>\n    <text x=\"105\" y=\"288\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">indépendants du lot</text>\n  </g>\n\n  <g id=\"gradients\">\n    <text x=\"255\" y=\"96\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">gradients</text>\n    <rect x=\"215\" y=\"112\" width=\"80\" height=\"150\" rx=\"8\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <rect x=\"215\" y=\"112\" width=\"80\" height=\"150\" rx=\"8\" fill=\"#fbbf24\" opacity=\"0.20\"/>\n    <text x=\"255\" y=\"192\" fill=\"#fcd34d\" font-size=\"12\" text-anchor=\"middle\">même taille</text>\n    <text x=\"255\" y=\"288\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">que les poids</text>\n  </g>\n\n  <g id=\"etat\">\n    <text x=\"405\" y=\"96\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">état de l'optimiseur</text>\n    <rect x=\"365\" y=\"112\" width=\"80\" height=\"150\" rx=\"8\" fill=\"#0f172a\" stroke=\"#c084fc\" stroke-width=\"2\"/>\n    <rect x=\"365\" y=\"112\" width=\"80\" height=\"150\" rx=\"8\" fill=\"#c084fc\" opacity=\"0.20\"/>\n    <text x=\"405\" y=\"180\" fill=\"#d8b4fe\" font-size=\"12\" text-anchor=\"middle\">un ou deux</text>\n    <text x=\"405\" y=\"198\" fill=\"#d8b4fe\" font-size=\"12\" text-anchor=\"middle\">moments</text>\n    <text x=\"405\" y=\"288\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">selon l'optimiseur</text>\n  </g>\n\n  <g id=\"activations\">\n    <text x=\"640\" y=\"96\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">activations</text>\n    <rect x=\"545\" y=\"220\" width=\"42\" height=\"42\" rx=\"4\" fill=\"#34d399\" opacity=\"0.35\"/>\n    <rect x=\"600\" y=\"190\" width=\"42\" height=\"72\" rx=\"4\" fill=\"#34d399\" opacity=\"0.55\"/>\n    <rect x=\"655\" y=\"150\" width=\"42\" height=\"112\" rx=\"4\" fill=\"#34d399\" opacity=\"0.75\"/>\n    <rect x=\"710\" y=\"112\" width=\"42\" height=\"150\" rx=\"4\" fill=\"#34d399\" opacity=\"0.95\"/>\n    <text x=\"566\" y=\"286\" fill=\"#94a3b8\" font-size=\"10\" text-anchor=\"middle\">lot 1</text>\n    <text x=\"621\" y=\"286\" fill=\"#94a3b8\" font-size=\"10\" text-anchor=\"middle\">lot 2</text>\n    <text x=\"676\" y=\"286\" fill=\"#94a3b8\" font-size=\"10\" text-anchor=\"middle\">lot 4</text>\n    <text x=\"731\" y=\"286\" fill=\"#94a3b8\" font-size=\"10\" text-anchor=\"middle\">lot 8</text>\n    <text x=\"648\" y=\"318\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">croissent avec le lot</text>\n  </g>\n\n  <g id=\"lot\">\n    <line x1=\"520\" y1=\"262\" x2=\"760\" y2=\"262\" stroke=\"#64748b\" stroke-width=\"1.5\"/>\n    <text x=\"640\" y=\"344\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">Poids de taille fixe ; les activations si.</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Les poids",
+            "explanation": "Les paramètres ont une taille fixe, déterminée par l'architecture. Le lot ne change pas leur nombre.",
+            "highlight": [
+              "poids"
+            ]
+          },
+          {
+            "title": "2. Gradients et état",
+            "explanation": "L'entraînement ajoute un gradient par poids et, selon l'optimiseur, un ou deux moments. Ces tenseurs ont la même taille que les poids.",
+            "highlight": [
+              "gradients",
+              "etat"
+            ]
+          },
+          {
+            "title": "3. Les activations",
+            "explanation": "Les sorties intermédiaires sont conservées pour la rétropropagation. Leur taille dépend de la résolution, du nombre de canaux et du lot.",
+            "highlight": [
+              "activations",
+              "lot"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Estimation des paramètres, des MACs et de la mémoire d'activations d'une couche convolutive. Le calcul suppose des activations en float32 et une sortie de même taille que l'entrée.",
+        "code": "def cout_conv(cin, cout, noyau, hauteur, largeur, lot, octets=4):\n    parametres = cout * (cin * noyau * noyau + 1)\n    macs = hauteur * largeur * cout * cin * noyau * noyau\n    activations = lot * cout * hauteur * largeur * octets\n    return parametres, macs, activations / 2**20\n\np, m, a = cout_conv(3, 64, 3, 224, 224, 8)\nprint(f\"paramètres : {p:,}\".replace(\",\", \" \"))\nprint(f\"MACs par image : {m / 1e6:.1f} millions\")\nprint(f\"activations du lot : {a:.1f} Mio\")",
+        "output": "paramètres : 1 792\nMACs par image : 86.7 millions\nactivations du lot : 98.0 Mio",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Avec un grand lot, qu'est-ce qui domine souvent la mémoire d'entraînement ?",
+          "options": [
+            "Les biais des couches",
+            "Le nombre de classes",
+            "Les activations conservées pour la rétropropagation",
+            "La taille du fichier de configuration"
+          ],
+          "correctIndex": 2,
+          "explanation": "Les poids ont une taille fixe. Les activations, elles, sont multipliées par la taille du lot et par la résolution, et doivent être gardées pour calculer les gradients."
+        },
+        {
+          "question": "Quel est l'effet de la taille du lot sur le nombre de paramètres d'une couche ?",
+          "options": [
+            "Aucun : le lot ne change pas le nombre de poids",
+            "Elle multiplie les paramètres par le nombre d'images",
+            "Elle divise les paramètres par le nombre de canaux",
+            "Elle ajoute un paramètre par image"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le lot répète le même calcul sur plusieurs images. Les poids sont partagés et leur nombre reste identique."
+        },
+        {
+          "question": "Pourquoi un modèle avec moins de FLOPs peut-il être plus lent qu'un autre ?",
+          "options": [
+            "Parce que les FLOPs mesurent la mémoire et non le calcul",
+            "Parce qu'un modèle plus petit a toujours plus de couches",
+            "Parce que le nombre de FLOPs est toujours faux",
+            "Parce que la latence dépend aussi de la bande passante, de l'intensité arithmétique et de l'implémentation des noyaux"
+          ],
+          "correctIndex": 3,
+          "explanation": "Les FLOPs ne décrivent qu'une partie du coût. Les accès mémoire, l'occupation du matériel et la qualité des noyaux influencent fortement le temps réel."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Paramètre",
+          "definition": "Poids ou biais appris par le modèle. Son nombre est fixé par l'architecture."
+        },
+        {
+          "term": "Activation",
+          "definition": "Tenseur intermédiaire produit par une couche. À l'entraînement, il est souvent conservé pour la rétropropagation."
+        },
+        {
+          "term": "MAC et FLOPs",
+          "definition": "Multiplication-addition (MAC) et opérations en virgule flottante (FLOPs). Une convention courante compte un MAC comme deux FLOPs ; il faut préciser la convention avant de comparer deux chiffres."
+        },
+        {
+          "term": "Intensité arithmétique",
+          "definition": "Rapport entre les opérations effectuées et les octets lus ou écrits. Une faible intensité rend la mémoire limitante."
+        },
+        {
+          "term": "Checkpointing",
+          "definition": "Technique qui recalcule certaines activations au lieu de les stocker, pour réduire la mémoire au prix de calcul supplémentaire."
+        }
+      ],
+      "example": {
+        "title": "Poids et activations d'une seule couche",
+        "text": "**Exemple de calcul.** Une couche qui passe de 3 à 64 canaux avec un noyau 3 × 3 sur une entrée de 224 × 224 possède 1 792 poids. Pour un lot de 8 images en float32, sa sortie représente 8 × 64 × 224 × 224 × 4 octets, soit environ 98 Mio. Adam ajoute deux moments par poids, et les gradients une autre copie. Les activations dominent donc largement les poids de cette couche.\n\nÀ l'inférence, les gradients et l'état de l'optimiseur disparaissent. Le pic dépend des couches qui restent simultanément en mémoire. Réduire le lot de 8 à 1 divise ces activations par huit, mais peut sous-utiliser le processeur graphique. Ces chiffres ignorent les activations des autres couches et le coût des bibliothèques. Ils servent à repérer la couche qui pèse, pas à prédire la latence."
+      },
+      "exercises": [
+        {
+          "title": "Poids, MACs et activations d'une couche",
+          "prompt": "Une couche passe de 128 à 256 canaux avec un noyau 3 × 3, sur une entrée de 56 × 56, avec un lot de 16 en float32. Calculez le nombre de paramètres, les MACs par image et la mémoire des activations du lot. Comparez cette dernière à la mémoire des poids et indiquez quel poste domine.",
+          "solution": "Paramètres : 256 × (128 × 9 + 1) = 256 × 1 153 = 295 168, soit environ 1,2 Mo en float32. MACs par image : 56 × 56 × 256 × 128 × 9 = 924 844 032, soit environ 925 millions. Activations du lot : 16 × 256 × 56 × 56 × 4 octets = 51 380 224 octets, soit environ 49 Mio. Les activations du lot dominent donc largement les poids de cette couche. À l'entraînement, il faut encore ajouter les gradients et les états d'optimiseur, et conserver ces activations pour la rétropropagation."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Stanford CS231n, notes sur les réseaux convolutifs, consulté le 21 octobre 2026.",
+          "href": "https://cs231n.github.io/convolutional-networks/"
+        },
+        {
+          "label": "Li et al., A Survey of Convolutional Neural Networks: Analysis, Applications, and Prospects, 2020.",
+          "href": "https://arxiv.org/abs/2004.02806"
+        }
+      ]
+    },
+    {
+      "id": "pionniers",
+      "title": "LeNet-5, ImageNet et AlexNet",
+      "keyTakeaways": [
+        "LeNet-5 montre dès 1998 qu'un réseau convolutif peut apprendre des filtres utiles directement à partir des images pour lire des documents, avec peu de paramètres.",
+        "Le sous-ensemble ILSVRC d'ImageNet fournit un banc d'essai à grande échelle : 1 000 classes et plus d'un million d'images d'entraînement.",
+        "AlexNet combine des convolutions profondes, la ReLU, le dropout, l'augmentation de données et l'entraînement sur GPU.",
+        "Le gain d'AlexNet en 2012 vient d'un ensemble de choix et de moyens de calcul, pas d'une idée unique.",
+        "Un résultat sur un banc d'essai ne garantit ni robustesse ni généralité hors de la distribution des données de test."
+      ],
+      "theory": "### Avant les filtres appris\n\nPendant longtemps, la reconnaissance d'images a reposé sur des descripteurs conçus à la main : contours, textures, coins, histogrammes locaux. Un classifieur, souvent une machine à vecteurs de support, prenait ces descriptions en entrée. Cette approche fonctionnait, mais elle obligeait à choisir les descripteurs avant de voir les données, et elle transférait mal d'un domaine à un autre. Les réseaux convolutifs proposent l'inverse : apprendre les filtres à partir des images, en même temps que le classifieur.\n\nLeNet-5 est l'un des premiers systèmes à avoir démontré cette approche à une échelle utile. LeCun et ses coauteurs le présentent en 1998 dans un article sur la reconnaissance de documents. Le réseau reçoit une image en niveaux de gris de 32 x 32 pixels et reconnaît un caractère ou un chiffre. Il enchaîne des convolutions, des sous-échantillonnages et des couches denses : six filtres 5 x 5, un sous-échantillonnage, seize filtres 5 x 5, un second sous-échantillonnage, puis une convolution C5 à 120 cartes, une couche dense F6 de 84 unités et une sortie de 10 unités. Le réseau emploie des activations non linéaires entre les couches. Le nombre de paramètres reste de l'ordre de quelques dizaines de milliers.\n\nTrois idées structurent LeNet-5. Les champs récepteurs sont locaux : chaque unité ne regarde qu'une petite fenêtre. Les poids sont partagés entre les positions : le même filtre balaie toute l'image. Le sous-échantillonnage réduit la résolution et apporte une tolérance aux petits déplacements. Ces idées sont exactement celles du module 1. LeNet-5 les applique à un problème industriel, la lecture automatique de chèques, et il est entraîné par rétropropagation.\n\nSes limites sont celles de son époque. Les images sont petites, en niveaux de gris, et le réseau est spécialisé dans des caractères. Le jeu d'entraînement ne ressemble pas à la diversité d'ImageNet. LeNet-5 prouve qu'un réseau convolutif peut apprendre des filtres utiles ; il ne prouve pas qu'il peut reconnaître des milliers d'objets dans des photographies variées.\n\n### ImageNet change l'échelle\n\nImageNet est un jeu de données d'images annotées, construit pour l'entraînement et l'évaluation à grande échelle. La version utilisée par le concours ILSVRC comporte 1 000 classes, plus d'un million d'images d'entraînement et plusieurs dizaines de milliers d'images de validation. Les images sont des photographies en couleurs, de tailles variées, annotées avec une classe unique. Cette échelle permet de comparer des architectures sur un problème commun, avec un protocole partagé.\n\nUn banc d'essai de cette taille a deux effets. Il rend les progrès mesurables, ce qui aide à trier les idées. Il concentre aussi la recherche sur une tâche et une distribution particulières : bien réussir ImageNet ne signifie pas bien réussir la détection, la segmentation, le diagnostic médical ou la conduite. Il faut lire les résultats comme des mesures sur ce jeu, pas comme une preuve de compétence générale.\n\n### AlexNet en 2012\n\nAlexNet est le réseau qui a rendu l'approche convolutive profonde visible à grande échelle. Il comporte cinq couches convolutives et trois couches entièrement connectées, pour environ 60 millions de paramètres. L'entrée est une image de 224 x 224 pixels en couleurs, la sortie un score par classe. Le réseau est entraîné sur ILSVRC-2012 et devance nettement les systèmes classés derrière lui. Ce résultat situe l'approche dans son contexte historique ; il ne dit rien de la performance d'un modèle actuel.\n\nPlusieurs choix expliquent ce résultat. La ReLU remplace la sigmoïde et la tangente hyperbolique : elle ne sature pas pour les valeurs positives et son gradient reste égal à 1, ce qui accélère l'entraînement. Le dropout, appliqué aux deux premières couches denses avec une probabilité de 0,5, désactive aléatoirement des unités pendant l'entraînement et limite la co-adaptation. L'augmentation de données recadre, retourne et modifie les couleurs des images, ce qui réduit le surapprentissage. L'entraînement est réparti sur deux GPU, avec des convolutions groupées pour tenir dans la mémoire de chaque carte. Une normalisation de réponse locale complète le dispositif.\n\nAucun de ces ingrédients ne suffit seul. La ReLU sans données variées, le dropout sans capacité suffisante ou les GPU sans architecture adaptée ne produisent pas le même résultat. AlexNet est un assemblage cohérent : un modèle plus grand, entraîné sur plus de données, avec des activations plus faciles à optimiser et une régularisation adaptée.\n\n### Ce qui change, ce qui reste\n\nLeNet-5 et AlexNet partagent les mêmes principes : filtres locaux, partage des poids, hiérarchie de représentations, entraînement de bout en bout. Ce qui change est l'échelle : plus de données, plus de couches, plus de canaux, plus de calcul. AlexNet conserve aussi de grandes couches denses, une entrée de taille fixe et une architecture écrite à la main. Les modules suivants montrent comment la profondeur, les blocs résiduels et les convolutions efficaces ont répondu à ces limites.\n\n> **Repère.** AlexNet n'est pas une rupture de principe par rapport à LeNet-5. C'est un changement d'échelle rendu possible par les données, les GPU et quelques choix d'entraînement.",
+      "diagram": {
+        "title": "De LeNet-5 à AlexNet, une frise",
+        "description": "Schéma illustratif : une frise situe LeNet-5 en 1998, ImageNet en 2009 et AlexNet en 2012, avec les ingrédients qui changent d'échelle. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 440\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Frise de LeNet-5 en 1998 à AlexNet en 2012, en passant par ImageNet\">\n  <rect width=\"800\" height=\"440\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Deux architectures, un changement d'échelle</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <line x1=\"70\" y1=\"250\" x2=\"730\" y2=\"250\" stroke=\"#475569\" stroke-width=\"2\"/>\n\n  <g id=\"lecun\">\n    <rect x=\"80\" y=\"90\" width=\"180\" height=\"110\" rx=\"12\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"2\"/>\n    <text x=\"170\" y=\"118\" fill=\"#f8fafc\" font-size=\"14\" font-weight=\"bold\" text-anchor=\"middle\">LeNet-5</text>\n    <text x=\"170\" y=\"140\" fill=\"#7dd3fc\" font-size=\"12\" text-anchor=\"middle\">1998</text>\n    <text x=\"170\" y=\"164\" fill=\"#cbd5e1\" font-size=\"11\" text-anchor=\"middle\">lecture de documents</text>\n    <text x=\"170\" y=\"182\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">convolutions et pooling</text>\n    <circle cx=\"170\" cy=\"250\" r=\"7\" fill=\"#38bdf8\"/>\n    <line x1=\"170\" y1=\"200\" x2=\"170\" y2=\"243\" stroke=\"#38bdf8\" stroke-width=\"1.5\"/>\n  </g>\n\n  <g id=\"imagenet\">\n    <rect x=\"300\" y=\"90\" width=\"190\" height=\"110\" rx=\"12\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n    <text x=\"395\" y=\"118\" fill=\"#f8fafc\" font-size=\"14\" font-weight=\"bold\" text-anchor=\"middle\">ImageNet / ILSVRC</text>\n    <text x=\"395\" y=\"140\" fill=\"#fcd34d\" font-size=\"12\" text-anchor=\"middle\">2009-2012</text>\n    <text x=\"395\" y=\"164\" fill=\"#cbd5e1\" font-size=\"11\" text-anchor=\"middle\">1 000 classes</text>\n    <text x=\"395\" y=\"182\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">environ 1,2 million d'images</text>\n    <circle cx=\"395\" cy=\"250\" r=\"7\" fill=\"#fbbf24\"/>\n    <line x1=\"395\" y1=\"200\" x2=\"395\" y2=\"243\" stroke=\"#fbbf24\" stroke-width=\"1.5\"/>\n  </g>\n\n  <g id=\"alexnet\">\n    <rect x=\"520\" y=\"90\" width=\"200\" height=\"110\" rx=\"12\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"2\"/>\n    <text x=\"620\" y=\"118\" fill=\"#f8fafc\" font-size=\"14\" font-weight=\"bold\" text-anchor=\"middle\">AlexNet</text>\n    <text x=\"620\" y=\"140\" fill=\"#6ee7b7\" font-size=\"12\" text-anchor=\"middle\">2012</text>\n    <text x=\"620\" y=\"164\" fill=\"#cbd5e1\" font-size=\"11\" text-anchor=\"middle\">5 convolutions, 3 couches denses</text>\n    <text x=\"620\" y=\"182\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">environ 60 millions de paramètres</text>\n    <circle cx=\"620\" cy=\"250\" r=\"7\" fill=\"#34d399\"/>\n    <line x1=\"620\" y1=\"200\" x2=\"620\" y2=\"243\" stroke=\"#34d399\" stroke-width=\"1.5\"/>\n  </g>\n\n  <g id=\"relu\">\n    <rect x=\"95\" y=\"296\" width=\"120\" height=\"34\" rx=\"17\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"1.5\"/>\n    <text x=\"155\" y=\"318\" fill=\"#7dd3fc\" font-size=\"12\" text-anchor=\"middle\">ReLU</text>\n  </g>\n\n  <g id=\"dropout\">\n    <rect x=\"230\" y=\"296\" width=\"120\" height=\"34\" rx=\"17\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"1.5\"/>\n    <text x=\"290\" y=\"318\" fill=\"#7dd3fc\" font-size=\"12\" text-anchor=\"middle\">dropout</text>\n  </g>\n\n  <g id=\"gpu\">\n    <rect x=\"365\" y=\"296\" width=\"120\" height=\"34\" rx=\"17\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"1.5\"/>\n    <text x=\"425\" y=\"318\" fill=\"#7dd3fc\" font-size=\"12\" text-anchor=\"middle\">GPU</text>\n  </g>\n\n  <g id=\"donnees\">\n    <rect x=\"500\" y=\"296\" width=\"190\" height=\"34\" rx=\"17\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"1.5\"/>\n    <text x=\"595\" y=\"318\" fill=\"#7dd3fc\" font-size=\"12\" text-anchor=\"middle\">données à grande échelle</text>\n  </g>\n\n  <text x=\"395\" y=\"372\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Les principes restent : la taille des données et des calculs change.</text>\n</svg>",
+        "steps": [
+          {
+            "title": "1. LeNet-5, 1998",
+            "explanation": "Un réseau convolutif compact apprend à lire des caractères sur des images de 32 x 32 pixels. Il prouve qu'un modèle peut apprendre ses filtres directement à partir des images.",
+            "highlight": [
+              "lecun"
+            ]
+          },
+          {
+            "title": "2. ImageNet, 2009",
+            "explanation": "Le sous-ensemble ILSVRC d'ImageNet rend les comparaisons possibles : 1 000 classes et plus d'un million d'images d'entraînement.",
+            "highlight": [
+              "imagenet"
+            ]
+          },
+          {
+            "title": "3. AlexNet, 2012",
+            "explanation": "Cinq convolutions et trois couches denses, environ 60 millions de paramètres, entraînées sur ILSVRC-2012. Le réseau profite de l'échelle des données.",
+            "highlight": [
+              "alexnet"
+            ]
+          },
+          {
+            "title": "4. Quatre ingrédients",
+            "explanation": "La ReLU accélère l'optimisation, le dropout régularise, le GPU permet un plus grand modèle et les données variées limitent le surapprentissage. Le résultat vient de leur combinaison.",
+            "highlight": [
+              "relu",
+              "dropout",
+              "gpu",
+              "donnees"
+            ]
+          }
+        ]
+      },
+      "quiz": [
+        {
+          "question": "Quel avantage la ReLU apporte-t-elle par rapport à la tangente hyperbolique dans AlexNet ?",
+          "options": [
+            "Elle borne les sorties entre 0 et 1",
+            "Elle ne sature pas pour les valeurs positives et garde un gradient égal à 1",
+            "Elle supprime le besoin de biais",
+            "Elle réduit le nombre de canaux"
+          ],
+          "correctIndex": 1,
+          "explanation": "Pour les valeurs positives, la ReLU a une pente constante. La tangente hyperbolique sature loin de zéro, ce qui ralentit la propagation du gradient."
+        },
+        {
+          "question": "À quoi sert le dropout pendant l'entraînement ?",
+          "options": [
+            "À supprimer définitivement les unités les plus faibles",
+            "À accélérer les convolutions en sautant des pixels",
+            "À augmenter la résolution des images",
+            "À désactiver aléatoirement des unités pour limiter la co-adaptation"
+          ],
+          "correctIndex": 3,
+          "explanation": "Le dropout masque des unités à chaque passe. Le réseau ne peut pas compter sur une unité particulière, ce qui réduit la co-adaptation et sert de régularisation."
+        },
+        {
+          "question": "Dans quel contexte LeNet-5 a-t-il été conçu ?",
+          "options": [
+            "La lecture automatique de documents, comme les chèques",
+            "La conduite autonome sur autoroute",
+            "La génération d'images à partir de texte",
+            "La traduction automatique de phrases"
+          ],
+          "correctIndex": 0,
+          "explanation": "LeNet-5 est présenté dans un article sur la reconnaissance de documents. Il lit des caractères sur de petites images en niveaux de gris."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "LeNet-5",
+          "definition": "Réseau convolutif proposé en 1998 pour la reconnaissance de documents, avec convolutions, sous-échantillonnage et couches denses."
+        },
+        {
+          "term": "ImageNet",
+          "definition": "Jeu de données d'images annotées à grande échelle, utilisé notamment par le concours ILSVRC avec 1 000 classes."
+        },
+        {
+          "term": "ReLU",
+          "definition": "Fonction d'activation définie par max(0, z). Elle ne sature pas pour les valeurs positives."
+        },
+        {
+          "term": "Dropout",
+          "definition": "Régularisation qui désactive aléatoirement des unités pendant l'entraînement pour limiter leur co-adaptation."
+        },
+        {
+          "term": "ILSVRC",
+          "definition": "Concours de reconnaissance d'images associé à ImageNet, qui a servi de banc d'essai commun à de nombreuses architectures."
+        }
+      ],
+      "example": {
+        "title": "LeNet-5 et AlexNet, deux échelles",
+        "text": "**Scénario historique.** LeNet-5 lisait des chiffres de 32 × 32 pixels en niveaux de gris avec quelques dizaines de milliers de paramètres. AlexNet lisait des images de 224 × 224 pixels en couleur avec cinq couches convolutives et trois couches denses, pour environ 60 millions de paramètres. Le second n'est pas seulement plus gros : il dispose de la ReLU, du dropout, de l'augmentation de données et de deux GPU. Ces deux ordres de grandeur ne mesurent pas la qualité. LeNet-5 était spécialisé sur des documents, AlexNet sur 1 000 classes photographiques. Comparer leurs taux d'erreur sans préciser le jeu, le protocole et l'époque n'a pas de sens."
+      },
+      "exercises": [
+        {
+          "title": "Deux réseaux, deux échelles",
+          "prompt": "LeNet-5 et AlexNet partagent les principes de la convolution, mais pas leur échelle. Citez trois éléments communs aux deux architectures et trois changements qui distinguent AlexNet. Expliquez ensuite pourquoi le gain d'AlexNet en 2012 ne peut pas être attribué à la seule ReLU.",
+          "solution": "Trois éléments communs : filtres locaux, partage des poids et hiérarchie de représentations, avec un entraînement de bout en bout. AlexNet change d'échelle avec des images de 224 × 224 en couleur, cinq couches convolutives et environ 60 millions de paramètres, puis ajoute la ReLU, le dropout, l'augmentation de données et l'entraînement sur deux GPU. La ReLU facilite l'optimisation, mais elle ne suffit pas sans davantage de données, de capacité et de calcul : c'est l'assemblage qui produit le résultat. Un score élevé sur ImageNet reste une mesure sur ce jeu, pas une preuve de compétence générale."
+        }
+      ],
+      "sources": [
+        {
+          "label": "LeCun et al., Gradient-Based Learning Applied to Document Recognition, 1998.",
+          "href": "https://ieeexplore.ieee.org/document/726791"
+        },
+        {
+          "label": "Krizhevsky et al., ImageNet Classification with Deep Convolutional Neural Networks, 2012.",
+          "href": "https://papers.nips.cc/paper/2012/hash/c399862d3b9d6b76c8436e924a68c45b-Abstract.html"
+        }
+      ]
+    },
+    {
+      "id": "profondeur",
+      "title": "GoogLeNet, VGG et ResNet",
+      "keyTakeaways": [
+        "VGG montre qu'empiler des convolutions 3 x 3 et des couches de pooling permet de construire des réseaux profonds et réguliers.",
+        "GoogLeNet combine des branches de tailles différentes et utilise des convolutions 1 x 1 pour réduire le coût des canaux.",
+        "Les réseaux plats très profonds souffrent d'un problème de dégradation : leur erreur d'entraînement augmente avec la profondeur.",
+        "Un bloc résiduel apprend une correction par rapport à l'identité, ce qui facilite l'optimisation sans ajouter de paramètres lorsque les formes coïncident.",
+        "La profondeur n'est utile que si l'optimisation et le coût mémoire restent maîtrisés."
+      ],
+      "theory": "### VGG et la régularité des briques\n\nVGG, présenté en 2014 par Simonyan et Zisserman, mise sur une recette simple : empiler des convolutions de taille 3 x 3, entrecoupées de pooling 2 x 2, puis terminer par des couches denses. Les variantes comptent 16 ou 19 couches avec poids. Cette uniformité rend l'architecture facile à décrire et à modifier ; elle montre surtout que la profondeur elle-même apporte quelque chose, à condition de rester régulière.\n\nL'argument sur les petits noyaux est devenu classique. Deux convolutions 3 x 3 ont le même champ récepteur qu'une convolution 5 x 5, mais coûtent $2 \\times 9C^2 = 18C^2$ paramètres contre $25C^2$. Trois convolutions 3 x 3 couvrent 7 x 7 pour $27C^2$ paramètres, contre $49C^2$ pour un noyau 7 x 7. À champ égal, la version empilée est moins paramétrique et insère des non-linéarités entre les couches. VGG généralise ce choix à tout le réseau.\n\nLe prix est élevé. Les activations sont nombreuses, et les trois couches denses finales concentrent une grande partie des paramètres. VGG reste un repère utile pour comprendre la profondeur, pas un modèle léger. Ses blocs réguliers ont aussi inspiré les architectures suivantes, qui ont cherché à obtenir la même profondeur avec moins de calcul.\n\n### Inception et les chemins parallèles\n\nGoogLeNet, dont la brique centrale est le module Inception, prend un autre chemin. Au lieu d'enchaîner une seule convolution par étage, un module Inception applique plusieurs branches en parallèle : une convolution 1 x 1, une convolution 3 x 3, une convolution 5 x 5 et un pooling. Les sorties sont concaténées. Le réseau peut ainsi combiner des motifs de plusieurs échelles au même niveau.\n\nLes convolutions 1 x 1 servent de goulots d'étranglement. Avant un noyau 3 x 3 ou 5 x 5 coûteux, elles réduisent le nombre de canaux, ce qui diminue fortement les calculs. GoogLeNet remplace aussi les grandes couches denses finales par un pooling global moyen suivi d'une petite couche de sortie. Cette conception permet un réseau profond avec moins de paramètres qu'un VGG de profondeur comparable. Le module Inception illustre un principe durable : dépenser le calcul là où il apporte de l'information, et compresser ailleurs.\n\n### ResNet et le problème de dégradation\n\nEn 2015, He et ses coauteurs observent un phénomène gênant. Lorsqu'on empile simplement des couches, un réseau plus profond peut avoir une erreur d'entraînement plus élevée qu'un réseau moins profond. Ce n'est pas du surapprentissage : le modèle échoue même sur les données qu'il voit. Les auteurs appellent ce phénomène la dégradation. Il indique que l'optimisation, et non la capacité, devient le facteur limitant.\n\nLa solution est le bloc résiduel. Au lieu d'apprendre directement une transformation $H(x)$, le bloc apprend une correction $F(x) = H(x) - x$, puis ajoute l'entrée :\n\n$$y = F(x) + x$$\n\nLe raccourci qui transporte $x$ est une connexion identité. Si la transformation optimale est proche de l'identité, le réseau n'a qu'à pousser $F(x)$ vers zéro, ce qui est plus simple que d'apprendre l'identité avec des couches non linéaires. Le raccourci offre aussi un chemin direct au gradient. Lorsque les dimensions changent, une convolution 1 x 1 projette l'entrée pour ajuster sa forme.\n\nResNet combine ce bloc avec des convolutions 1 x 1, 3 x 3 et 1 x 1 dans les versions profondes : les 1 x 1 réduisent puis restaurent le nombre de canaux, et le 3 x 3 travaille dans un espace comprimé. La normalisation par lots est placée après chaque convolution. Pour ImageNet, la version la plus profonde testée atteint 152 couches ; l'article explore aussi un ResNet-1202 sur CIFAR-10, une profondeur impensable quelques années plus tôt.\n\n### Pourquoi le résidu fonctionne\n\nLe résidu ne rend pas la profondeur gratuite. Il change la paramétrisation du problème d'optimisation : chaque bloc part d'une fonction proche de l'identité, et les couches apprennent des corrections. Cette paramétrisation aide les gradients à circuler et évite que la composition de nombreuses couches dégrade la sortie. Elle n'ajoute aucun paramètre lorsque les formes d'entrée et de sortie coïncident : l'addition est une opération, pas une couche.\n\nLe bloc résiduel est devenu une brique standard. On le retrouve dans les réseaux de classification, de détection et de segmentation. Sa forme exacte varie : pré-activation, post-activation, groupes de canaux, largeur du goulot. Le principe reste le même : apprendre une correction et laisser passer l'information.\n\n### Profondeur, coût et rendements\n\nLa profondeur augmente le champ récepteur et permet de composer des motifs de plus en plus abstraits. Elle augmente aussi la mémoire, la latence et le risque d'instabilité. Les résultats de VGG et de ResNet ne disent pas qu'il faut toujours plus de couches : ils montrent qu'à une époque donnée, une meilleure optimisation permet d'exploiter des réseaux plus profonds. Les architectures efficaces du module suivant cherchent à obtenir une capacité comparable avec moins de paramètres et de calculs.\n\n> **Repère.** Le résidu ne résout pas la profondeur en général ; il rend l'optimisation plus facile en faisant apprendre une correction plutôt qu'une transformation complète.",
+      "diagram": {
+        "title": "Inception, bloc résiduel et dégradation",
+        "description": "Schéma illustratif : un module Inception à branches parallèles, un bloc résiduel avec raccourci identité, et deux courbes qualitatives d'erreur d'entraînement. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 480\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Module Inception, bloc résiduel et courbes de dégradation\">\n  <rect width=\"800\" height=\"480\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Trois réponses à la profondeur</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"inception\">\n    <text x=\"190\" y=\"86\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">Inception : plusieurs échelles</text>\n    <rect x=\"40\" y=\"120\" width=\"36\" height=\"80\" rx=\"6\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"1.5\"/>\n    <text x=\"58\" y=\"164\" fill=\"#7dd3fc\" font-size=\"10\" text-anchor=\"middle\">x</text>\n    <g fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"1.2\">\n      <rect x=\"108\" y=\"104\" width=\"86\" height=\"22\" rx=\"4\"/><rect x=\"108\" y=\"134\" width=\"86\" height=\"22\" rx=\"4\"/><rect x=\"108\" y=\"164\" width=\"86\" height=\"22\" rx=\"4\"/><rect x=\"108\" y=\"194\" width=\"86\" height=\"22\" rx=\"4\"/>\n    </g>\n    <g fill=\"#cbd5e1\" font-size=\"10\">\n      <text x=\"151\" y=\"119\" text-anchor=\"middle\">1 x 1</text><text x=\"151\" y=\"149\" text-anchor=\"middle\">3 x 3</text><text x=\"151\" y=\"179\" text-anchor=\"middle\">5 x 5</text><text x=\"151\" y=\"209\" text-anchor=\"middle\">pooling</text>\n    </g>\n    <rect x=\"228\" y=\"120\" width=\"52\" height=\"80\" rx=\"6\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"1.5\"/>\n    <text x=\"254\" y=\"156\" fill=\"#fcd34d\" font-size=\"10\" text-anchor=\"middle\">concaté-</text>\n    <text x=\"254\" y=\"170\" fill=\"#fcd34d\" font-size=\"10\" text-anchor=\"middle\">nation</text>\n    <g stroke=\"#64748b\" stroke-width=\"1.5\">\n      <line x1=\"76\" y1=\"160\" x2=\"104\" y2=\"115\"/><line x1=\"76\" y1=\"160\" x2=\"104\" y2=\"145\"/><line x1=\"76\" y1=\"160\" x2=\"104\" y2=\"175\"/><line x1=\"76\" y1=\"160\" x2=\"104\" y2=\"205\"/>\n      <line x1=\"194\" y1=\"115\" x2=\"224\" y2=\"140\"/><line x1=\"194\" y1=\"145\" x2=\"224\" y2=\"155\"/><line x1=\"194\" y1=\"175\" x2=\"224\" y2=\"170\"/><line x1=\"194\" y1=\"205\" x2=\"224\" y2=\"185\"/>\n    </g>\n  </g>\n\n  <g id=\"residual\">\n    <text x=\"590\" y=\"86\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">Bloc résiduel : apprendre une correction</text>\n    <circle cx=\"438\" cy=\"150\" r=\"16\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"1.5\"/>\n    <text x=\"438\" y=\"155\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">x</text>\n    <rect x=\"480\" y=\"130\" width=\"80\" height=\"40\" rx=\"6\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"1.5\"/>\n    <text x=\"520\" y=\"154\" fill=\"#7dd3fc\" font-size=\"11\" text-anchor=\"middle\">F(x)</text>\n    <circle cx=\"610\" cy=\"150\" r=\"18\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"1.5\"/>\n    <text x=\"610\" y=\"155\" fill=\"#fcd34d\" font-size=\"14\" text-anchor=\"middle\">+</text>\n    <rect x=\"660\" y=\"132\" width=\"80\" height=\"36\" rx=\"6\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"1.5\"/>\n    <text x=\"700\" y=\"155\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">y</text>\n    <g stroke=\"#64748b\" stroke-width=\"1.8\" fill=\"none\">\n      <line x1=\"454\" y1=\"150\" x2=\"476\" y2=\"150\"/>\n      <line x1=\"560\" y1=\"150\" x2=\"592\" y2=\"150\"/>\n      <line x1=\"628\" y1=\"150\" x2=\"656\" y2=\"150\"/>\n    </g>\n    <path id=\"identite\" d=\"M438 166 L438 220 L610 220 L610 168\" fill=\"none\" stroke=\"#fbbf24\" stroke-width=\"2\" stroke-dasharray=\"6 4\"/>\n    <text x=\"524\" y=\"238\" fill=\"#fcd34d\" font-size=\"10\" text-anchor=\"middle\">raccourci identité</text>\n  </g>\n\n  <g id=\"degradation\">\n    <text x=\"190\" y=\"300\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">Erreur d'entraînement selon la profondeur</text>\n    <line x1=\"80\" y1=\"430\" x2=\"330\" y2=\"430\" stroke=\"#64748b\" stroke-width=\"1.5\"/>\n    <line x1=\"80\" y1=\"430\" x2=\"80\" y2=\"320\" stroke=\"#64748b\" stroke-width=\"1.5\"/>\n    <path d=\"M90 410 C150 390, 210 370, 310 330\" fill=\"none\" stroke=\"#f87171\" stroke-width=\"2.5\"/>\n    <path d=\"M90 410 C150 404, 210 400, 310 392\" fill=\"none\" stroke=\"#34d399\" stroke-width=\"2.5\"/>\n    <text x=\"230\" y=\"344\" fill=\"#fca5a5\" font-size=\"10\" text-anchor=\"middle\">réseau plat</text>\n    <text x=\"250\" y=\"384\" fill=\"#6ee7b7\" font-size=\"10\" text-anchor=\"middle\">avec résidus</text>\n    <text x=\"205\" y=\"456\" fill=\"#94a3b8\" font-size=\"10\" text-anchor=\"middle\">profondeur croissante</text>\n  </g>\n\n  <g id=\"legende-degradation\">\n    <rect x=\"470\" y=\"300\" width=\"270\" height=\"140\" rx=\"12\" fill=\"#0f172a\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n    <text x=\"605\" y=\"328\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">Dégradation</text>\n    <text x=\"605\" y=\"352\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">Un réseau plat plus profond</text>\n    <text x=\"605\" y=\"370\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">peut moins bien apprendre,</text>\n    <text x=\"605\" y=\"388\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">même sur l'entraînement.</text>\n    <text x=\"605\" y=\"414\" fill=\"#6ee7b7\" font-size=\"11\" text-anchor=\"middle\">Le résidu facilite l'optimisation.</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Inception",
+            "explanation": "Plusieurs branches de tailles différentes analysent la même entrée, puis leurs sorties sont concaténées. Les convolutions 1 x 1 compriment les canaux avant les noyaux coûteux.",
+            "highlight": [
+              "inception"
+            ]
+          },
+          {
+            "title": "2. Le bloc résiduel",
+            "explanation": "Le bloc apprend une transformation F(x) et l'ajoute à l'entrée. Si la sortie doit rester proche de l'entrée, F(x) peut tendre vers zéro.",
+            "highlight": [
+              "residual"
+            ]
+          },
+          {
+            "title": "3. Le raccourci identité",
+            "explanation": "La connexion identité transporte l'entrée directement vers l'addition. Elle offre un chemin simple au signal et au gradient, sans paramètres lorsque les formes coïncident.",
+            "highlight": [
+              "identite"
+            ]
+          },
+          {
+            "title": "4. La dégradation",
+            "explanation": "Sur un réseau plat, augmenter la profondeur peut augmenter l'erreur d'entraînement. Les résidus rendent l'optimisation plus facile et limitent ce phénomène.",
+            "highlight": [
+              "degradation"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Un bloc résiduel de type goulot d'étranglement, avec trois convolutions et une connexion identité. Le script vérifie que la forme est conservée et compte les paramètres.",
+        "code": "import torch\nfrom torch import nn\n\nclass BlocResiduel(nn.Module):\n    def __init__(self, canaux, reduction=4):\n        super().__init__()\n        cache = canaux // reduction\n        self.conv1 = nn.Conv2d(canaux, cache, 1, bias=False)\n        self.bn1 = nn.BatchNorm2d(cache)\n        self.conv2 = nn.Conv2d(cache, cache, 3, padding=1, bias=False)\n        self.bn2 = nn.BatchNorm2d(cache)\n        self.conv3 = nn.Conv2d(cache, canaux, 1, bias=False)\n        self.bn3 = nn.BatchNorm2d(canaux)\n        self.relu = nn.ReLU(inplace=True)\n\n    def forward(self, x):\n        y = self.relu(self.bn1(self.conv1(x)))\n        y = self.relu(self.bn2(self.conv2(y)))\n        y = self.bn3(self.conv3(y))\n        return self.relu(y + x)\n\nbloc = BlocResiduel(64)\nx = torch.zeros(2, 64, 32, 32)\ny = bloc(x)\n\nprint(\"entrée :\", tuple(x.shape))\nprint(\"sortie :\", tuple(y.shape))\nprint(\"paramètres :\", sum(p.numel() for p in bloc.parameters()))",
+        "output": "entrée : (2, 64, 32, 32)\nsortie : (2, 64, 32, 32)\nparamètres : 4544",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Quel problème le bloc résiduel cherche-t-il d'abord à résoudre ?",
+          "options": [
+            "Le manque de données d'entraînement",
+            "La taille trop faible des images",
+            "La difficulté d'optimiser des réseaux plats très profonds, dont l'erreur d'entraînement se dégrade",
+            "L'absence de fonction d'activation"
+          ],
+          "correctIndex": 2,
+          "explanation": "Le papier ResNet distingue la dégradation du surapprentissage : un réseau plat plus profond peut moins bien apprendre. Le raccourci identité facilite l'optimisation."
+        },
+        {
+          "question": "Quel rôle jouent les convolutions 1 x 1 dans un bloc résiduel en goulot d'étranglement ?",
+          "options": [
+            "Elles augmentent la résolution spatiale",
+            "Elles réduisent puis restaurent le nombre de canaux autour de la convolution 3 x 3",
+            "Elles remplacent la normalisation par lots",
+            "Elles calculent la perte du modèle"
+          ],
+          "correctIndex": 1,
+          "explanation": "La première 1 x 1 comprime les canaux, la 3 x 3 travaille dans cet espace réduit, la seconde 1 x 1 restaure la profondeur. Le coût du 3 x 3 diminue."
+        },
+        {
+          "question": "Pourquoi VGG utilise-t-il plusieurs convolutions 3 x 3 plutôt qu'une grande convolution ?",
+          "options": [
+            "Pour obtenir un champ récepteur comparable avec moins de paramètres et plus de non-linéarités",
+            "Pour supprimer le pooling",
+            "Pour éviter d'utiliser des couches denses",
+            "Pour réduire le nombre de canaux à chaque couche"
+          ],
+          "correctIndex": 0,
+          "explanation": "Deux 3 x 3 couvrent 5 x 5 avec 18C^2 paramètres contre 25C^2, et insèrent une activation entre les deux convolutions."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "VGG",
+          "definition": "Famille de réseaux convolutifs profonds qui empilent des convolutions 3 x 3 et des couches de pooling, avec 16 ou 19 couches dans les variantes courantes."
+        },
+        {
+          "term": "Module Inception",
+          "definition": "Bloc qui applique plusieurs convolutions et un pooling en parallèle, puis concatène leurs sorties pour combiner plusieurs échelles."
+        },
+        {
+          "term": "Bloc résiduel",
+          "definition": "Bloc qui apprend une correction F(x) et l'ajoute à son entrée x, grâce à une connexion identité."
+        },
+        {
+          "term": "Dégradation",
+          "definition": "Phénomène où un réseau plat plus profond obtient une erreur d'entraînement plus élevée qu'un réseau moins profond."
+        },
+        {
+          "term": "Goulot d'étranglement",
+          "definition": "Structure qui réduit temporairement le nombre de canaux pour diminuer le coût d'une opération, puis restaure la profondeur."
+        }
+      ],
+      "example": {
+        "title": "Un bloc résiduel qui apprend l'identité",
+        "text": "**Exemple de calcul.** Un bloc résiduel calcule $y = F(x) + x$. Si la transformation utile est l'identité, le réseau n'a qu'à pousser $F(x)$ vers zéro, ce qui est plus simple que d'apprendre l'identité avec des couches non linéaires. Le gradient de $y$ par rapport à $x$ contient le terme 1 du raccourci : il dispose d'un chemin direct vers les couches précédentes. Quand les dimensions changent, une convolution 1 × 1 projette $x$ pour ajuster sa forme. Le raccourci n'ajoute aucun paramètre lorsque les formes coïncident. Un réseau plat très profond peut voir son erreur d'entraînement augmenter ; le résidu attaque ce problème d'optimisation, pas la capacité du modèle."
+      },
+      "exercises": [
+        {
+          "title": "Le coût d'un goulot résiduel",
+          "prompt": "Un bloc résiduel enchaîne une convolution 1 × 1 de 64 vers 16 canaux, une convolution 3 × 3 de 16 vers 16, puis une convolution 1 × 1 de 16 vers 64. Calculez le nombre de poids sans biais, comparez-le à une convolution 3 × 3 directe de 64 vers 64 canaux, puis expliquez pourquoi le raccourci n'ajoute aucun paramètre ici.",
+          "solution": "Première 1 × 1 : 64 × 16 = 1 024 poids. La 3 × 3 : 16 × 16 × 9 = 2 304. La seconde 1 × 1 : 16 × 64 = 1 024. Le bloc totalise 4 352 poids, contre 64 × 64 × 9 = 36 864 pour une convolution 3 × 3 directe, soit environ 8,5 fois moins. La normalisation par lots ajoute ses propres paramètres, absents de ce compte. Le raccourci est une addition : l'entrée et la sortie ont la même forme, 64 canaux, donc aucune projection n'est nécessaire et aucun poids ne s'ajoute."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Simonyan et Zisserman, Very Deep Convolutional Networks for Large-Scale Image Recognition, 2014.",
+          "href": "https://arxiv.org/abs/1409.1556"
+        },
+        {
+          "label": "He et al., Deep Residual Learning for Image Recognition, 2015.",
+          "href": "https://arxiv.org/abs/1512.03385"
+        }
+      ]
+    },
+    {
+      "id": "efficacite",
+      "title": "DenseNet, SENet, MobileNet, EfficientNet et RegNet",
+      "keyTakeaways": [
+        "DenseNet réutilise les cartes de toutes les couches précédentes d'un bloc, ce qui réduit les paramètres mais augmente la mémoire d'activations.",
+        "SENet ajoute une attention sur les canaux : un vecteur global recalibre les cartes avec un surcoût limité.",
+        "Une convolution séparable en profondeur combine une convolution par canal et une convolution 1 x 1, pour un coût très inférieur à une convolution standard.",
+        "EfficientNet applique une échelle composée à la profondeur, à la largeur et à la résolution, au lieu d'augmenter un seul axe.",
+        "Les compromis ne se résument pas aux FLOPs : mémoire, latence et matériel décident souvent du choix final."
+      ],
+      "theory": "### DenseNet et la réutilisation\n\nDenseNet propose une connectivité dense à l'intérieur d'un bloc. Chaque couche reçoit les sorties de toutes les couches précédentes du bloc et les concatène à sa propre entrée. Une couche ne réapprend donc pas des caractéristiques déjà présentes ; elle les réutilise et ajoute une transformation. Le nombre de connexions croît quadratiquement avec la profondeur du bloc, mais chaque couche peut rester étroite. Le taux de croissance fixe le nombre de nouvelles cartes produites par couche.\n\nCette conception réduit le nombre de paramètres par rapport à un réseau classique de même profondeur, car les filtres n'ont pas besoin d'être larges. Elle a un coût : les concaténations conservent de nombreuses cartes en mémoire, et les activations peuvent devenir volumineuses. Des couches de transition, avec une convolution 1 x 1 et un pooling, réduisent la résolution et le nombre de canaux entre les blocs.\n\n### SENet et l'attention sur les canaux\n\nSENet introduit un bloc de « squeeze-and-excitation ». La première étape, le squeeze, calcule une moyenne globale par canal : chaque carte est résumée par un nombre. La seconde, l'excitation, passe ce vecteur dans deux couches denses avec une non-linéarité, puis une sigmoïde. Le résultat est un poids entre 0 et 1 par canal. La sortie du bloc multiplie chaque carte par son poids.\n\nL'effet est une recalibration : le réseau apprend quels canaux renforcer selon le contenu global de l'image. Le surcoût est faible, car le vecteur intermédiaire est petit. Le bloc peut s'insérer dans de nombreuses architectures, et il illustre une idée plus générale : moduler les caractéristiques avant de les combiner. Il ne remplace pas la convolution ; il la complète.\n\n### MobileNet et la convolution séparable\n\nMobileNet cible les environnements contraints. Sa brique principale est la convolution séparable en profondeur, qui décompose une convolution standard en deux étapes. La convolution depthwise applique un filtre $K \\times K$ à chaque canal séparément. La convolution pointwise, un noyau 1 x 1, combine ensuite les canaux. La première étape filtre l'espace, la seconde mélange les canaux.\n\nLe gain se calcule. Une convolution standard de $C$ canaux d'entrée vers $F$ canaux de sortie avec un noyau $K \\times K$ coûte $C \\times F \\times K^2$ multiplications par position. La version séparable coûte $C \\times K^2$ pour la partie depthwise, plus $C \\times F$ pour la partie pointwise. Le rapport vaut approximativement $1/F + 1/K^2$. Pour $C = 64$, $F = 128$ et $K = 3$, une convolution standard a 73 856 paramètres et la version séparable 8 960, soit environ 12 % du total. Le calcul suit la même tendance.\n\nMobileNet ajoute des multiplicateurs de largeur et de résolution, qui réduisent le nombre de canaux et la taille d'entrée. Ces réglages permettent d'adapter le modèle à un budget, au prix d'une perte de capacité. La convolution depthwise a toutefois une faible intensité arithmétique : elle lit beaucoup de valeurs pour peu de calculs, ce qui peut limiter son efficacité réelle sur certains accélérateurs.\n\n### EfficientNet et l'échelle composée\n\nEfficientNet part d'une base construite par recherche d'architecture, puis applique une échelle composée. Au lieu d'augmenter seulement la profondeur, la largeur ou la résolution, la méthode augmente les trois ensemble avec des coefficients fixés. L'intuition est qu'un réseau plus profond a besoin de plus de canaux pour représenter des motifs plus abstraits, et d'une résolution suffisante pour ne pas perdre les détails fins. Agrandir un seul axe finit par saturer le gain.\n\nL'échelle composée ne garantit pas un modèle rapide. Un réseau plus large et plus profond peut avoir un meilleur score avec un coût de calcul plus élevé. Le papier présente plusieurs variantes correspondant à des budgets différents ; il ne dit pas qu'une seule taille convient à tous les usages. La recette d'entraînement, l'augmentation de données et la recherche d'architecture comptent autant que la formule d'échelle.\n\n### RegNet et l'espace de conception\n\nRegNet adopte une démarche différente : au lieu de proposer un bloc unique, il explore un espace de conception paramétré par la largeur des blocs, leur profondeur et le nombre de groupes. L'analyse fait apparaître des régularités, puis une famille de modèles est dérivée de ces régularités. Cette approche rappelle que l'architecture n'est pas seulement une suite de blocs inventés ; c'est aussi un espace de choix que l'on peut parcourir méthodiquement.\n\n### Les compromis qui comptent\n\nLes architectures efficaces ne se comparent pas sur un seul nombre. DenseNet économise des paramètres mais consomme de la mémoire d'activations. SENet ajoute peu de paramètres mais introduit des opérations de réduction globale. MobileNet réduit les FLOPs, avec un risque de limitation par la mémoire. EfficientNet cherche un équilibre, mais son coût dépend de la variante. RegNet montre qu'une famille régulière peut être plus facile à adapter qu'un modèle isolé.\n\nPour un déploiement, il faut mesurer la latence, la mémoire et le débit sur le matériel cible, avec la résolution et la précision prévues. Un modèle plus petit en paramètres peut être plus lent s'il enchaîne des opérations peu efficaces. Inversement, un modèle plus gros peut mieux utiliser un accélérateur. Le choix final est un compromis entre précision, coût et contraintes d'exploitation.\n\n> **Repère.** Une architecture efficace ne se résume pas à moins de FLOPs : elle doit aussi tenir en mémoire et utiliser correctement le matériel.",
+      "diagram": {
+        "title": "Séparable, attention et échelle composée",
+        "description": "Schéma illustratif : une convolution standard est comparée à une convolution séparable, un bloc squeeze-and-excitation recalibre les canaux, et l'échelle composée agit sur trois axes. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 480\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Convolution standard, convolution séparable, bloc SE et échelle composée\">\n  <rect width=\"800\" height=\"480\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">Trois façons de réduire le coût</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"standard\">\n    <text x=\"195\" y=\"90\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">convolution standard</text>\n    <rect x=\"80\" y=\"110\" width=\"50\" height=\"50\" rx=\"6\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"1.5\"/>\n    <rect x=\"180\" y=\"110\" width=\"70\" height=\"50\" rx=\"6\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"1.5\"/>\n    <rect x=\"300\" y=\"110\" width=\"50\" height=\"50\" rx=\"6\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"1.5\"/>\n    <text x=\"105\" y=\"140\" fill=\"#7dd3fc\" font-size=\"10\" text-anchor=\"middle\">C canaux</text>\n    <text x=\"215\" y=\"140\" fill=\"#fcd34d\" font-size=\"10\" text-anchor=\"middle\">K x K, F filtres</text>\n    <text x=\"325\" y=\"140\" fill=\"#6ee7b7\" font-size=\"10\" text-anchor=\"middle\">F canaux</text>\n    <g stroke=\"#64748b\" stroke-width=\"1.5\"><line x1=\"130\" y1=\"135\" x2=\"176\" y2=\"135\"/><line x1=\"250\" y1=\"135\" x2=\"296\" y2=\"135\"/></g>\n    <text x=\"210\" y=\"188\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">chaque sortie lit tous les canaux</text>\n  </g>\n\n  <g id=\"depthwise\">\n    <text x=\"590\" y=\"90\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">convolution depthwise</text>\n    <rect x=\"480\" y=\"110\" width=\"50\" height=\"50\" rx=\"6\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"1.5\"/>\n    <rect x=\"570\" y=\"110\" width=\"70\" height=\"50\" rx=\"6\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"1.5\"/>\n    <rect x=\"680\" y=\"110\" width=\"50\" height=\"50\" rx=\"6\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"1.5\"/>\n    <text x=\"505\" y=\"140\" fill=\"#7dd3fc\" font-size=\"10\" text-anchor=\"middle\">C canaux</text>\n    <text x=\"605\" y=\"140\" fill=\"#fcd34d\" font-size=\"10\" text-anchor=\"middle\">un filtre par canal</text>\n    <text x=\"705\" y=\"140\" fill=\"#7dd3fc\" font-size=\"10\" text-anchor=\"middle\">C canaux</text>\n    <g stroke=\"#64748b\" stroke-width=\"1.5\"><line x1=\"530\" y1=\"135\" x2=\"566\" y2=\"135\"/><line x1=\"640\" y1=\"135\" x2=\"676\" y2=\"135\"/></g>\n    <text x=\"605\" y=\"188\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">filtre spatial indépendant par canal</text>\n  </g>\n\n  <g id=\"pointwise\">\n    <rect x=\"480\" y=\"212\" width=\"50\" height=\"44\" rx=\"6\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"1.5\"/>\n    <rect x=\"570\" y=\"212\" width=\"70\" height=\"44\" rx=\"6\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"1.5\"/>\n    <rect x=\"680\" y=\"212\" width=\"50\" height=\"44\" rx=\"6\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"1.5\"/>\n    <text x=\"505\" y=\"238\" fill=\"#7dd3fc\" font-size=\"10\" text-anchor=\"middle\">C canaux</text>\n    <text x=\"605\" y=\"238\" fill=\"#6ee7b7\" font-size=\"10\" text-anchor=\"middle\">1 x 1, F filtres</text>\n    <text x=\"705\" y=\"238\" fill=\"#6ee7b7\" font-size=\"10\" text-anchor=\"middle\">F canaux</text>\n    <g stroke=\"#64748b\" stroke-width=\"1.5\"><line x1=\"530\" y1=\"234\" x2=\"566\" y2=\"234\"/><line x1=\"640\" y1=\"234\" x2=\"676\" y2=\"234\"/></g>\n    <text x=\"605\" y=\"278\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"middle\">mélange des canaux</text>\n  </g>\n\n  <g id=\"se\">\n    <text x=\"195\" y=\"324\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">squeeze-and-excitation</text>\n    <rect x=\"60\" y=\"344\" width=\"60\" height=\"44\" rx=\"6\" fill=\"#0f172a\" stroke=\"#38bdf8\" stroke-width=\"1.5\"/>\n    <rect x=\"150\" y=\"344\" width=\"70\" height=\"44\" rx=\"6\" fill=\"#0f172a\" stroke=\"#fbbf24\" stroke-width=\"1.5\"/>\n    <rect x=\"250\" y=\"344\" width=\"70\" height=\"44\" rx=\"6\" fill=\"#0f172a\" stroke=\"#c084fc\" stroke-width=\"1.5\"/>\n    <rect x=\"350\" y=\"344\" width=\"60\" height=\"44\" rx=\"6\" fill=\"#0f172a\" stroke=\"#34d399\" stroke-width=\"1.5\"/>\n    <text x=\"90\" y=\"370\" fill=\"#7dd3fc\" font-size=\"10\" text-anchor=\"middle\">cartes</text>\n    <text x=\"185\" y=\"364\" fill=\"#fcd34d\" font-size=\"10\" text-anchor=\"middle\">moyenne</text>\n    <text x=\"185\" y=\"378\" fill=\"#fcd34d\" font-size=\"10\" text-anchor=\"middle\">globale</text>\n    <text x=\"285\" y=\"364\" fill=\"#d8b4fe\" font-size=\"10\" text-anchor=\"middle\">poids par</text>\n    <text x=\"285\" y=\"378\" fill=\"#d8b4fe\" font-size=\"10\" text-anchor=\"middle\">canal</text>\n    <text x=\"380\" y=\"370\" fill=\"#6ee7b7\" font-size=\"10\" text-anchor=\"middle\">recalibrage</text>\n    <g stroke=\"#64748b\" stroke-width=\"1.5\"><line x1=\"120\" y1=\"366\" x2=\"146\" y2=\"366\"/><line x1=\"220\" y1=\"366\" x2=\"246\" y2=\"366\"/><line x1=\"320\" y1=\"366\" x2=\"346\" y2=\"366\"/></g>\n  </g>\n\n  <g id=\"scaling\">\n    <text x=\"590\" y=\"324\" fill=\"#e2e8f0\" font-size=\"13\" text-anchor=\"middle\">échelle composée</text>\n    <line x1=\"520\" y1=\"430\" x2=\"680\" y2=\"430\" stroke=\"#64748b\" stroke-width=\"1.5\"/>\n    <line x1=\"520\" y1=\"430\" x2=\"520\" y2=\"350\" stroke=\"#64748b\" stroke-width=\"1.5\"/>\n    <line x1=\"520\" y1=\"430\" x2=\"470\" y2=\"470\" stroke=\"#64748b\" stroke-width=\"1.5\"/>\n    <text x=\"690\" y=\"434\" fill=\"#7dd3fc\" font-size=\"10\">profondeur</text>\n    <text x=\"505\" y=\"344\" fill=\"#fcd34d\" font-size=\"10\">largeur</text>\n    <text x=\"450\" y=\"468\" fill=\"#6ee7b7\" font-size=\"10\">résolution</text>\n    <path d=\"M520 430 L610 410 L650 380\" fill=\"none\" stroke=\"#c084fc\" stroke-width=\"2.5\"/>\n    <text x=\"605\" y=\"404\" fill=\"#d8b4fe\" font-size=\"10\" text-anchor=\"middle\">les trois axes</text>\n    <text x=\"605\" y=\"418\" fill=\"#d8b4fe\" font-size=\"10\" text-anchor=\"middle\">augmentent ensemble</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. La convolution standard",
+            "explanation": "Chaque canal de sortie combine tous les canaux d'entrée avec un noyau K x K. Le coût est proportionnel à C x F x K x K.",
+            "highlight": [
+              "standard"
+            ]
+          },
+          {
+            "title": "2. La convolution séparable",
+            "explanation": "La partie depthwise filtre chaque canal séparément, puis la partie pointwise, un noyau 1 x 1, recombine les canaux. Le coût baisse fortement.",
+            "highlight": [
+              "depthwise",
+              "pointwise"
+            ]
+          },
+          {
+            "title": "3. Le bloc SE",
+            "explanation": "Une moyenne globale produit un vecteur par canal. Un petit réseau apprend des poids, qui recalibrent les cartes avant la suite du réseau.",
+            "highlight": [
+              "se"
+            ]
+          },
+          {
+            "title": "4. L'échelle composée",
+            "explanation": "EfficientNet augmente la profondeur, la largeur et la résolution ensemble, avec des coefficients fixés, plutôt qu'un seul axe.",
+            "highlight": [
+              "scaling"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Comparaison du nombre de paramètres d'une convolution standard et d'une convolution séparable en profondeur, pour 64 canaux d'entrée, 128 canaux de sortie et un noyau 3 x 3.",
+        "code": "def conv_standard(cin, cout, k):\n    return cout * (cin * k * k + 1)\n\ndef conv_separable(cin, cout, k):\n    depthwise = cin * (k * k + 1)\n    pointwise = cout * (cin + 1)\n    return depthwise + pointwise\n\nstandard = conv_standard(64, 128, 3)\nseparable = conv_separable(64, 128, 3)\n\nprint(\"convolution standard :\", standard)\nprint(\"séparable en profondeur :\", separable)\nprint(f\"rapport : {separable / standard:.3f}\")",
+        "output": "convolution standard : 73856\nséparable en profondeur : 8960\nrapport : 0.121",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Pour une convolution 3 x 3 qui passe de 64 à 128 canaux, quel est l'ordre de grandeur du rapport entre une version séparable et une version standard ?",
+          "options": [
+            "Environ 12 %, car le coût vaut à peu près 1/F + 1/K^2",
+            "Environ 50 %, car la profondeur est divisée par deux",
+            "Environ 100 %, car les deux versions ont le même coût",
+            "Environ 200 %, car la version séparable ajoute une étape"
+          ],
+          "correctIndex": 0,
+          "explanation": "La version séparable coûte C x K^2 + C x F, contre C x F x K^2. Le rapport vaut environ 1/128 + 1/9, soit 0,119. Les paramètres suivent la même tendance."
+        },
+        {
+          "question": "Quel est l'effet d'un bloc squeeze-and-excitation ?",
+          "options": [
+            "Il réduit la résolution spatiale de moitié",
+            "Il remplace les convolutions par des couches denses",
+            "Il recalibre les canaux à partir d'une information globale, avec un surcoût limité",
+            "Il supprime la nécessité d'une fonction d'activation"
+          ],
+          "correctIndex": 2,
+          "explanation": "Le squeeze résume chaque canal par une moyenne globale. L'excitation apprend un poids par canal, qui module les cartes. Le bloc complète la convolution sans la remplacer."
+        },
+        {
+          "question": "Que propose l'échelle composée d'EfficientNet ?",
+          "options": [
+            "Augmenter uniquement la profondeur jusqu'à saturation",
+            "Augmenter ensemble la profondeur, la largeur et la résolution, avec des coefficients fixés",
+            "Supprimer le pooling global",
+            "Remplacer toutes les convolutions par de l'attention"
+          ],
+          "correctIndex": 1,
+          "explanation": "EfficientNet ajuste les trois axes simultanément. L'idée est qu'un réseau plus profond profite de plus de canaux et d'une résolution adaptée, au lieu de saturer un seul axe."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "DenseNet",
+          "definition": "Architecture où chaque couche d'un bloc reçoit et concatène les sorties de toutes les couches précédentes du bloc."
+        },
+        {
+          "term": "Squeeze-and-excitation",
+          "definition": "Bloc d'attention sur les canaux qui calcule un poids global par canal, puis recalibre les cartes."
+        },
+        {
+          "term": "Convolution séparable en profondeur",
+          "definition": "Décomposition d'une convolution en une convolution spatiale par canal, suivie d'une convolution 1 x 1 qui mélange les canaux."
+        },
+        {
+          "term": "Échelle composée",
+          "definition": "Méthode qui augmente simultanément la profondeur, la largeur et la résolution d'un réseau selon des coefficients fixés."
+        },
+        {
+          "term": "RegNet",
+          "definition": "Famille d'architectures issues de l'exploration d'un espace de conception paramétré par la largeur, la profondeur et les groupes."
+        }
+      ],
+      "example": {
+        "title": "Convolution standard contre convolution séparable",
+        "text": "**Exemple de calcul.** Une convolution standard 3 × 3 qui passe de 64 à 64 canaux possède 64 × 64 × 9 = 36 864 poids, plus 64 biais, soit 36 928 paramètres. Une version séparable en profondeur utilise 64 × 9 = 576 poids pour le filtrage spatial, puis 64 × 64 = 4 096 pour le mélange 1 × 1, soit 4 672 poids, plus 64 biais, soit 4 736 paramètres. Le rapport des poids est d'environ 7,9. L'économie dépend des canaux et de la taille du noyau ; elle n'est pas gratuite. La convolution depthwise effectue peu d'opérations par octet lu et peut être limitée par la mémoire. EfficientNet ajoute une échelle composée, RegNet une progression de largeur. Aucun de ces choix ne garantit un meilleur débit sur votre matériel."
+      },
+      "exercises": [
+        {
+          "title": "Séparable ou standard",
+          "prompt": "Une convolution 3 × 3 passe de 96 à 96 canaux. Calculez le nombre de poids d'une convolution standard, puis celui d'une convolution séparable en profondeur, et donnez le rapport. Expliquez ensuite pourquoi la version séparable peut malgré tout être plus lente sur certains accélérateurs.",
+          "solution": "Standard : 96 × 96 × 9 = 82 944 poids. Séparable : 96 × 9 = 864 pour la partie depthwise, plus 96 × 96 = 9 216 pour la partie pointwise, soit 10 080 poids. Le rapport vaut 10 080 / 82 944 ≈ 0,12, donc environ 12 %. Le calcul suit la même tendance. La partie depthwise effectue peu d'opérations par octet lu : elle a une faible intensité arithmétique et peut être limitée par la mémoire plutôt que par le calcul. Le gain dépend donc du noyau, du matériel et de la forme des tenseurs, et se mesure sur la cible."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Tan et Le, EfficientNet, 2019.",
+          "href": "https://arxiv.org/abs/1905.11946"
+        },
+        {
+          "label": "Li et al., A Survey of Convolutional Neural Networks: Analysis, Applications, and Prospects, 2020.",
+          "href": "https://arxiv.org/abs/2004.02806"
+        }
+      ]
+    },
+    {
+      "id": "vit-convnext",
+      "title": "ViT, ConvNeXt, comparaison et conclusion",
+      "keyTakeaways": [
+        "Un Vision Transformer découpe l'image en patches, projette chaque patch en un jeton et applique un encodeur Transformer.",
+        "L'attention donne accès à une information globale dès les premières couches, mais son coût croît quadratiquement avec le nombre de jetons.",
+        "Le ViT a moins de biais inductif visuel qu'un CNN : il demande généralement plus de données ou une régularisation plus forte.",
+        "ConvNeXt modernise le réseau convolutif avec de grands noyaux depthwise, des goulots inversés et une normalisation de couche.",
+        "Il n'existe pas de gagnant universel : le choix dépend des données, du budget de calcul, de la latence et du matériel de déploiement."
+      ],
+      "theory": "### Le Vision Transformer\n\nLe Vision Transformer, présenté en 2020 par Dosovitskiy et ses coauteurs, importe l'architecture Transformer dans la vision. L'image est découpée en patches fixes, par exemple de 16 x 16 pixels. Chaque patch est aplati, puis projeté linéairement en un vecteur de dimension $D$. Une image de 224 x 224 pixels donne $14 \\times 14 = 196$ patches, donc 196 jetons. Un jeton de classe est ajouté au début de la séquence, et des encodages positionnels sont ajoutés pour conserver l'ordre spatial.\n\nLa séquence passe ensuite dans un encodeur Transformer. Chaque bloc contient une attention multi-têtes, qui permet à chaque jeton de consulter tous les autres, puis un réseau feed-forward. Des connexions résiduelles et des normalisations de couche stabilisent l'empilement. À la sortie, le jeton de classe sert à la classification, ou les jetons sont agrégés pour une autre tâche.\n\nL'attention a un avantage et un coût. Elle mélange l'information de toute l'image dès la première couche : un patch peut regarder un patch éloigné sans passer par une pile de convolutions. Son coût croît comme $O(N^2 D)$ pour $N$ jetons, ce qui limite la résolution ou impose des variantes locales. Un patch de 16 x 16 réduit $N$, mais perd les détails fins ; un patch plus petit augmente $N$ et le coût.\n\n### Le biais inductif et les données\n\nUne convolution encode des hypothèses fortes : localité, partage des poids, équivariance aux translations. Ces hypothèses conviennent bien aux images et réduisent le nombre d'exemples nécessaires pour apprendre. Le ViT impose moins de structure : il apprend les relations spatiales à partir des données. Cette souplesse a un prix. Le papier montre que le ViT donne de bons résultats lorsqu'il est préentraîné sur de grands ensembles, comme ImageNet-21k ou JFT-300M, puis affiné sur la tâche cible. Sur des jeux plus petits, un réseau convolutif reste souvent plus efficace.\n\nCette observation ne dit pas que l'attention est inutile. Elle dit que le choix d'architecture dépend de la quantité de données et de la recette d'entraînement. Un ViT entraîné sur un petit jeu sans régularisation appropriée peut sous-performer un ResNet. Avec un préentraînement à grande échelle, l'écart se réduit ou s'inverse selon les jeux d'évaluation. Les hybrides combinent parfois un extracteur convolutif et un encodeur Transformer pour garder la localité et profiter de l'attention globale.\n\n### ConvNeXt et la modernisation du CNN\n\nConvNeXt, présenté en 2022, part d'un ResNet et le modernise progressivement. Les auteurs remplacent les noyaux 3 x 3 par des convolutions depthwise 7 x 7, adoptent un goulot inversé qui élargit les canaux avant de les comprimer, utilisent GELU au lieu de ReLU, LayerNorm au lieu de BatchNorm, et réduisent le nombre d'activations et de normalisations. Ils ajustent aussi la structure macroscopique : un stem de type patchify, des étages avec un ratio de blocs différent, et une séparation explicite de la réduction de résolution.\n\nLe résultat est un réseau purement convolutif dont les performances sont comparables à celles des Transformers de vision sur les jeux d'évaluation étudiés. Le papier ne prétend pas que la convolution est toujours supérieure ; il montre qu'une grande partie de l'écart attribuée à l'attention provenait de choix d'entraînement et de conception. ConvNeXt conserve les avantages pratiques d'un CNN : opérations locales, implémentation mature, comportement prévisible sur des résolutions variées.\n\n### Comparer les deux familles\n\n| Critère | CNN | Transformer de vision |\n| --- | --- | --- |\n| Structure | Filtres locaux, partage des poids | Attention globale entre jetons |\n| Biais inductif | Fort : localité, translation | Faible : appris à partir des données |\n| Données | Souvent plus efficace sur des jeux moyens | Profite d'un grand préentraînement |\n| Coût | Linéaire en pixels pour une couche locale | Quadratique en nombre de jetons |\n| Déploiement | Opérations bien prises en charge | Dépend des noyaux d'attention disponibles |\n\nCe tableau est qualitatif. Il ne remplace pas une mesure sur la tâche visée. Un CNN peut être plus rapide sur un appareil mobile, tandis qu'un Transformer peut mieux exploiter un accélérateur spécialisé. Un hybride peut offrir un compromis. Le choix dépend aussi de la disponibilité de poids préentraînés et du coût d'adaptation.\n\n### Conclusion : ce qui reste\n\nDe LeNet-5 à ConvNeXt, plusieurs tensions reviennent. La localité réduit le nombre de paramètres et facilite l'apprentissage ; l'attention offre une portée globale mais coûteuse. La profondeur augmente la capacité ; les résidus et les normalisations la rendent optimisable. L'efficacité ne se mesure pas seulement en FLOPs ; la mémoire et la latence décident souvent. Enfin, les résultats dépendent des données et du protocole d'évaluation autant que de l'architecture.\n\nLire un article d'architecture consiste donc à vérifier plusieurs choses : les formes des tenseurs, le nombre de paramètres, le coût des opérations, la recette d'entraînement et le protocole d'évaluation. Une architecture n'est pas un nom isolé ; c'est un ensemble de choix, mesurés dans un contexte. Les modules précédents ont donné les outils pour faire cette lecture ; le prochain pas est de reproduire un petit modèle et de comparer ses résultats à ceux d'un modèle de référence simple.\n\n> **Repère.** Une architecture se juge sur une tâche, un budget et un matériel. Le nom du bloc ne suffit pas.",
+      "diagram": {
+        "title": "Des patches aux jetons, puis à l'attention",
+        "description": "Schéma illustratif : une image est découpée en patches, projetée en jetons, puis traitée par un encodeur Transformer. En bas, la portée locale d'une convolution est comparée à la portée globale de l'attention. Aucune mesure n'est représentée.",
+        "svg": "<svg viewBox=\"0 0 800 480\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Image découpée en patches, projetée en jetons et traitée par un Transformer, avec comparaison convolution et attention\">\n  <rect width=\"800\" height=\"480\" rx=\"16\" fill=\"#070b14\" stroke=\"#1e293b\" stroke-width=\"1.5\"/>\n  <text x=\"400\" y=\"32\" fill=\"#f8fafc\" font-size=\"15\" font-weight=\"bold\" text-anchor=\"middle\">De l'image aux jetons, puis à l'attention</text>\n  <text x=\"400\" y=\"54\" fill=\"#94a3b8\" font-size=\"12\" text-anchor=\"middle\">Schéma illustratif, sans mesure</text>\n\n  <g id=\"image\">\n    <text x=\"80\" y=\"92\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">image</text>\n    <g fill=\"#0ea5e9\" stroke=\"#0f172a\" stroke-width=\"1\">\n      <rect x=\"30\" y=\"110\" width=\"25\" height=\"25\" opacity=\"0.30\"/><rect x=\"55\" y=\"110\" width=\"25\" height=\"25\" opacity=\"0.40\"/><rect x=\"80\" y=\"110\" width=\"25\" height=\"25\" opacity=\"0.50\"/><rect x=\"105\" y=\"110\" width=\"25\" height=\"25\" opacity=\"0.60\"/>\n      <rect x=\"30\" y=\"135\" width=\"25\" height=\"25\" opacity=\"0.40\"/><rect x=\"55\" y=\"135\" width=\"25\" height=\"25\" opacity=\"0.50\"/><rect x=\"80\" y=\"135\" width=\"25\" height=\"25\" opacity=\"0.60\"/><rect x=\"105\" y=\"135\" width=\"25\" height=\"25\" opacity=\"0.70\"/>\n      <rect x=\"30\" y=\"160\" width=\"25\" height=\"25\" opacity=\"0.50\"/><rect x=\"55\" y=\"160\" width=\"25\" height=\"25\" opacity=\"0.60\"/><rect x=\"80\" y=\"160\" width=\"25\" height=\"25\" opacity=\"0.70\"/><rect x=\"105\" y=\"160\" width=\"25\" height=\"25\" opacity=\"0.80\"/>\n      <rect x=\"30\" y=\"185\" width=\"25\" height=\"25\" opacity=\"0.60\"/><rect x=\"55\" y=\"185\" width=\"25\" height=\"25\" opacity=\"0.70\"/><rect x=\"80\" y=\"185\" width=\"25\" height=\"25\" opacity=\"0.80\"/><rect x=\"105\" y=\"185\" width=\"25\" height=\"25\" opacity=\"0.90\"/>\n    </g>\n  </g>\n\n  <g id=\"patches\">\n    <text x=\"225\" y=\"92\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">patches 16 x 16</text>\n    <g fill=\"none\" stroke=\"#fbbf24\" stroke-width=\"1.5\">\n      <rect x=\"170\" y=\"110\" width=\"25\" height=\"25\"/><rect x=\"195\" y=\"110\" width=\"25\" height=\"25\"/><rect x=\"220\" y=\"110\" width=\"25\" height=\"25\"/><rect x=\"245\" y=\"110\" width=\"25\" height=\"25\"/>\n      <rect x=\"170\" y=\"135\" width=\"25\" height=\"25\"/><rect x=\"195\" y=\"135\" width=\"25\" height=\"25\"/><rect x=\"220\" y=\"135\" width=\"25\" height=\"25\"/><rect x=\"245\" y=\"135\" width=\"25\" height=\"25\"/>\n      <rect x=\"170\" y=\"160\" width=\"25\" height=\"25\"/><rect x=\"195\" y=\"160\" width=\"25\" height=\"25\"/><rect x=\"220\" y=\"160\" width=\"25\" height=\"25\"/><rect x=\"245\" y=\"160\" width=\"25\" height=\"25\"/>\n      <rect x=\"170\" y=\"185\" width=\"25\" height=\"25\"/><rect x=\"195\" y=\"185\" width=\"25\" height=\"25\"/><rect x=\"220\" y=\"185\" width=\"25\" height=\"25\"/><rect x=\"245\" y=\"185\" width=\"25\" height=\"25\"/>\n    </g>\n    <text x=\"225\" y=\"232\" fill=\"#fcd34d\" font-size=\"10\" text-anchor=\"middle\">196 jetons pour 224 x 224</text>\n  </g>\n\n  <g id=\"projection\">\n    <path d=\"M285 155 L345 155\" stroke=\"#64748b\" stroke-width=\"2\"/>\n    <path d=\"M345 155 L335 150 L335 160 Z\" fill=\"#64748b\"/>\n    <text x=\"315\" y=\"142\" fill=\"#94a3b8\" font-size=\"10\" text-anchor=\"middle\">projection</text>\n    <text x=\"315\" y=\"176\" fill=\"#94a3b8\" font-size=\"10\" text-anchor=\"middle\">linéaire</text>\n  </g>\n\n  <g id=\"tokens\">\n    <text x=\"405\" y=\"92\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">jetons + position</text>\n    <g fill=\"#34d399\" stroke=\"#0f172a\" stroke-width=\"1\">\n      <rect x=\"360\" y=\"110\" width=\"90\" height=\"18\" opacity=\"0.70\"/><rect x=\"360\" y=\"132\" width=\"90\" height=\"18\" opacity=\"0.60\"/><rect x=\"360\" y=\"154\" width=\"90\" height=\"18\" opacity=\"0.50\"/><rect x=\"360\" y=\"176\" width=\"90\" height=\"18\" opacity=\"0.40\"/><rect x=\"360\" y=\"198\" width=\"90\" height=\"18\" opacity=\"0.30\"/>\n    </g>\n    <text x=\"405\" y=\"238\" fill=\"#6ee7b7\" font-size=\"10\" text-anchor=\"middle\">jeton de classe en tête</text>\n  </g>\n\n  <g id=\"transformer\">\n    <rect x=\"500\" y=\"105\" width=\"120\" height=\"110\" rx=\"10\" fill=\"#0f172a\" stroke=\"#c084fc\" stroke-width=\"2\"/>\n    <text x=\"560\" y=\"132\" fill=\"#d8b4fe\" font-size=\"12\" text-anchor=\"middle\">Transformer</text>\n    <text x=\"560\" y=\"152\" fill=\"#cbd5e1\" font-size=\"10\" text-anchor=\"middle\">attention multi-têtes</text>\n    <text x=\"560\" y=\"170\" fill=\"#cbd5e1\" font-size=\"10\" text-anchor=\"middle\">+ feed-forward</text>\n    <text x=\"560\" y=\"188\" fill=\"#94a3b8\" font-size=\"10\" text-anchor=\"middle\">+ résidus et LayerNorm</text>\n    <path d=\"M455 160 L495 160\" stroke=\"#64748b\" stroke-width=\"2\"/>\n    <path d=\"M495 160 L485 155 L485 165 Z\" fill=\"#64748b\"/>\n  </g>\n\n  <g id=\"conv-bias\">\n    <text x=\"170\" y=\"300\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">convolution : portée locale</text>\n    <g fill=\"#0ea5e9\" stroke=\"#0f172a\" stroke-width=\"1\">\n      <rect x=\"70\" y=\"320\" width=\"28\" height=\"28\" opacity=\"0.20\"/><rect x=\"98\" y=\"320\" width=\"28\" height=\"28\" opacity=\"0.20\"/><rect x=\"126\" y=\"320\" width=\"28\" height=\"28\" opacity=\"0.20\"/><rect x=\"154\" y=\"320\" width=\"28\" height=\"28\" opacity=\"0.20\"/><rect x=\"182\" y=\"320\" width=\"28\" height=\"28\" opacity=\"0.20\"/><rect x=\"210\" y=\"320\" width=\"28\" height=\"28\" opacity=\"0.20\"/>\n      <rect x=\"70\" y=\"348\" width=\"28\" height=\"28\" opacity=\"0.20\"/><rect x=\"98\" y=\"348\" width=\"28\" height=\"28\" opacity=\"0.80\"/><rect x=\"126\" y=\"348\" width=\"28\" height=\"28\" opacity=\"0.80\"/><rect x=\"154\" y=\"348\" width=\"28\" height=\"28\" opacity=\"0.80\"/><rect x=\"182\" y=\"348\" width=\"28\" height=\"28\" opacity=\"0.20\"/><rect x=\"210\" y=\"348\" width=\"28\" height=\"28\" opacity=\"0.20\"/>\n      <rect x=\"70\" y=\"376\" width=\"28\" height=\"28\" opacity=\"0.20\"/><rect x=\"98\" y=\"376\" width=\"28\" height=\"28\" opacity=\"0.80\"/><rect x=\"126\" y=\"376\" width=\"28\" height=\"28\" opacity=\"0.80\"/><rect x=\"154\" y=\"376\" width=\"28\" height=\"28\" opacity=\"0.80\"/><rect x=\"182\" y=\"376\" width=\"28\" height=\"28\" opacity=\"0.20\"/><rect x=\"210\" y=\"376\" width=\"28\" height=\"28\" opacity=\"0.20\"/>\n      <rect x=\"70\" y=\"404\" width=\"28\" height=\"28\" opacity=\"0.20\"/><rect x=\"98\" y=\"404\" width=\"28\" height=\"28\" opacity=\"0.80\"/><rect x=\"126\" y=\"404\" width=\"28\" height=\"28\" opacity=\"0.80\"/><rect x=\"154\" y=\"404\" width=\"28\" height=\"28\" opacity=\"0.80\"/><rect x=\"182\" y=\"404\" width=\"28\" height=\"28\" opacity=\"0.20\"/><rect x=\"210\" y=\"404\" width=\"28\" height=\"28\" opacity=\"0.20\"/>\n    </g>\n    <rect x=\"98\" y=\"348\" width=\"84\" height=\"84\" fill=\"none\" stroke=\"#fbbf24\" stroke-width=\"2\"/>\n  </g>\n\n  <g id=\"attention\">\n    <text x=\"590\" y=\"300\" fill=\"#e2e8f0\" font-size=\"12\" text-anchor=\"middle\">attention : portée globale</text>\n    <g fill=\"#c084fc\" stroke=\"#0f172a\" stroke-width=\"1\">\n      <rect x=\"500\" y=\"320\" width=\"28\" height=\"28\" opacity=\"0.25\"/><rect x=\"528\" y=\"320\" width=\"28\" height=\"28\" opacity=\"0.25\"/><rect x=\"556\" y=\"320\" width=\"28\" height=\"28\" opacity=\"0.25\"/><rect x=\"584\" y=\"320\" width=\"28\" height=\"28\" opacity=\"0.25\"/><rect x=\"612\" y=\"320\" width=\"28\" height=\"28\" opacity=\"0.25\"/><rect x=\"640\" y=\"320\" width=\"28\" height=\"28\" opacity=\"0.25\"/>\n      <rect x=\"500\" y=\"348\" width=\"28\" height=\"28\" opacity=\"0.25\"/><rect x=\"528\" y=\"348\" width=\"28\" height=\"28\" opacity=\"0.25\"/><rect x=\"556\" y=\"348\" width=\"28\" height=\"28\" opacity=\"0.25\"/><rect x=\"584\" y=\"348\" width=\"28\" height=\"28\" opacity=\"0.25\"/><rect x=\"612\" y=\"348\" width=\"28\" height=\"28\" opacity=\"0.25\"/><rect x=\"640\" y=\"348\" width=\"28\" height=\"28\" opacity=\"0.25\"/>\n      <rect x=\"500\" y=\"376\" width=\"28\" height=\"28\" opacity=\"0.25\"/><rect x=\"528\" y=\"376\" width=\"28\" height=\"28\" opacity=\"0.25\"/><rect x=\"556\" y=\"376\" width=\"28\" height=\"28\" opacity=\"0.25\"/><rect x=\"584\" y=\"376\" width=\"28\" height=\"28\" opacity=\"0.95\"/><rect x=\"612\" y=\"376\" width=\"28\" height=\"28\" opacity=\"0.25\"/><rect x=\"640\" y=\"376\" width=\"28\" height=\"28\" opacity=\"0.25\"/>\n      <rect x=\"500\" y=\"404\" width=\"28\" height=\"28\" opacity=\"0.25\"/><rect x=\"528\" y=\"404\" width=\"28\" height=\"28\" opacity=\"0.25\"/><rect x=\"556\" y=\"404\" width=\"28\" height=\"28\" opacity=\"0.25\"/><rect x=\"584\" y=\"404\" width=\"28\" height=\"28\" opacity=\"0.25\"/><rect x=\"612\" y=\"404\" width=\"28\" height=\"28\" opacity=\"0.25\"/><rect x=\"640\" y=\"404\" width=\"28\" height=\"28\" opacity=\"0.25\"/>\n    </g>\n    <g stroke=\"#c084fc\" stroke-width=\"1\" opacity=\"0.7\">\n      <line x1=\"598\" y1=\"390\" x2=\"514\" y2=\"334\"/><line x1=\"598\" y1=\"390\" x2=\"542\" y2=\"334\"/><line x1=\"598\" y1=\"390\" x2=\"570\" y2=\"334\"/><line x1=\"598\" y1=\"390\" x2=\"598\" y2=\"334\"/><line x1=\"598\" y1=\"390\" x2=\"626\" y2=\"334\"/><line x1=\"598\" y1=\"390\" x2=\"654\" y2=\"334\"/><line x1=\"598\" y1=\"390\" x2=\"514\" y2=\"390\"/><line x1=\"598\" y1=\"390\" x2=\"654\" y2=\"390\"/><line x1=\"598\" y1=\"390\" x2=\"514\" y2=\"418\"/><line x1=\"598\" y1=\"390\" x2=\"542\" y2=\"418\"/><line x1=\"598\" y1=\"390\" x2=\"570\" y2=\"418\"/><line x1=\"598\" y1=\"390\" x2=\"654\" y2=\"418\"/>\n    </g>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "1. Découper en patches",
+            "explanation": "L'image est divisée en carrés fixes, par exemple 16 x 16 pixels. Chaque patch devient un vecteur après aplatissement.",
+            "highlight": [
+              "image",
+              "patches"
+            ]
+          },
+          {
+            "title": "2. Projeter et ajouter la position",
+            "explanation": "Une projection linéaire amène chaque patch à la dimension du modèle. Un encodage positionnel indique sa place, et un jeton de classe est ajouté.",
+            "highlight": [
+              "projection",
+              "tokens"
+            ]
+          },
+          {
+            "title": "3. Empiler les blocs Transformer",
+            "explanation": "L'attention multi-têtes permet à chaque jeton de consulter tous les autres. Les blocs alternent attention et feed-forward, avec résidus et normalisation.",
+            "highlight": [
+              "transformer"
+            ]
+          },
+          {
+            "title": "4. Local contre global",
+            "explanation": "Une convolution ne mélange que des voisins, ce qui économise du calcul. L'attention relie tous les jetons, ce qui donne une portée globale mais un coût quadratique.",
+            "highlight": [
+              "conv-bias",
+              "attention"
+            ]
+          }
+        ]
+      },
+      "code": {
+        "language": "python",
+        "explanation": "Un embedding de patches réalisé avec une convolution de noyau 16 et de pas 16, puis une mise en séquence. Le script affiche la forme de l'image, celle de la carte de patches et le nombre de jetons.",
+        "code": "import torch\nfrom torch import nn\n\nembed = nn.Conv2d(3, 192, kernel_size=16, stride=16)\nx = torch.zeros(1, 3, 224, 224)\ntokens = embed(x).flatten(2).transpose(1, 2)\n\nprint(\"image :\", tuple(x.shape))\nprint(\"carte de patches :\", tuple(embed(x).shape))\nprint(\"séquence de jetons :\", tuple(tokens.shape))\nprint(\"nombre de jetons :\", tokens.shape[1])",
+        "output": "image : (1, 3, 224, 224)\ncarte de patches : (1, 192, 14, 14)\nséquence de jetons : (1, 196, 192)\nnombre de jetons : 196",
+        "outputVerified": true
+      },
+      "quiz": [
+        {
+          "question": "Pourquoi un Vision Transformer demande-t-il souvent plus de données qu'un CNN ?",
+          "options": [
+            "Parce qu'il ne peut pas utiliser de fonctions d'activation",
+            "Parce qu'il ne traite que des images en niveaux de gris",
+            "Parce que l'attention a un coût linéaire en nombre de pixels",
+            "Parce qu'il impose moins de biais inductif visuel et doit apprendre la localité à partir des données"
+          ],
+          "correctIndex": 3,
+          "explanation": "Le ViT n'a pas la localité et le partage des poids d'une convolution. Il compense par un grand préentraînement ou une régularisation adaptée."
+        },
+        {
+          "question": "Quel choix caractérise ConvNeXt par rapport à un ResNet classique ?",
+          "options": [
+            "Des convolutions depthwise 7 x 7, un goulot inversé et LayerNorm",
+            "La suppression de toutes les convolutions",
+            "Un retour aux fonctions sigmoïdes",
+            "Une réduction de la profondeur à trois couches"
+          ],
+          "correctIndex": 0,
+          "explanation": "ConvNeXt modernise le bloc convolutif avec de grands noyaux depthwise, un goulot inversé, GELU et LayerNorm, tout en restant purement convolutif."
+        },
+        {
+          "question": "Comment évolue le coût de l'attention avec le nombre de jetons ?",
+          "options": [
+            "Il est constant",
+            "Il est linéaire en nombre de jetons",
+            "Il est quadratique en nombre de jetons",
+            "Il ne dépend que du nombre de canaux"
+          ],
+          "correctIndex": 2,
+          "explanation": "Chaque jeton compare sa requête à tous les autres jetons. Le nombre de comparaisons croît comme N au carré, ce qui limite la résolution ou impose des variantes locales."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Patch",
+          "definition": "Petit carré d'image, par exemple 16 x 16 pixels, qui devient un jeton dans un Vision Transformer."
+        },
+        {
+          "term": "Jeton",
+          "definition": "Vecteur représentant un patch ou un élément de séquence, traité par les couches d'attention."
+        },
+        {
+          "term": "Attention multi-têtes",
+          "definition": "Mécanisme qui calcule plusieurs relations pondérées entre jetons en parallèle, puis combine leurs résultats."
+        },
+        {
+          "term": "Biais inductif",
+          "definition": "Hypothèse intégrée à l'architecture, comme la localité ou le partage des poids, qui facilite l'apprentissage sur certains types de données."
+        },
+        {
+          "term": "ConvNeXt",
+          "definition": "Réseau convolutif moderne inspiré des Transformers, avec de grands noyaux depthwise, un goulot inversé et une normalisation de couche."
+        }
+      ],
+      "example": {
+        "title": "Patchs et coût quadratique de l'attention",
+        "text": "**Exemple de calcul.** Une image de 224 × 224 découpée en patchs de 16 × 16 donne 14 × 14 = 196 jetons. L'attention entre ces jetons produit une matrice de 196 × 196 scores par tête, soit 38 416 scores. À 512 × 512, on obtient 32 × 32 = 1 024 jetons et environ 1,05 million de scores par tête. Le coût quadratique devient visible. Un CNN traite les pixels avec des voisinages locaux et un coût qui croît avec la surface ; un ViT mélange globalement dès la première couche mais paie cette matrice. ConvNeXt conserve la convolution et emprunte des choix aux Transformers. Le choix dépend des données, de la résolution et du budget de calcul."
+      },
+      "exercises": [
+        {
+          "title": "Le prix de la résolution",
+          "prompt": "Une image de 224 × 224 découpée en patchs de 16 × 16 donne 196 jetons. Calculez le nombre de jetons et de scores d'attention par tête pour une image de 384 × 384 avec les mêmes patchs, puis expliquez ce que ce changement implique pour le coût et pour le choix entre CNN et Transformer.",
+          "solution": "À 384 × 384, on obtient 24 × 24 = 576 jetons. L'attention produit une matrice de 576 × 576 scores par tête, soit 331 776 scores, contre 196 × 196 = 38 416 à 224 × 224. Le nombre de jetons a presque triplé, mais le nombre de scores a été multiplié par environ 8,6. Le coût quadratique devient visible. Un CNN traite les pixels par voisinages locaux, avec un coût qui croît avec la surface, et reste souvent plus économique à haute résolution. Le choix dépend des données, du budget et du matériel, pas d'une supériorité générale de l'attention."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Dosovitskiy et al., An Image is Worth 16x16 Words, 2020.",
+          "href": "https://arxiv.org/abs/2010.11929"
+        },
+        {
+          "label": "Liu et al., A ConvNet for the 2020s, 2022.",
+          "href": "https://arxiv.org/abs/2201.03545"
+        }
+      ]
+    },
+    {
+      "id": "choisir-deployer",
+      "title": "Choisir et déployer un modèle de vision",
+      "keyTakeaways": [
+        "Le classement sur ImageNet ne suffit pas à choisir un modèle : les données, la latence, la mémoire et le matériel décident.",
+        "Un CNN reste souvent le choix le plus robuste avec peu de données, tandis qu’un ViT exploite mieux de grands corpus et un budget de calcul important.",
+        "Les hybrides et ConvNeXt brouillent la frontière : la famille importe moins que la recette d’entraînement et la mesure sur la cible.",
+        "Les FLOPs, les paramètres et la précision ne se comparent pas sans protocole commun ; il faut mesurer le débit et la latence réels.",
+        "Le déploiement ajoute la résolution, la quantification, le prétraitement et la surveillance de la dérive."
+      ],
+      "theory": "### Le problème n'est plus seulement l'architecture\n\nLes modules précédents ont suivi une chronologie : LeNet-5, AlexNet, VGG, GoogLeNet, ResNet, DenseNet, MobileNet, EfficientNet, ViT, ConvNeXt. Cette histoire donne l'impression qu'un modèle plus récent remplace le précédent. En pratique, un modèle n'est jamais choisi seul : il est choisi pour une tâche, un jeu de données, une machine et un budget.\n\nUn résultat sur ImageNet mesure la capacité à classer 1 000 catégories dans une distribution particulière. Il ne dit rien de la détection d'un défaut sur une chaîne de production, de la segmentation d'une tumeur, de la lecture d'une plaque ou de la robustesse à un éclairage différent. Le même réseau peut réussir un banc et échouer sur les images du client. La première question n'est donc pas « quel est le meilleur modèle ? » mais « quelles contraintes doivent être respectées ? »\n\n### Quatre contraintes de décision\n\nLa première contrainte est la quantité de données étiquetées et leur proximité avec le domaine cible. Un CNN entraîné depuis zéro peut apprendre des motifs locaux avec moins d'exemples qu'un ViT, grâce à son biais inductif de localité et de partage des poids. Un ViT, qui mélange l'information globalement dès les premières couches, a besoin de plus de données ou d'un pré-entraînement à grande échelle pour compenser l'absence de ce biais.\n\nLa deuxième contrainte est la latence et le débit. Une application interactive peut exiger une réponse en quelques dizaines de millisecondes, tandis qu'un traitement par lots peut privilégier le débit global. Un modèle plus petit en paramètres n'est pas automatiquement plus rapide : une convolution depthwise peut être limitée par la mémoire, et un Transformer peut mieux utiliser un accélérateur spécialisé. La mesure sur la cible reste indispensable.\n\nLa troisième contrainte est la mémoire. À l'entraînement, les activations et l'état de l'optimiseur peuvent dominer. À l'inférence, les poids et le pic d'activations comptent. Un modèle qui tient sur un serveur peut ne pas tenir sur un téléphone, une caméra ou un automate. La résolution d'entrée multiplie la mémoire et le calcul ; réduire la résolution change aussi la qualité.\n\nLa quatrième contrainte est la robustesse et la maintenance. Un modèle doit supporter les variations de lumière, d'angle, de matériel et de distribution. Il doit aussi pouvoir être mis à jour, surveillé et expliqué aux personnes qui l'utilisent. Un gain de précision de quelques dixièmes sur un banc ne compense pas une panne silencieuse en production.\n\n### Comparer sans faux classement\n\nLes paramètres et les FLOPs sont utiles pour comprendre le coût, pas pour prédire la latence. Un tableau qui compare des modèles doit préciser la résolution, la taille du lot, la précision numérique, le matériel, le framework et le protocole de mesure. Sans ces informations, les chiffres ne sont pas comparables.\n\nLa précision doit être lue avec la métrique adaptée. Une exactitude globale peut cacher une classe rare mal détectée. Pour une détection, la précision et le rappel par classe, la matrice de confusion et le coût des erreurs comptent davantage. Pour une segmentation, l'intersection sur union et la qualité des contours sont plus informatives. Le choix d'une métrique est déjà une décision de conception.\n\nEnfin, un banc public peut être contaminé par des images proches de celles vues à l'entraînement. Un score élevé ne prouve pas la généralisation. Il faut constituer un jeu de test représentatif, le garder séparé et vérifier les cas difficiles : petits objets, occlusions, reflets, arrière-plans rares, classes ambiguës.\n\n### CNN, ViT et hybrides\n\nUn CNN possède un biais inductif fort : localité, partage des poids et hiérarchie. Ce biais réduit la quantité de données nécessaire pour apprendre des motifs visuels. Il peut aussi limiter la capacité à relier des éléments éloignés dans l'image. Les convolutions dilatées, les grands noyaux et les mécanismes d'attention ajoutent du contexte sans abandonner la structure convolutive.\n\nUn ViT découpe l'image en patchs et applique l'attention globale. Il peut relier deux régions distantes dès les premières couches, mais son coût d'attention croît avec le carré du nombre de jetons. Il est souvent entraîné sur de grands corpus ou distillé à partir d'un modèle plus grand. Sur un petit jeu, un CNN pré-entraîné ou un hybride peut être plus simple à obtenir.\n\nConvNeXt modernise le CNN avec de grands noyaux depthwise, un stem de type patchify, une normalisation de couche et des goulots inversés. Les modèles hybrides combinent convolutions et attention. La frontière entre les familles est donc moins nette qu'elle ne l'était en 2020. Ce qui compte est la recette complète : données, augmentation, optimisation, régularisation et pré-entraînement.\n\n### Choisir pour un usage\n\nPour un appareil à faible consommation, une famille MobileNet ou EfficientNet reste un point de départ raisonnable, à comparer avec un petit ConvNeXt. Pour un serveur qui traite des images de haute résolution, un ResNet ou un ConvNeXt offre souvent un bon compromis entre simplicité et qualité. Pour un corpus très large et un budget de calcul important, un ViT ou un hybride peut exploiter l'attention globale. Ces règles sont des hypothèses à tester, pas des prescriptions.\n\nLe pré-entraînement change la donne. Un modèle pré-entraîné sur un grand corpus peut être adapté avec peu d'images, mais il faut vérifier que le domaine et la résolution correspondent. Un modèle pré-entraîné sur des photographies naturelles peut mal se comporter sur des radiographies ou des images industrielles. Le fine-tuning doit être évalué sur les classes et les conditions réelles.\n\n### Ce que le déploiement change\n\nÀ l'inférence, la résolution d'entrée, le prétraitement et la quantification modifient les résultats. Une quantification en huit bits réduit la mémoire et peut accélérer le calcul, mais elle dégrade parfois les petites classes ou les détails fins. Il faut mesurer la précision après quantification, pas seulement la taille du fichier. Le prétraitement doit être identique entre l'entraînement et la production : normalisation, redimensionnement, ordre des canaux et gestion des couleurs.\n\nLe déploiement ajoute la surveillance. Une caméra change, un éclairage est modifié, une nouvelle classe apparaît. Sans mesure de la distribution des entrées et des sorties, l'équipe ne voit pas la dérive. Il faut journaliser les prédictions, les scores et les cas rejetés, puis prévoir une procédure de réentraînement ou de retour à une version précédente.\n\n> **Repère.** Il n'existe pas de meilleure architecture dans l'absolu. Il existe un compromis mesuré entre données, qualité, latence, mémoire, matériel et maintenance.",
+      "diagram": {
+        "title": "Choisir une architecture selon quatre contraintes",
+        "description": "Schéma illustratif : données, latence, mémoire et maintenance orientent le choix entre CNN, ViT et hybride.",
+        "svg": "<svg viewBox=\"0 0 900 390\" xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Schéma illustratif : choix d'une architecture de vision selon les contraintes\">\n  <defs>\n    <marker id=\"cnn8-arrow\" markerWidth=\"9\" markerHeight=\"7\" refX=\"7\" refY=\"3.5\" orient=\"auto\"><path d=\"M0,0 L9,3.5 L0,7 z\" fill=\"#38bdf8\" /></marker>\n  </defs>\n  <rect width=\"900\" height=\"390\" rx=\"16\" fill=\"#0f172a\" />\n  <text x=\"450\" y=\"32\" fill=\"#7dd3fc\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"16\" text-anchor=\"middle\">Quatre contraintes, trois familles</text>\n  <g id=\"cnn8-data\">\n    <rect x=\"30\" y=\"62\" width=\"190\" height=\"120\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#0ea5e9\" stroke-width=\"1.4\" />\n    <text x=\"125\" y=\"90\" fill=\"#e0f2fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Données</text>\n    <text x=\"125\" y=\"116\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">peu d'images</text>\n    <text x=\"125\" y=\"136\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">ou grand corpus</text>\n    <text x=\"125\" y=\"160\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">domaine proche ?</text>\n  </g>\n  <g id=\"cnn8-latency\">\n    <rect x=\"245\" y=\"62\" width=\"190\" height=\"120\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#a78bfa\" stroke-width=\"1.4\" />\n    <text x=\"340\" y=\"90\" fill=\"#ede9fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Latence</text>\n    <text x=\"340\" y=\"116\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">temps par image</text>\n    <text x=\"340\" y=\"136\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">débit du lot</text>\n    <text x=\"340\" y=\"160\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">mesure sur la cible</text>\n  </g>\n  <g id=\"cnn8-memory\">\n    <rect x=\"460\" y=\"62\" width=\"190\" height=\"120\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#fbbf24\" stroke-width=\"1.4\" />\n    <text x=\"555\" y=\"90\" fill=\"#fde68a\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Mémoire</text>\n    <text x=\"555\" y=\"116\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">poids et activations</text>\n    <text x=\"555\" y=\"136\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">résolution et lot</text>\n    <text x=\"555\" y=\"160\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">téléphone ou serveur</text>\n  </g>\n  <g id=\"cnn8-maintenance\">\n    <rect x=\"675\" y=\"62\" width=\"190\" height=\"120\" rx=\"10\" fill=\"#0c1d2e\" stroke=\"#34d399\" stroke-width=\"1.4\" />\n    <text x=\"770\" y=\"90\" fill=\"#a7f3d0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Maintenance</text>\n    <text x=\"770\" y=\"116\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">mise à jour</text>\n    <text x=\"770\" y=\"136\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"12\" text-anchor=\"middle\">surveillance</text>\n    <text x=\"770\" y=\"160\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">dérive des images</text>\n  </g>\n  <g id=\"cnn8-cnn\">\n    <rect x=\"55\" y=\"235\" width=\"230\" height=\"100\" rx=\"10\" fill=\"#0d1f2d\" stroke=\"#34d399\" stroke-width=\"1.5\" />\n    <text x=\"170\" y=\"264\" fill=\"#a7f3d0\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">CNN</text>\n    <text x=\"170\" y=\"288\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">localité, partage des poids</text>\n    <text x=\"170\" y=\"308\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">souvent robuste avec peu de données</text>\n  </g>\n  <g id=\"cnn8-vit\">\n    <rect x=\"335\" y=\"235\" width=\"230\" height=\"100\" rx=\"10\" fill=\"#0d1f2d\" stroke=\"#38bdf8\" stroke-width=\"1.5\" />\n    <text x=\"450\" y=\"264\" fill=\"#bae6fd\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">ViT</text>\n    <text x=\"450\" y=\"288\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">attention globale</text>\n    <text x=\"450\" y=\"308\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">grands corpus, coût quadratique</text>\n  </g>\n  <g id=\"cnn8-hybrid\">\n    <rect x=\"615\" y=\"235\" width=\"230\" height=\"100\" rx=\"10\" fill=\"#0d1f2d\" stroke=\"#a78bfa\" stroke-width=\"1.5\" />\n    <text x=\"730\" y=\"264\" fill=\"#ede9fe\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"14\" text-anchor=\"middle\">Hybride</text>\n    <text x=\"730\" y=\"288\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">convolutions et attention</text>\n    <text x=\"730\" y=\"308\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">ConvNeXt, modèles hybrides</text>\n  </g>\n  <g id=\"cnn8-measure\">\n    <rect x=\"190\" y=\"360\" width=\"520\" height=\"24\" rx=\"12\" fill=\"#2a2415\" stroke=\"#fbbf24\" />\n    <text x=\"450\" y=\"377\" fill=\"#fde68a\" font-family=\"sans-serif\" font-size=\"11\" text-anchor=\"middle\">Mesurer sur vos images, votre matériel et votre budget</text>\n  </g>\n</svg>",
+        "steps": [
+          {
+            "title": "Les données",
+            "explanation": "La quantité et la proximité des images étiquetées orientent le choix. Un petit jeu favorise souvent un CNN pré-entraîné ; un grand corpus peut justifier un ViT.",
+            "highlight": [
+              "cnn8-data",
+              "cnn8-cnn",
+              "cnn8-vit"
+            ]
+          },
+          {
+            "title": "Le budget machine",
+            "explanation": "Latence, débit et mémoire se mesurent sur la cible. Les FLOPs ne suffisent pas à prédire le temps de réponse.",
+            "highlight": [
+              "cnn8-latency",
+              "cnn8-memory"
+            ]
+          },
+          {
+            "title": "La maintenance",
+            "explanation": "La surveillance, la mise à jour et la dérive des images font partie du choix. Un modèle plus précis mais impossible à maintenir n’est pas un bon modèle.",
+            "highlight": [
+              "cnn8-maintenance",
+              "cnn8-measure"
+            ]
+          }
+        ]
+      },
+      "example": {
+        "title": "Choisir pour un contrôle qualité",
+        "text": "**Scénario illustratif.** Une ligne de production dispose de 50 000 images étiquetées, d'un appareil photo fixe et d'une contrainte de 40 millisecondes par image sur un petit serveur. Un CNN pré-entraîné, de type ResNet ou EfficientNet, est un point de départ raisonnable : il supporte une résolution modérée et se déploie bien. Si le corpus atteint plusieurs millions d'images et que le budget GPU augmente, un ViT ou un hybride peut être comparé sur le même jeu de test. Le choix final ne se fait pas sur ImageNet : il se fait sur les défauts rares, les reflets, les pièces sales et la latence mesurée."
+      },
+      "quiz": [
+        {
+          "question": "Pourquoi les FLOPs ne suffisent-ils pas à prédire la latence ?",
+          "options": [
+            "Parce qu’ils ne comptent que les multiplications",
+            "Parce que la mémoire, l’intensité arithmétique et l’implémentation comptent aussi",
+            "Parce qu’ils sont toujours faux",
+            "Parce qu’ils ne dépendent pas du modèle"
+          ],
+          "correctIndex": 1,
+          "explanation": "Les FLOPs décrivent le travail arithmétique. La latence dépend aussi des accès mémoire, de l’occupation du matériel et des noyaux utilisés."
+        },
+        {
+          "question": "Dans quel cas un ViT peut-il être plus difficile à entraîner qu’un CNN ?",
+          "options": [
+            "Quand le corpus est petit et sans pré-entraînement",
+            "Quand l’image est en couleur",
+            "Quand le modèle a des convolutions",
+            "Quand on utilise un GPU"
+          ],
+          "correctIndex": 0,
+          "explanation": "Le ViT a moins de biais inductif visuel. Sans pré-entraînement ni grand corpus, il peut sous-performer un CNN sur une tâche limitée."
+        },
+        {
+          "question": "Que faut-il mesurer avant de déployer un modèle de vision ?",
+          "options": [
+            "Uniquement le nombre de paramètres",
+            "La précision sur le test, la latence, la mémoire et le comportement après quantification",
+            "Uniquement la taille du fichier",
+            "Le nombre de couches"
+          ],
+          "correctIndex": 1,
+          "explanation": "Le déploiement change la résolution, la précision numérique et le matériel. Il faut mesurer la qualité et le coût sur la cible."
+        },
+        {
+          "question": "Que caractérise un modèle hybride en vision ?",
+          "options": [
+            "Il n'utilise que des convolutions",
+            "Il combine convolutions et attention",
+            "Il n'utilise aucune donnée",
+            "Il est toujours plus petit qu’un CNN"
+          ],
+          "correctIndex": 1,
+          "explanation": "Les hybrides combinent des briques convolutives et des mécanismes d’attention. ConvNeXt modernise le CNN sans utiliser l’attention globale de la même manière qu’un ViT."
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Biais inductif",
+          "definition": "Hypothèses intégrées à l’architecture, comme la localité et le partage des poids pour un CNN."
+        },
+        {
+          "term": "Débit",
+          "definition": "Nombre d’images traitées par unité de temps, souvent mesuré sur un lot."
+        },
+        {
+          "term": "Latence",
+          "definition": "Temps nécessaire pour produire la réponse à une entrée."
+        },
+        {
+          "term": "Quantification",
+          "definition": "Réduction de la précision numérique des poids ou des activations pour diminuer la mémoire et parfois accélérer le calcul."
+        },
+        {
+          "term": "Dérive",
+          "definition": "Changement de la distribution des entrées ou des sorties après le déploiement, qui peut dégrader les performances."
+        }
+      ],
+      "exercises": [
+        {
+          "title": "Choisir sur la cible",
+          "prompt": "Deux modèles ont la même exactitude sur ImageNet. Pourquoi ce chiffre ne suffit-il pas pour choisir celui à déployer, et quelles mesures faut-il ajouter ?",
+          "solution": "ImageNet ne représente ni les images, ni la résolution, ni le matériel cible. Il faut mesurer la latence, le débit, la mémoire et la précision sur un jeu de validation du domaine, puis tenir compte du prétraitement et de la quantification."
+        }
+      ],
+      "sources": [
+        {
+          "label": "Li et al., A Survey of Convolutional Neural Networks: Analysis, Applications, and Prospects, 2020.",
+          "href": "https://arxiv.org/abs/2004.02806"
+        },
+        {
+          "label": "Tan et Le, EfficientNet, 2019.",
+          "href": "https://arxiv.org/abs/1905.11946"
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "label": "LeCun et al., Gradient-Based Learning Applied to Document Recognition, 1998.",
+      "href": "https://ieeexplore.ieee.org/document/726791"
+    },
+    {
+      "label": "Krizhevsky et al., ImageNet Classification with Deep Convolutional Neural Networks, 2012.",
+      "href": "https://papers.nips.cc/paper/2012/hash/c399862d3b9d6b76c8436e924a68c45b-Abstract.html"
+    },
+    {
+      "label": "Simonyan et Zisserman, Very Deep Convolutional Networks for Large-Scale Image Recognition, 2014.",
+      "href": "https://arxiv.org/abs/1409.1556"
+    },
+    {
+      "label": "He et al., Deep Residual Learning for Image Recognition, 2015.",
+      "href": "https://arxiv.org/abs/1512.03385"
+    },
+    {
+      "label": "Dosovitskiy et al., An Image is Worth 16x16 Words, 2020.",
+      "href": "https://arxiv.org/abs/2010.11929"
+    },
+    {
+      "label": "Liu et al., A ConvNet for the 2020s, 2022.",
+      "href": "https://arxiv.org/abs/2201.03545"
+    },
+    {
+      "label": "Tan et Le, EfficientNet, 2019.",
+      "href": "https://arxiv.org/abs/1905.11946"
+    },
+    {
+      "label": "Stanford CS231n, notes sur les réseaux convolutifs, consulté le 21 octobre 2026.",
+      "href": "https://cs231n.github.io/convolutional-networks/"
+    },
+    {
+      "label": "Li et al., A Survey of Convolutional Neural Networks: Analysis, Applications, and Prospects, 2020.",
+      "href": "https://arxiv.org/abs/2004.02806"
+    }
+  ],
+  "related": [
+    {
+      "to": "/cours/deep-learning-pratique",
+      "title": "Cours : le deep learning en pratique",
+      "description": "Construire, entraîner et évaluer un réseau avec PyTorch, après avoir compris les briques de ce cours."
+    },
+    {
+      "to": "/machine-learning",
+      "title": "Machine learning",
+      "description": "Situer l'apprentissage supervisé et les réseaux convolutifs parmi les autres familles de méthodes."
+    },
+    {
+      "to": "/simulateur-ia",
+      "title": "Simulateur d'entraînement IA",
+      "description": "Observer dans le navigateur l'effet du taux d'apprentissage, du lot et de la régularisation sur un petit réseau."
+    }
+  ]
+}
