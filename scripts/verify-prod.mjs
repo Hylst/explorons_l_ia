@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025-2026 Geoffroy Streit
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Vérifie que la production sert exactement le build local : chaque fichier de dist/ est demandé à
-// https://hylst.fr/explorons_l_ia/ puis comparé en SHA-256. Contrôle aussi la redirection sans slash final, la 404 de section
+// https://ia.hylst.fr/explorons_l_ia/ puis comparé en SHA-256. Contrôle aussi la redirection sans slash final, la 404 de section
 // et l'absence de « supabase », de JWT ou de variable d'environnement dans les octets réellement servis.
 // À lancer après le déploiement (réseau requis) : `npm run verify:prod`. PROD_BASE=https://... pour viser une autre adresse.
 // Code de sortie 1 au moindre écart. Aucune dépendance.
@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dist = path.join(root, 'dist');
-const BASE = (process.env.PROD_BASE || 'https://hylst.fr/explorons_l_ia/').replace(/\/?$/, '/');
+const BASE = (process.env.PROD_BASE || 'https://ia.hylst.fr/explorons_l_ia/').replace(/\/?$/, '/');
 const ORIGIN = new URL(BASE).origin;
 
 if (!fs.existsSync(dist)) {

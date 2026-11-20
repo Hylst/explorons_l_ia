@@ -24,7 +24,7 @@ const Confidentialite = () => (
               votre navigateur.
             </li>
             <li>
-              Pas de service tiers chargé par les pages : polices, images et scripts sont servis depuis hylst.fr.
+              Pas de service tiers chargé par les pages : polices, images et scripts sont servis depuis ia.hylst.fr.
             </li>
             <li>
               Les outils du site (calculateur de coûts, comparateur de modèles, générateur de prompts, simulateur

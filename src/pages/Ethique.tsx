@@ -100,7 +100,7 @@ const Ethique = () => {
               <div className="text-xs text-muted-foreground">Comprendre et réduire l'empreinte environnementale du numérique.</div>
             </a>
             <a
-              href="https://hylst.fr/boussole-ia/"
+              href="https://ia.hylst.fr/boussole-ia/"
               className="p-3 rounded-lg bg-card border border-border/50 hover:border-primary/50 transition-colors block"
             >
               <div className="font-medium text-sm text-primary mb-1">Boussole IA</div>

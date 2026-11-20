@@ -353,7 +353,7 @@ t('montants affichés', () => {
     for (const app of authorApps) {
       assert.ok(app.name && app.description && app.category, app.link);
       assert.ok(app.tags.length >= 1, app.name);
-      assert.match(app.link, /^https:\/\/hylst\.fr\/[a-z0-9._-]+\/$/, app.link);
+      assert.match(app.link, /^https:\/\/(?:[a-z0-9-]+\.)?hylst\.fr\/[a-z0-9._-]+\/$/, app.link);
       assert.notEqual(app.link, 'https://hylst.fr/data/', 'Data Science Memo répond 410');
       assert.ok(app.description.length >= 80 && app.description.length <= 240, app.name);
       assert.ok(!/[—–]/.test(`${app.name} ${app.description}`), app.name);

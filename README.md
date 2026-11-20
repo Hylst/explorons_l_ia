@@ -2,7 +2,7 @@
 
 Site pédagogique francophone pour comprendre l'intelligence artificielle : bases, types d'IA, machine learning, cours interactifs, outils de démonstration et éthique.
 
-- En ligne : https://hylst.fr/explorons_l_ia/ (plateforme [hylst.fr](https://hylst.fr/))
+- En ligne : https://ia.hylst.fr/explorons_l_ia/ (plateforme [Hylst](https://hylst.fr/))
 - Auteur : Geoffroy Streit, réalisé par Geoffroy avec assistance IA
 
 ## Principes
@@ -70,7 +70,7 @@ Le statut de la mise en ligne (bloc Nginx, Search Console, vérification en prod
 Sans ce bloc, la règle générale `location /` de la plateforme sert déjà le site, mais sans redirection du chemin sans slash, sans CSP, sans cache long pour les fichiers hashés (ils sont revalidés à chaque visite) et avec la 404 globale. À coller dans la « Custom Nginx Configuration », avant les `error_page` globales, à côté des autres sections. Les `add_header` d'un bloc `location` annulent l'héritage des en-têtes du bloc `server` : les en-têtes globaux y sont donc répétés.
 
 ```nginx
-# Explorons l'IA (Vite + React, export statique) : https://hylst.fr/explorons_l_ia/
+# Explorons l'IA (Vite + React, export statique) : https://ia.hylst.fr/explorons_l_ia/
 # /explorons_l_ia sans slash final redirige (URI relative : pas de souci de schéma derrière Traefik)
 location = /explorons_l_ia {
     absolute_redirect off;

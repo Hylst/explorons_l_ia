@@ -99,7 +99,7 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({ initialWorkflow, onLeav
       edges,
       metadata: {
         name: 'Workflow IA personnalisé',
-        generator: "Explorons l'IA (hylst.fr)",
+        generator: "Explorons l'IA (ia.hylst.fr)",
         created: new Date().toISOString(),
         format: 1
       }

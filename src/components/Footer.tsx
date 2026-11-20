@@ -27,10 +27,10 @@ const Footer = () => {
               <span className="font-semibold text-foreground/80 block">Plateforme Hylst IT learning&nbsp;:</span>
               <ul className="space-y-1">
                 <li><a href="https://hylst.fr/data_science_explorer/" className="hover:text-primary hover:underline">Explorons la Data Science</a></li>
-                <li><a href="https://hylst.fr/guide_maths/" className="hover:text-primary hover:underline">Guide Maths pour l'IA</a></li>
+                <li><a href="https://edu.hylst.fr/guide_maths/" className="hover:text-primary hover:underline">Guide Maths pour l'IA</a></li>
                 <li><a href="https://hylst.fr/datalab/" className="hover:text-primary hover:underline">DataLab Studio+</a></li>
-                <li><a href="https://hylst.fr/datalitteracie/" className="hover:text-primary hover:underline">DataLittéracie</a></li>
-                <li><a href="https://hylst.fr/boussole-ia/" className="hover:text-primary hover:underline">Boussole IA</a></li>
+                <li><a href="https://ia.hylst.fr/datalitteracie/" className="hover:text-primary hover:underline">DataLittéracie</a></li>
+                <li><a href="https://ia.hylst.fr/boussole-ia/" className="hover:text-primary hover:underline">Boussole IA</a></li>
               </ul>
             </div>
           </div>

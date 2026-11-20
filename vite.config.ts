@@ -11,7 +11,7 @@ import { vendorDashesPlugin, isKatexModule } from "./scripts/vendor-dashes.ts";
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  // Déployé sur https://hylst.fr/explorons_l_ia/ (voir src/config/site.ts).
+  // Déployé sur https://ia.hylst.fr/explorons_l_ia/ (voir src/config/site.ts).
   base: SITE_BASE,
   // Ce site n'utilise aucune variable d'environnement. Le préfixe par défaut (VITE_) est remplacé
   // exprès : certaines bibliothèques (zustand, via React Flow) lisent l'objet d'environnement en

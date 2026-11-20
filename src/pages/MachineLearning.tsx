@@ -258,7 +258,7 @@ const MachineLearning = () => {
                 <div className="text-xs text-muted-foreground">Bac à sable SQL et NoSQL dans le navigateur, sans serveur.</div>
               </a>
               <a
-                href="https://hylst.fr/datalitteracie/"
+                href="https://ia.hylst.fr/datalitteracie/"
                 className="p-3 rounded-lg bg-card border border-border/50 hover:border-primary/50 transition-colors block"
               >
                 <div className="font-medium text-sm text-primary mb-1">DataLittéracie</div>

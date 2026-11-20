@@ -3,7 +3,7 @@
   "description": "Explorons l'IA : site pédagogique francophone pour comprendre l'intelligence artificielle",
   "license": "AGPL-3.0-or-later",
   "author": "Geoffroy Streit (Hylst)",
-  "homepage": "https://hylst.fr/explorons_l_ia/",
+  "homepage": "https://ia.hylst.fr/explorons_l_ia/",
   "private": true,
   "version": "0.0.0",
   "type": "module",

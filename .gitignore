@@ -26,3 +26,8 @@ dist-ssr
 # Secrets (le .env Supabase historique est obsolète : à supprimer du dépôt)
 .env
 .env.*
+
+# Notes d'agents et fichiers temporaires (non publies)
+.superpowers/
+docs/superpowers/
+*.tmp

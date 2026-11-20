@@ -5,8 +5,8 @@
 
 export const SITE_NAME = "Explorons l'IA";
 export const SITE_TAGLINE = "Comprendre l'intelligence artificielle, pas à pas";
-export const SITE_ORIGIN = 'https://hylst.fr';
-/** Sous-chemin de déploiement sur hylst.fr (avec slash final). */
+export const SITE_ORIGIN = 'https://ia.hylst.fr';
+/** Sous-chemin de déploiement sur ia.hylst.fr (avec slash final). */
 export const SITE_BASE = '/explorons_l_ia/';
 export const SITE_URL = `${SITE_ORIGIN}${SITE_BASE}`;
 
@@ -17,8 +17,9 @@ export const AUTHOR_TITLE = "Ancien ingénieur en sciences de l'industrie, déve
 export const CONTACT_EMAIL = 'geoffroy.streit@ik.me';
 export const AUTHOR_LINKEDIN = 'https://www.linkedin.com/in/geoffroy-streit/';
 export const AUTHOR_GITHUB = 'https://github.com/Hylst';
-export const PLATFORM_URL = `${SITE_ORIGIN}/`;
-export const PLATFORM_LEGAL_URL = `${SITE_ORIGIN}/mentions-legales.html`;
+/** Plateforme Hylst : le hub reste hylst.fr, distinct de l'origine de ce site. */
+export const PLATFORM_URL = 'https://hylst.fr/';
+export const PLATFORM_LEGAL_URL = 'https://hylst.fr/mentions-legales.html';
 
 /** Licence du code et des contenus rédigés pour le site (même règle que la plateforme hylst.fr). */
 export const LICENSE_SPDX = 'AGPL-3.0-or-later';

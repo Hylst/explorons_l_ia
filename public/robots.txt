@@ -1,6 +1,6 @@
-# Seul le robots.txt racine de hylst.fr fait foi pour les moteurs.
+# Seul le robots.txt racine de la plateforme ia.hylst.fr fait foi pour les moteurs.
 # Ce fichier est conservé par hygiène et déclare le sitemap de la section.
 User-agent: *
 Allow: /
 
-Sitemap: https://hylst.fr/explorons_l_ia/sitemap.xml
+Sitemap: https://ia.hylst.fr/explorons_l_ia/sitemap.xml

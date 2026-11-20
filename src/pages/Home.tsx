@@ -295,7 +295,7 @@ const Home = () => {
                 Cours, exercices, quiz, simulateurs et fiches du primaire au supérieur pour consolider les bases mathématiques utiles à l'IA.
               </p>
               <a
-                href="https://hylst.fr/guide_maths/"
+                href="https://edu.hylst.fr/guide_maths/"
                 className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
               >
                 Visiter le site <ChevronRight className="h-4 w-4" />
@@ -335,7 +335,7 @@ const Home = () => {
                 Parcours pour comprendre le cycle de vie des données en les manipulant&nbsp;: collecte, nettoyage, graphiques, prédiction, stockage et RGPD.
               </p>
               <a
-                href="https://hylst.fr/datalitteracie/"
+                href="https://ia.hylst.fr/datalitteracie/"
                 className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
               >
                 Visiter le site <ChevronRight className="h-4 w-4" />
@@ -355,7 +355,7 @@ const Home = () => {
                 Guide gratuit pour comprendre, choisir, mettre en œuvre et encadrer l'IA dans une TPE, une association ou une collectivité.
               </p>
               <a
-                href="https://hylst.fr/boussole-ia/"
+                href="https://ia.hylst.fr/boussole-ia/"
                 className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
               >
                 Visiter le site <ChevronRight className="h-4 w-4" />

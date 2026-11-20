@@ -154,13 +154,13 @@ try {
   });
   if (!switched) failures.push('écosystème : onglet introuvable');
   await page.waitForFunction(() => new URL(location.href).searchParams.get('tab') === 'ecosysteme', { timeout: 5000 }).catch(() => {});
-  const apps = await page.$$eval('main a[href^="https://hylst.fr/"]', (links) => links.map((a) => ({
+  const apps = await page.$$eval('main a[href^="https://hylst.fr/"], main a[href^="https://ia.hylst.fr/"], main a[href^="https://edu.hylst.fr/"]', (links) => links.map((a) => ({
     href: a.getAttribute('href') || '',
     target: a.getAttribute('target') || '',
     text: (a.textContent || '').trim(),
   })));
   check(apps.length >= 11, `écosystème : ${apps.length} applications`);
-  check(apps.some((a) => a.href === 'https://hylst.fr/boussole-ia/'), 'écosystème : Boussole IA absente');
+  check(apps.some((a) => a.href === 'https://ia.hylst.fr/boussole-ia/'), 'écosystème : Boussole IA absente');
   check(apps.every((a) => a.target === '_blank'), 'écosystème : lien sans target=_blank');
   const construction = await page.$$eval('main', (mains) => mains.map((el) => el.textContent || '').join(' '));
   check(construction.includes('Explorons la Data Science') && construction.includes('En construction'), 'écosystème : état de construction absent');

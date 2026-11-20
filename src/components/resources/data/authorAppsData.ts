@@ -10,14 +10,14 @@ export const authorApps: AuthorApp[] = [
   {
     name: "Boussole IA",
     description: "Guide gratuit pour comprendre, choisir, mettre en œuvre et encadrer l'IA dans une TPE, une association ou une collectivité\u00A0: modules, cas d'usage, boîte à outils et laboratoire, sans jargon.",
-    link: "https://hylst.fr/boussole-ia/",
+    link: "https://ia.hylst.fr/boussole-ia/",
     category: "Usages et gouvernance",
     tags: ["IA", "gouvernance", "TPE", "associations"]
   },
   {
     name: "CogniAI",
     description: "Exploration des biais cognitifs et des illusions de compétence face à l'IA\u00A0: mieux comprendre ses limites et garder un regard critique sur ses réponses.",
-    link: "https://hylst.fr/cogniai/",
+    link: "https://ia.hylst.fr/cogniai/",
     category: "Esprit critique",
     tags: ["biais", "esprit critique", "IA"]
   },
@@ -31,7 +31,7 @@ export const authorApps: AuthorApp[] = [
   {
     name: "DataLittéracie",
     description: "Parcours pour comprendre le cycle de vie des données en les manipulant\u00A0: collecte, nettoyage, graphiques, prédiction, stockage, souveraineté et risques liés à l'IA.",
-    link: "https://hylst.fr/datalitteracie/",
+    link: "https://ia.hylst.fr/datalitteracie/",
     category: "Données",
     tags: ["données", "littéracie", "RGPD", "visualisation"]
   },
@@ -53,7 +53,7 @@ export const authorApps: AuthorApp[] = [
   {
     name: "Guide Maths",
     description: "Cours, exercices, quiz, simulateurs et fiches du primaire au supérieur pour consolider les bases mathématiques utiles à l'IA.",
-    link: "https://hylst.fr/guide_maths/",
+    link: "https://edu.hylst.fr/guide_maths/",
     category: "Mathématiques",
     tags: ["mathématiques", "exercices", "révisions"]
   },

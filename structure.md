@@ -6,13 +6,13 @@ Ce document décrit l'organisation technique d'Explorons l'IA. Pour les commande
 
 ## Vue d'ensemble
 
-Explorons l'IA est une application **React 18 + TypeScript + Vite 8** entièrement statique. Le build produit une page HTML par route, sans serveur applicatif, sans base de données et sans appel réseau à l'exécution. Le site est servi sous le sous-chemin `/explorons_l_ia/`.
+Explorons l'IA est une application **React 18 + TypeScript + Vite 8** entièrement statique. Le build produit une page HTML par route, sans serveur applicatif, sans base de données et sans appel réseau à l'exécution. Le site est servi sur `https://ia.hylst.fr/explorons_l_ia/` depuis le 20/11/2026.
 
 - Source : `<racine du projet>`.
 - Build : `dist/`, non versionné.
-- Miroir de déploiement : `<dossier de la plateforme>`.
+- Déploiement : dépôt de builds `Hylst/hylst.ia`, dossier `explorons_l_ia/` (le hub `hylst.fr/explorons_l_ia/` redirige en 301 depuis le 20/11/2026).
 - Point d'entrée : `src/main.tsx`, monté par `src/App.tsx`.
-- Production actuelle : 71 pages HTML, entrée `index-Bf50djqm.js`, CSS `index-CcCZrjNq.css`, 479 fichiers vérifiés (`verify:prod` 479/479 le 14/11/2026). `CKdmXnuk`, `BUkCTNp7`, `DuqG4b_A`, `BdgIgA7Y`, `CZ3AMObL`, `BVL5KpEX`, `2DDSKOs9`, `DWHD0VaT`, `CJgmncwL`, `CcGsYR4Z`, `BOE6JFOt`, `BgKc8PL6`, `erCpVNC-` et `To9pBCuS` écartés ; commits Docker `a8b35c53` (lot 11), `529eccfa` (lot 12), `39dc466c` (lot 14), `e077e136` (relevé tarifaire), `4cc42f20` (lot 15), `57f8c2ac` (lot 16), `DuqG4b_A` (lot 16b), `BUkCTNp7` (lot 17) puis `ea6d9719` (lot 18) et `21cc08473` (journaux douze mois, adresse ik.me), `explorons_l_ia/` + `accessibilite/`. `CKdmXnuk` publié le 07/11/2026 : glossaire à 123 termes, liens écosystème Hylst sur l'accueil, le menu et le pied de page. `BE9AAaQh` (lot 13) n'a pas été publié et reste remplacé par `2DDSKOs9`.
+- Production actuelle sur ia : entrée `index-f2PuJE-X.js`, CSS `index-CAPaubBX.css`, 67 URL au sitemap, 479 fichiers, source `38a316b`. Historique des builds jusqu'au 14/11/2026 : 71 pages HTML, entrée `index-Bf50djqm.js`, CSS `index-CcCZrjNq.css`, 479 fichiers vérifiés (`verify:prod` 479/479 le 14/11/2026). `CKdmXnuk`, `BUkCTNp7`, `DuqG4b_A`, `BdgIgA7Y`, `CZ3AMObL`, `BVL5KpEX`, `2DDSKOs9`, `DWHD0VaT`, `CJgmncwL`, `CcGsYR4Z`, `BOE6JFOt`, `BgKc8PL6`, `erCpVNC-` et `To9pBCuS` écartés ; commits Docker `a8b35c53` (lot 11), `529eccfa` (lot 12), `39dc466c` (lot 14), `e077e136` (relevé tarifaire), `4cc42f20` (lot 15), `57f8c2ac` (lot 16), `DuqG4b_A` (lot 16b), `BUkCTNp7` (lot 17) puis `ea6d9719` (lot 18) et `21cc08473` (journaux douze mois, adresse ik.me), `explorons_l_ia/` + `accessibilite/`. `CKdmXnuk` publié le 07/11/2026 : glossaire à 123 termes, liens écosystème Hylst sur l'accueil, le menu et le pied de page. `BE9AAaQh` (lot 13) n'a pas été publié et reste remplacé par `2DDSKOs9`.
 
 ## Arborescence utile
 
@@ -150,7 +150,7 @@ Dernier build publié : 71 pages, `verify-dist` 331 fichiers, smoke clair et som
 1. `npm run build` puis `npm run serve:dist`.
 2. Figer le snapshot : `npm run snapshot -- <dossier> --commit <sha>` copie `dist/` et écrit `SNAPSHOT-MANIFEST.json`. L'arbre SHA-256 est le SHA-256 des lignes `<chemin>|<sha256 du fichier>
 `, chemins triés octet par octet en UTF-8 ; `SNAPSHOT-MANIFEST.json` est exclu. Annoncer l'entrée avant toute copie.
-3. Laisser l'écrivain désigné (agent de plateforme, ou Claude quand la plateforme le demande) copier ce snapshot exact dans `<dossier de la plateforme>`, manifeste exclu. Un seul écrivain à la fois ; ne lancer aucun rebuild pendant la recette.
-4. Après mise en ligne, lancer `npm run verify:prod` sur le snapshot exact publié. Production du 14/11/2026 : `Bf50djqm`, `verify:prod` 479/479, `CKdmXnuk` en 404, manifeste en 404, sitemap 67 URL. Préparer chaque lot sur une branche et annoncer l'entrée avant tout push sur la branche publiée ; ne pas reconstruire un snapshot déjà annoncé.
+3. Laisser l'écrivain désigné (agent de plateforme, ou Claude quand la plateforme le demande) copier ce snapshot exact dans `explorons_l_ia/` du dépôt de builds `Hylst/hylst.ia` (`https://ia.hylst.fr/explorons_l_ia/`), manifeste exclu. Un seul écrivain à la fois ; ne lancer aucun rebuild pendant la recette.
+4. Après mise en ligne, lancer `npm run verify:prod` sur le snapshot exact publié (l'adresse par défaut est celle d'ia depuis le 20/11/2026). Production du 20/11/2026 : entrée `index-f2PuJE-X.js`, `verify:prod` 477/479 au controle brut, les deux ecarts etant des fins de ligne CRLF du deploiement (contenu identique apres normalisation), sitemap 67 URL. Historique du 14/11/2026 : `Bf50djqm`, `CKdmXnuk` en 404, manifeste en 404. Préparer chaque lot sur une branche et annoncer l'entrée avant tout push sur la branche publiée ; ne pas reconstruire un snapshot déjà annoncé.
 
 Le bloc Nginx, les en-têtes et la procédure complète restent dans `README.md`.
